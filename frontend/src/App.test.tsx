@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -14,6 +14,7 @@ describe('App', () => {
   });
 
   afterEach(() => {
+    cleanup();
     window.localStorage.clear();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -27,6 +28,7 @@ describe('App', () => {
         { code: 'REPORT', name: '报告', status: 'ACTIVE', sortOrder: 3 },
       ]))
       .mockResolvedValueOnce(jsonResponse(sampleDraft('后端草稿标题')))
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(sampleDraft('更新后的标题')));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -45,7 +47,7 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
       method: 'PUT',
     }));
-    expect(await screen.findByText('已保存')).toBeInTheDocument();
+    expect(await screen.findByText('草稿已保存')).toBeInTheDocument();
     expect(window.localStorage.getItem('gongwen.currentDraftId')).toBe('1');
   });
 
@@ -57,7 +59,8 @@ describe('App', () => {
         { code: 'REQUEST', name: '请示', status: 'ACTIVE', sortOrder: 2 },
         { code: 'REPORT', name: '报告', status: 'ACTIVE', sortOrder: 3 },
       ]))
-      .mockResolvedValueOnce(jsonResponse({ ...sampleDraft('刷新后的草稿标题'), id: 42 }));
+      .mockResolvedValueOnce(jsonResponse({ ...sampleDraft('刷新后的草稿标题'), id: 42 }))
+      .mockResolvedValueOnce(jsonResponse([]));
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -70,12 +73,67 @@ describe('App', () => {
       method: 'POST',
     }));
   });
+
+  it('uploads a material and shows a unified success toast', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('材料测试草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(sampleMaterial('meeting.docx', 'READY')))
+      .mockResolvedValueOnce(jsonResponse([sampleMaterial('meeting.docx', 'READY')]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByDisplayValue('材料测试草稿');
+    const input = screen.getByLabelText('上传材料文件');
+    await userEvent.upload(input, new File(['会议纪要'], 'meeting.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/materials', expect.objectContaining({
+      method: 'POST',
+      body: expect.any(FormData),
+    }));
+    expect(await screen.findByText('材料上传成功')).toBeInTheDocument();
+    expect(await within(screen.getByLabelText('材料列表')).findByText('meeting.docx')).toBeInTheDocument();
+  });
+
+  it('shows a unified error toast when material upload fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('失败测试草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(errorResponse('MATERIAL_TYPE_NOT_ALLOWED', '仅支持上传 Word 或 PDF 材料'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByDisplayValue('失败测试草稿');
+    const input = screen.getByLabelText('上传材料文件');
+    await userEvent.upload(input, new File(['plain text'], 'broken.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    }));
+
+    expect(await screen.findByText('仅支持上传 Word 或 PDF 材料')).toBeInTheDocument();
+  });
 });
 
 function jsonResponse<T>(data: T) {
   return {
     ok: true,
     json: async () => ({ success: true, data, errorCode: null, message: null }),
+  };
+}
+
+function errorResponse(errorCode: string, message: string) {
+  return {
+    ok: false,
+    json: async () => ({ success: false, data: null, errorCode, message }),
   };
 }
 
@@ -103,5 +161,19 @@ function sampleDraft(title: string) {
       { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
       { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
     ],
+  };
+}
+
+function sampleMaterial(originalFileName: string, status: string) {
+  return {
+    id: 1,
+    draftId: 1,
+    originalFileName,
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    fileSizeBytes: 12,
+    fileExtension: 'docx',
+    status,
+    extractedTextLength: status === 'READY' ? 4 : 0,
+    errorMessage: null,
   };
 }

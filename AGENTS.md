@@ -276,7 +276,7 @@ UI 改动必须验证：
 
 ## 14. 当前状态
 
-当前状态：P2+P3 草稿结构与真实工作台已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表，以及工作台真实草稿加载、编辑、预览和保存能力。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用到 v3。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
+当前状态：P4 材料上传与文本提取已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表，以及工作台真实草稿加载、编辑、预览、保存、材料上传和材料列表能力。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用到 v4。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
 
 当前核心 API：
 
@@ -287,6 +287,23 @@ UI 改动必须验证：
 - `POST /api/drafts`
 - `GET /api/drafts/{id}`
 - `PUT /api/drafts/{id}/blocks`
+- `GET /api/drafts/{draftId}/materials`
+- `POST /api/drafts/{draftId}/materials`
+
+材料上传当前约定：
+
+- 支持 `.docx` 和 `.pdf`。
+- 默认最大 20MB。
+- 本地存储目录由 `GONGWEN_MATERIAL_STORAGE_DIR` 配置，默认 `storage/materials`。
+- `.docx` 使用 Apache POI 提取文本，`.pdf` 使用 Apache PDFBox 提取文本。
+- 提取成功保存 `READY`，提取失败保存 `FAILED` 和错误摘要。
+- 当前 API 列表返回材料状态和提取字数，不直接返回完整提取文本。
+
+前端统一反馈约定：
+
+- 已引入 `@radix-ui/react-toast`。
+- 保存、上传、失败等轻反馈通过 `ToastProvider` / `useToast` 统一展示。
+- Toast 样式必须继续使用 `DESIGN.md` CSS 变量，避免引入与当前 Anthropic-inspired 风格冲突的成套视觉主题。
 
 本地 Vite 联调时，如果后端容器因本机 8080 被占用而映射到 18080，需要用 `VITE_API_BASE_URL=http://127.0.0.1:18080` 启动前端。后端已允许本地 Vite 端口跨域访问 `/api/**`。
 
@@ -311,6 +328,6 @@ UI 改动必须验证：
 
 下一步建议：
 
-1. 开始 P4：材料上传与文本提取，建立 `Material` 表、文件存储抽象、Word/PDF 提取和失败状态。
+1. 开始 P5：AI 生成提纲，建立 `ModelAdapter`、`PromptBuilder`、`AiGenerationTrace` 和结构化提纲 API。
 2. 补齐本机 Java 21、Gradle 或 Gradle Wrapper，减少对后端 Docker 构建容器的依赖。
-3. P4 完成后推进 P5/P6 AI 提纲和逐段正文生成。
+3. P5 完成后推进 P6 AI 逐段正文生成。

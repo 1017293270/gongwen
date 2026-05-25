@@ -1,7 +1,15 @@
-import { FileDown, Save, Sparkles, Upload } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { createDraft, getDraft, listDocumentTypes, saveDraftBlocks } from './api';
-import type { DocumentType, DraftBlock, DraftBlockUpdate, DraftDetail } from './draftTypes';
+import { AlertCircle, CheckCircle2, FileDown, FileText, Save, Sparkles, Upload } from 'lucide-react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import {
+  createDraft,
+  getDraft,
+  listDocumentTypes,
+  listDraftMaterials,
+  saveDraftBlocks,
+  uploadDraftMaterial,
+} from './api';
+import { ToastProvider, useToast } from './components/feedback/ToastProvider';
+import type { DocumentType, DraftBlock, DraftBlockUpdate, DraftDetail, Material } from './draftTypes';
 
 const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
 const CURRENT_DRAFT_ID_KEY = 'gongwen.currentDraftId';
@@ -16,12 +24,24 @@ const BLOCK_SORT_ORDER: Record<string, number> = {
 };
 
 type WorkbenchStatus = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
+type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
 
 export function App() {
+  return (
+    <ToastProvider>
+      <Workbench />
+    </ToastProvider>
+  );
+}
+
+function Workbench() {
+  const { showToast } = useToast();
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
   const [status, setStatus] = useState<WorkbenchStatus>('loading');
+  const [materialStatus, setMaterialStatus] = useState<MaterialStatus>('loading');
   const [statusMessage, setStatusMessage] = useState('正在加载草稿');
 
   useEffect(() => {
@@ -30,22 +50,27 @@ export function App() {
     async function loadWorkbench() {
       try {
         setStatus('loading');
+        setMaterialStatus('loading');
         setStatusMessage('正在加载草稿');
         const types = await listDocumentTypes();
         const loadedDraft = await loadCurrentDraft();
+        const loadedMaterials = await listDraftMaterials(loadedDraft.id);
         if (!mounted) {
           return;
         }
         setDocumentTypes(types);
         setDraft(loadedDraft);
         setBlocks(loadedDraft.blocks);
+        setMaterials(loadedMaterials);
         setStatus('idle');
+        setMaterialStatus('idle');
         setStatusMessage('草稿已载入');
       } catch (error) {
         if (!mounted) {
           return;
         }
         setStatus('error');
+        setMaterialStatus('error');
         setStatusMessage(error instanceof Error ? error.message : '草稿加载失败');
       }
     }
@@ -128,9 +153,42 @@ export function App() {
       setBlocks(updatedDraft.blocks);
       setStatus('saved');
       setStatusMessage('已保存');
+      showToast({ title: '草稿已保存', tone: 'success' });
     } catch (error) {
+      const message = error instanceof Error ? error.message : '保存失败';
       setStatus('error');
-      setStatusMessage(error instanceof Error ? error.message : '保存失败');
+      setStatusMessage(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleMaterialUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!draft || !file) {
+      return;
+    }
+
+    try {
+      setMaterialStatus('uploading');
+      const uploaded = await uploadDraftMaterial(draft.id, file);
+      const refreshedMaterials = await listDraftMaterials(draft.id);
+      setMaterials(refreshedMaterials);
+      setMaterialStatus('idle');
+      if (uploaded.status === 'READY') {
+        showToast({ title: '材料上传成功', description: uploaded.originalFileName, tone: 'success' });
+      } else {
+        showToast({
+          title: '材料解析失败',
+          description: uploaded.errorMessage ?? uploaded.originalFileName,
+          tone: 'error',
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '材料上传失败';
+      setMaterialStatus('error');
+      showToast({ title: message, tone: 'error' });
+    } finally {
+      event.target.value = '';
     }
   }
 
@@ -208,10 +266,51 @@ export function App() {
               <input className="field" aria-label="日期" onChange={(event) => updateBlock('DATE', event.target.value)} value={date} />
             </label>
 
-            <button className="btn secondary" type="button">
-              <Upload aria-hidden="true" className="btn-icon" />
-              上传 Word/PDF 材料
-            </button>
+            <div className="material-upload">
+              <input
+                accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                aria-label="上传材料文件"
+                className="visually-hidden"
+                disabled={!draft || materialStatus === 'uploading'}
+                id="material-upload"
+                onChange={handleMaterialUpload}
+                type="file"
+              />
+              <label
+                aria-disabled={!draft || materialStatus === 'uploading'}
+                className="btn secondary upload-label"
+                htmlFor="material-upload"
+              >
+                <Upload aria-hidden="true" className="btn-icon" />
+                {materialStatus === 'uploading' ? '正在上传材料' : '上传 Word/PDF 材料'}
+              </label>
+            </div>
+
+            <div className="material-list" aria-label="材料列表">
+              {materials.length === 0 ? (
+                <p className="empty-note">
+                  {materialStatus === 'loading' ? '正在加载材料' : '尚未上传材料'}
+                </p>
+              ) : materials.map((material) => (
+                <div className="material-item" key={material.id}>
+                  <FileText aria-hidden="true" className="material-icon" />
+                  <div className="material-copy">
+                    <div className="material-name">{material.originalFileName}</div>
+                    <div className="material-meta">
+                      {material.fileExtension.toUpperCase()} · {formatFileSize(material.fileSizeBytes)} · {material.status === 'READY' ? `提取 ${material.extractedTextLength} 字` : material.errorMessage}
+                    </div>
+                  </div>
+                  <span className={`status-chip ${material.status === 'READY' ? 'success' : 'danger'}`}>
+                    {material.status === 'READY' ? (
+                      <CheckCircle2 aria-hidden="true" className="status-icon" />
+                    ) : (
+                      <AlertCircle aria-hidden="true" className="status-icon" />
+                    )}
+                    {material.status === 'READY' ? '已就绪' : '失败'}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -241,7 +340,9 @@ export function App() {
           <div className="panel-body">
             <div className={`check-item ${status === 'error' ? 'warning' : 'success'}`}>{statusMessage}</div>
             <div className="check-item success">结构化草稿块 {blocks.length} 项</div>
-            <div className="check-item warning">材料上传和 AI 生成将在后续阶段接入</div>
+            <div className={materials.length > 0 ? 'check-item success' : 'check-item warning'}>
+              参考材料 {materials.length} 项
+            </div>
             <button className="btn secondary" type="button">
               <Sparkles aria-hidden="true" className="btn-icon" />
               优化选中段落
@@ -251,4 +352,14 @@ export function App() {
       </main>
     </div>
   );
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }

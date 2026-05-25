@@ -14,9 +14,18 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info
+
+gongwen:
+  material:
+    storage-dir: ${GONGWEN_MATERIAL_STORAGE_DIR:storage/materials}
+    max-file-size-bytes: ${GONGWEN_MATERIAL_MAX_FILE_SIZE_BYTES:20971520}

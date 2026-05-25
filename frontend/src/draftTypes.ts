@@ -32,3 +32,15 @@ export type DraftBlockUpdate = {
   content: string;
   sortOrder: number;
 };
+
+export type Material = {
+  id: number;
+  draftId: number;
+  originalFileName: string;
+  contentType: string | null;
+  fileSizeBytes: number;
+  fileExtension: string;
+  status: 'READY' | 'FAILED';
+  extractedTextLength: number;
+  errorMessage: string | null;
+};
