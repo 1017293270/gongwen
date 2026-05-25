@@ -1,0 +1,77 @@
+<h2>公文助手工作台雏形</h2>
+<p class="subtitle">先看结构感：左侧收集材料，中间编辑草稿，右侧做 AI 建议、检查和导出。</p>
+
+<div class="mockup">
+  <div class="mockup-header">MVP 工作台：通知 / 请示 / 报告</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:250px minmax(360px,1fr) 280px;gap:14px;min-height:560px;">
+      <aside style="border-right:1px solid #e5e7eb;padding-right:12px;">
+        <div class="label">起草信息</div>
+        <div style="display:grid;gap:10px;margin-top:10px;">
+          <select class="mock-input">
+            <option>通知</option>
+            <option>请示</option>
+            <option>报告</option>
+          </select>
+          <input class="mock-input" value="关于开展年度档案整理工作的通知">
+          <input class="mock-input" value="主送：各部门、各直属单位">
+          <textarea class="mock-input" rows="5">事项背景：年度资料归档不完整，需要统一整理。
+工作要求：按部门提交台账，明确责任人和完成时间。</textarea>
+        </div>
+
+        <div class="label" style="margin-top:20px;">参考材料</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <div class="placeholder" style="min-height:48px;">上传会议纪要.docx</div>
+          <div class="placeholder" style="min-height:48px;">历史通知范文.docx</div>
+          <button class="mock-button">上传材料</button>
+        </div>
+
+        <div class="label" style="margin-top:20px;">模板</div>
+        <div class="placeholder" style="min-height:64px;margin-top:10px;">集团通知模板<br>{{标题}} {{主送机关}} {{正文}} {{落款}}</div>
+      </aside>
+
+      <main>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div>
+            <div class="label">公文草稿</div>
+            <h3 style="margin:4px 0 0;">关于开展年度档案整理工作的通知</h3>
+          </div>
+          <button class="mock-button">重新生成</button>
+        </div>
+
+        <div style="border:1px solid #d1d5db;border-radius:8px;background:white;padding:28px 34px;min-height:470px;box-shadow:0 1px 3px rgba(15,23,42,.08);">
+          <p style="text-align:center;font-weight:700;font-size:20px;margin-top:0;">关于开展年度档案整理工作的通知</p>
+          <p>各部门、各直属单位：</p>
+          <p style="line-height:1.9;">为进一步规范年度档案管理工作，提升资料归集、整理和归档质量，现就开展年度档案整理工作有关事项通知如下。</p>
+          <p style="line-height:1.9;"><strong>一、整理范围</strong><br>各部门在本年度形成的会议材料、制度文件、项目资料、台账记录及其他应归档资料。</p>
+          <p style="line-height:1.9;"><strong>二、工作要求</strong><br>各部门应指定专人负责，按照统一目录完成资料整理，确保材料完整、分类准确、命名规范。</p>
+          <p style="line-height:1.9;"><strong>三、时间安排</strong><br>请于指定时间前完成部门自查，并将归档台账报送办公室汇总。</p>
+          <p style="text-align:right;margin-top:34px;">办公室<br>2026年5月25日</p>
+        </div>
+      </main>
+
+      <aside style="border-left:1px solid #e5e7eb;padding-left:12px;">
+        <div class="label">AI 建议</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <div class="placeholder" style="min-height:64px;">建议补充：档案整理的验收标准。</div>
+          <div class="placeholder" style="min-height:64px;">语气检查：整体正式，可将“指定时间”替换为具体日期。</div>
+          <div class="placeholder" style="min-height:64px;">依据提示：可引用单位档案管理制度。</div>
+        </div>
+
+        <div class="label" style="margin-top:20px;">质检清单</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <div class="placeholder" style="min-height:36px;">已识别标题</div>
+          <div class="placeholder" style="min-height:36px;">已识别主送机关</div>
+          <div class="placeholder" style="min-height:36px;">落款与日期完整</div>
+          <div class="placeholder" style="min-height:36px;">附件：无</div>
+        </div>
+
+        <div class="label" style="margin-top:20px;">输出</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <button class="mock-button">套用 Word 模板</button>
+          <button class="mock-button">导出 .docx</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>

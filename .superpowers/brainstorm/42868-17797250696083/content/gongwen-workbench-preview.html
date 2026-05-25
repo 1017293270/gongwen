@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>公文助手工作台预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+    }
+    .page { padding: 24px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    h2 { margin: 4px 0 0; font-size: 18px; }
+    p { font-size: 14px; }
+    .subtitle { margin: 0 0 18px; color: #64748b; }
+    .shell {
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, .08);
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      background: #fafafa;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 300px minmax(420px, 1fr) 320px;
+      gap: 16px;
+      min-height: 660px;
+      padding: 16px;
+    }
+    aside:first-child { border-right: 1px solid #e5e7eb; padding-right: 14px; }
+    aside:last-child { border-left: 1px solid #e5e7eb; padding-left: 14px; }
+    .label {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+      margin-top: 16px;
+    }
+    .label:first-child { margin-top: 0; }
+    .card, .check, .field, .material {
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+    }
+    .field {
+      width: 100%;
+      margin-top: 9px;
+      font: inherit;
+      background: #f8fafc;
+    }
+    textarea.field { min-height: 92px; resize: vertical; }
+    .button {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #111827;
+      color: #fff;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+      cursor: default;
+    }
+    .button.secondary { background: #fff; color: #111827; }
+    .stack { display: grid; gap: 8px; margin-top: 10px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .paper-wrap {
+      background: #e5e7eb;
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 560px;
+      display: flex;
+      justify-content: center;
+      overflow: auto;
+    }
+    .paper {
+      width: 460px;
+      min-height: 620px;
+      background: #fff;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, .18);
+      padding: 38px 42px;
+      color: #111827;
+    }
+    .red-title {
+      text-align: center;
+      color: #b91c1c;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .red-line { height: 1px; background: #b91c1c; margin: 12px 0 22px; }
+    .doc-title {
+      text-align: center;
+      font-weight: 700;
+      font-size: 20px;
+      line-height: 1.35;
+    }
+    .paper p { line-height: 1.9; font-size: 14px; }
+    .ok { border-left: 4px solid #22c55e; background: #f8fafc; }
+    .warn { border-left: 4px solid #f59e0b; background: #fffbeb; }
+    .muted { color: #64748b; font-size: 13px; margin: 4px 0 0; }
+    @media (max-width: 1180px) {
+      .grid { grid-template-columns: 1fr; }
+      aside:first-child, aside:last-child { border: 0; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>公文助手工作台雏形</h1>
+    <p class="subtitle">强化 Word 预览、模板材料、AI 质检。这个页面只用于讨论产品形态，不是最终视觉设计。</p>
+
+    <div class="shell">
+      <div class="topbar">
+        <div>
+          <strong>公文助手 MVP 工作台</strong>
+          <div class="muted">通知 / 请示 / 报告，私有化单单位版本</div>
+        </div>
+        <div class="row">
+          <button class="button secondary">保存草稿</button>
+          <button class="button">导出 Word</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <aside>
+          <div class="row">
+            <div>
+              <div class="label">文种与模板</div>
+              <h2>通知</h2>
+            </div>
+            <button class="button secondary">切换</button>
+          </div>
+
+          <div class="card" style="margin-top:12px;">
+            <strong>集团通知模板 V3</strong>
+            <p class="muted">适用：总部及直属单位通知</p>
+            <p class="muted">字段：标题、主送、正文、附件、落款、日期</p>
+          </div>
+
+          <div class="label">关键字段</div>
+          <input class="field" value="年度档案整理工作">
+          <input class="field" value="各部门、各直属单位">
+          <textarea class="field">背景：年度资料归档不完整。
+要求：统一整理，提交台账，明确责任。</textarea>
+          <input class="field" value="办公室">
+          <input class="field" value="2026年5月25日">
+
+          <div class="label">材料库</div>
+          <div class="stack">
+            <div class="material">
+              <strong>会议纪要.docx</strong>
+              <p class="muted">已提取 5 条要点</p>
+            </div>
+            <div class="material">
+              <strong>历史通知范文.docx</strong>
+              <p class="muted">匹配相似结构</p>
+            </div>
+            <button class="button secondary">上传材料</button>
+          </div>
+        </aside>
+
+        <main>
+          <div class="row" style="margin-bottom:10px;">
+            <div>
+              <div class="label">Word 版式预览</div>
+              <h2>可分块编辑，导出前保持套版一致</h2>
+            </div>
+            <div class="row">
+              <button class="button secondary">生成正文</button>
+              <button class="button secondary">套版预览</button>
+            </div>
+          </div>
+
+          <div class="paper-wrap">
+            <article class="paper">
+              <div class="red-title">某某集团有限公司文件</div>
+              <div class="red-line"></div>
+              <div class="doc-title">关于开展年度档案整理工作的通知</div>
+              <p style="margin-top:24px;">各部门、各直属单位：</p>
+              <p>为进一步规范年度档案管理工作，提升资料归集、整理和归档质量，现就开展年度档案整理工作有关事项通知如下。</p>
+              <p><strong>一、整理范围</strong><br>各部门在本年度形成的会议材料、制度文件、项目资料、台账记录及其他应归档资料。</p>
+              <p><strong>二、工作要求</strong><br>各部门应指定专人负责，按照统一目录完成资料整理，确保材料完整、分类准确、命名规范。</p>
+              <p><strong>三、时间安排</strong><br>请于5月31日前完成部门自查，并将归档台账报送办公室汇总。</p>
+              <p style="text-align:right;margin-top:34px;">办公室<br>2026年5月25日</p>
+            </article>
+          </div>
+        </main>
+
+        <aside>
+          <div class="label">AI 质检</div>
+          <div class="stack">
+            <div class="check ok">基础字段完整</div>
+            <div class="check warn">建议补充验收标准</div>
+            <div class="check warn">建议引用档案管理制度</div>
+            <div class="check ok">语气符合行政通知风格</div>
+          </div>
+
+          <div class="label">AI 操作</div>
+          <div class="stack">
+            <button class="button secondary">优化选中段落</button>
+            <button class="button secondary">补充工作要求</button>
+            <button class="button secondary">生成检查报告</button>
+            <button class="button secondary">重新生成全文</button>
+          </div>
+
+          <div class="label">导出前检查</div>
+          <div class="stack">
+            <div class="card">模板占位符：已全部填充</div>
+            <div class="card">正文结构：三段式完整</div>
+            <div class="card">落款日期：完整</div>
+            <div class="card">附件：无，已确认</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

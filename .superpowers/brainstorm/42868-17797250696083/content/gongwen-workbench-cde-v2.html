@@ -1,0 +1,105 @@
+<h2>公文工作台：强化 Word 预览、模板材料、AI 质检</h2>
+<p class="subtitle">按你的 C+D+E 反馈调整：中间更像正式 Word 页面，左侧强化材料与模板，右侧强化建议和检查。</p>
+
+<div class="mockup">
+  <div class="mockup-header">公文助手 MVP 工作台</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:300px minmax(420px,1fr) 320px;gap:16px;min-height:620px;">
+      <aside style="border-right:1px solid #e5e7eb;padding-right:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div class="label">文种与模板</div>
+            <h3 style="margin:4px 0 0;">通知</h3>
+          </div>
+          <button class="mock-button">切换</button>
+        </div>
+
+        <div style="border:1px solid #d1d5db;border-radius:8px;margin-top:12px;padding:12px;background:#fff;">
+          <div style="font-weight:700;">集团通知模板 V3</div>
+          <p style="margin:6px 0 0;color:#64748b;font-size:13px;">适用：总部及直属单位通知</p>
+          <p style="margin:8px 0 0;color:#64748b;font-size:13px;">字段：标题、主送、正文、附件、落款、日期</p>
+        </div>
+
+        <div class="label" style="margin-top:18px;">关键字段</div>
+        <div style="display:grid;gap:9px;margin-top:10px;">
+          <input class="mock-input" value="年度档案整理工作">
+          <input class="mock-input" value="各部门、各直属单位">
+          <textarea class="mock-input" rows="4">背景：年度资料归档不完整。
+要求：统一整理，提交台账，明确责任。</textarea>
+          <input class="mock-input" value="办公室">
+          <input class="mock-input" value="2026年5月25日">
+        </div>
+
+        <div class="label" style="margin-top:18px;">材料库</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <div style="border:1px solid #d1d5db;border-radius:8px;padding:10px;background:#fff;">
+            <strong>会议纪要.docx</strong>
+            <p style="margin:4px 0 0;color:#64748b;font-size:13px;">已提取 5 条要点</p>
+          </div>
+          <div style="border:1px solid #d1d5db;border-radius:8px;padding:10px;background:#fff;">
+            <strong>历史通知范文.docx</strong>
+            <p style="margin:4px 0 0;color:#64748b;font-size:13px;">匹配相似结构</p>
+          </div>
+          <button class="mock-button">上传材料</button>
+        </div>
+      </aside>
+
+      <main>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div>
+            <div class="label">Word 版式预览</div>
+            <h3 style="margin:4px 0 0;">可分块编辑，导出前保持套版一致</h3>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="mock-button">生成正文</button>
+            <button class="mock-button">套版预览</button>
+          </div>
+        </div>
+
+        <div style="background:#e5e7eb;border-radius:8px;padding:18px;min-height:540px;display:flex;justify-content:center;">
+          <div style="width:430px;background:#fff;box-shadow:0 6px 18px rgba(15,23,42,.18);padding:38px 42px;color:#111827;">
+            <div style="text-align:center;color:#b91c1c;font-weight:700;font-size:13px;letter-spacing:0;">某某集团有限公司文件</div>
+            <div style="height:1px;background:#b91c1c;margin:12px 0 22px;"></div>
+            <div contenteditable="true" style="text-align:center;font-weight:700;font-size:20px;line-height:1.35;outline:2px solid transparent;">
+              关于开展年度档案整理工作的通知
+            </div>
+            <p contenteditable="true" style="margin-top:24px;line-height:1.9;">各部门、各直属单位：</p>
+            <p contenteditable="true" style="line-height:1.9;">为进一步规范年度档案管理工作，提升资料归集、整理和归档质量，现就开展年度档案整理工作有关事项通知如下。</p>
+            <p contenteditable="true" style="line-height:1.9;"><strong>一、整理范围</strong><br>各部门在本年度形成的会议材料、制度文件、项目资料、台账记录及其他应归档资料。</p>
+            <p contenteditable="true" style="line-height:1.9;"><strong>二、工作要求</strong><br>各部门应指定专人负责，按照统一目录完成资料整理，确保材料完整、分类准确、命名规范。</p>
+            <p contenteditable="true" style="line-height:1.9;"><strong>三、时间安排</strong><br>请于5月31日前完成部门自查，并将归档台账报送办公室汇总。</p>
+            <p contenteditable="true" style="text-align:right;margin-top:34px;line-height:1.9;">办公室<br>2026年5月25日</p>
+          </div>
+        </div>
+      </main>
+
+      <aside style="border-left:1px solid #e5e7eb;padding-left:14px;">
+        <div class="label">AI 质检</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <div style="border-left:4px solid #22c55e;background:#f8fafc;padding:10px;border-radius:6px;">基础字段完整</div>
+          <div style="border-left:4px solid #f59e0b;background:#fffbeb;padding:10px;border-radius:6px;">建议补充验收标准</div>
+          <div style="border-left:4px solid #f59e0b;background:#fffbeb;padding:10px;border-radius:6px;">建议引用档案管理制度</div>
+          <div style="border-left:4px solid #22c55e;background:#f8fafc;padding:10px;border-radius:6px;">语气符合行政通知风格</div>
+        </div>
+
+        <div class="label" style="margin-top:18px;">AI 操作</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <button class="mock-button">优化选中段落</button>
+          <button class="mock-button">补充工作要求</button>
+          <button class="mock-button">生成检查报告</button>
+          <button class="mock-button">重新生成全文</button>
+        </div>
+
+        <div class="label" style="margin-top:18px;">导出前检查</div>
+        <div style="display:grid;gap:8px;margin-top:10px;">
+          <div class="placeholder" style="min-height:36px;">模板占位符：已全部填充</div>
+          <div class="placeholder" style="min-height:36px;">正文结构：三段式完整</div>
+          <div class="placeholder" style="min-height:36px;">落款日期：完整</div>
+          <div class="placeholder" style="min-height:36px;">附件：无，已确认</div>
+        </div>
+
+        <button class="mock-button" style="margin-top:16px;width:100%;">导出 Word</button>
+      </aside>
+    </div>
+  </div>
+</div>
