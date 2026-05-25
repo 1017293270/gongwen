@@ -1,0 +1,90 @@
+:root {
+  --color-ivory-light: #faf9f5;
+  --color-ivory-medium: #f0eee6;
+  --color-ivory-dark: #e8e6dc;
+  --color-oat: #e3dacc;
+  --color-manilla: #ebdbbc;
+  --color-slate-dark: #141413;
+  --color-slate-medium: #3d3d3a;
+  --color-slate-light: #5e5d59;
+  --color-cloud-dark: #87867f;
+  --color-cloud-medium: #b0aea5;
+  --color-cloud-light: #d1cfc5;
+  --color-accent: #c6613f;
+  --color-clay: #d97757;
+  --color-olive: #788c5d;
+  --color-cactus: #bcd1ca;
+  --color-sky: #6a9bcc;
+  --color-heather: #cbcadb;
+  --color-fig: #c46686;
+  --color-coral: #ebcece;
+
+  --color-bg: var(--color-ivory-light);
+  --color-bg-subtle: var(--color-ivory-medium);
+  --color-bg-muted: var(--color-ivory-dark);
+  --color-surface: #ffffff;
+  --color-surface-warm: #fffdf8;
+  --color-text: var(--color-slate-dark);
+  --color-text-muted: var(--color-slate-light);
+  --color-text-subtle: var(--color-cloud-dark);
+  --color-text-inverse: var(--color-ivory-light);
+  --color-border: rgba(20, 20, 19, 0.12);
+  --color-border-strong: rgba(20, 20, 19, 0.2);
+  --color-border-subtle: rgba(20, 20, 19, 0.07);
+  --color-primary: var(--color-slate-dark);
+  --color-primary-hover: var(--color-slate-medium);
+  --color-accent-muted: #f3dbcf;
+  --color-success: var(--color-olive);
+  --color-success-bg: #eef3e8;
+  --color-warning: var(--color-clay);
+  --color-warning-bg: #fbefe9;
+  --color-danger: #b53333;
+  --color-danger-bg: #f7e4e1;
+  --color-info: var(--color-sky);
+  --color-info-bg: #eaf2fa;
+
+  --rgb-slate-dark: 20 20 19;
+  --rgb-accent: 198 97 63;
+
+  --font-sans: "Inter", "Noto Sans SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  --font-serif: "Source Serif 4", "Noto Serif SC", "Songti SC", SimSun, Georgia, serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --leading-tight: 1.1;
+  --leading-title: 1.25;
+  --leading-body: 1.65;
+  --leading-doc: 1.9;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.5rem;
+  --space-8: 3rem;
+  --space-9: 4rem;
+  --space-10: 5rem;
+
+  --shadow-xs: 0 1px 2px rgba(var(--rgb-slate-dark), 0.06);
+  --shadow-sm: 0 4px 10px rgba(var(--rgb-slate-dark), 0.08);
+  --shadow-md: 0 12px 28px rgba(var(--rgb-slate-dark), 0.12);
+  --shadow-focus: 0 0 0 3px rgba(var(--rgb-accent), 0.14);
+
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-family: var(--font-sans);
+}

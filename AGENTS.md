@@ -275,7 +275,7 @@ UI 改动必须验证：
 
 ## 14. 当前状态
 
-当前状态：产品设计已确认，第一份实施计划已生成：`docs/superpowers/plans/2026-05-25-mvp-foundation.md`。尚未开始正式业务功能代码实现。
+当前状态：MVP Foundation 代码骨架已建立并完成 Docker 化本地验证。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地，以及基础健康检查。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用初始迁移。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
 
 已确认决策：
 
@@ -296,7 +296,6 @@ UI 改动必须验证：
 
 下一步建议：
 
-1. 编写实施计划。
-2. 初始化前后端项目结构。
-3. 建立数据库 schema 和迁移。
-4. 优先实现模板管理、草稿结构和导出闭环。
+1. 补齐本机 Java 21、Gradle 或 Gradle Wrapper，减少对后端 Docker 构建容器的依赖。
+2. 开始模板管理和 `.docx` 导出闭环。
+3. 之后推进草稿结构、材料上传、AI 生成和基础质检。
