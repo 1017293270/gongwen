@@ -276,7 +276,7 @@ UI 改动必须验证：
 
 ## 14. 当前状态
 
-当前状态：MVP Foundation 代码骨架已建立并完成 Docker 化本地验证。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地，以及基础健康检查。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用初始迁移。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
+当前状态：P1 模板与 Word 导出最小闭环已完成后端基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表，以及最小解析和导出 API。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用到 v2。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
 
 长期任务总表已建立：`docs/PROJECT_TASKS.md`。后续 AI Agent 接手时必须用该文件判断当前阶段、依赖、验收标准和下一步任务。
 
@@ -299,6 +299,6 @@ UI 改动必须验证：
 
 下一步建议：
 
-1. 开始 P1：模板与 Word 导出最小闭环，后端优先，不做完整前端模板管理页。
+1. 开始 P2：草稿结构与文种模型，建立 `DocumentType`、`Draft`、`DraftBlock` 及草稿保存读取 API。
 2. 补齐本机 Java 21、Gradle 或 Gradle Wrapper，减少对后端 Docker 构建容器的依赖。
-3. P1 完成后推进 P2 草稿结构与文种模型，再推进 P3 工作台前端接入真实数据。
+3. P2 完成后推进 P3 工作台前端接入真实数据。

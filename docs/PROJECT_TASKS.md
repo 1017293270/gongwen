@@ -11,23 +11,28 @@
 
 ## 当前状态
 
-当前分支：`mvp-foundation`
+当前分支：`p1-template-docx-export`
 
 已完成：
 
 - P0 工程地基。
+- P1 模板与 Word 导出最小闭环。
 - Spring Boot 后端骨架。
 - React + TypeScript + Vite 前端骨架。
 - PostgreSQL Docker Compose。
 - Flyway 初始化迁移。
 - `/api/health`。
+- `.docx` 模板占位符解析。
+- Word 模板填充导出。
+- 模板、模板字段、导出记录数据库表。
+- 最小模板解析和 Word 导出 API。
 - 三栏公文工作台静态壳子。
 - 前端测试和构建验证。
-- 后端测试、Docker 化 `bootRun`、Flyway 和健康检查验证。
+- 后端测试、Docker 化 `bootRun`、Flyway v2、健康检查和导出烟测验证。
 
 当前推荐下一阶段：
 
-- P1 模板与 Word 导出最小闭环。
+- P2 草稿结构与文种模型。
 
 ## 全局落地原则
 
@@ -73,7 +78,7 @@
 
 ### P1 模板与 Word 导出最小闭环
 
-状态：下一阶段。
+状态：已完成。
 
 目标：先打通后端 `.docx` 模板占位符解析和结构化草稿导出 Word 的核心能力，不做完整前端模板管理页面。
 
@@ -103,11 +108,30 @@
 
 验收标准：
 
-- 能从 `.docx` 测试模板中解析出所有 `{{字段名}}` 占位符。
-- 能识别缺失字段并返回明确错误。
-- 能将结构化草稿数据填入 `.docx` 模板。
-- 导出的 `.docx` 可以被 Apache POI 重新读取，且内容已替换。
-- 导出记录保存模板版本、导出人预留字段、文件路径或文件标识。
+- 已能从 `.docx` 测试模板中解析出所有 `{{字段名}}` 占位符。
+- 已能识别缺失字段并返回明确错误。
+- 已能将结构化字段数据填入 `.docx` 模板。
+- 已通过 Apache POI 重新读取导出 `.docx`，确认内容已替换。
+- 已保存导出记录，包含模板名称、模板版本、文件名、状态和错误信息。
+
+已实现 API：
+
+- `POST /api/templates/parse`
+- `POST /api/exports/word`
+
+已实现后端模块：
+
+- `com.gongwen.assistant.template`
+- `com.gongwen.assistant.template.parser`
+- `com.gongwen.assistant.exporting`
+- `com.gongwen.assistant.exporting.word`
+
+验证状态：
+
+- 后端完整测试通过。
+- Flyway v2 已在 PostgreSQL 中应用。
+- `/api/exports/word` 已通过运行时烟测导出 `.docx`。
+- `export_record` 已写入成功记录。
 
 不做：
 
@@ -399,16 +423,15 @@
 
 ## 当前开发队列
 
-1. P1 模板与 Word 导出最小闭环。
-2. P2 草稿结构与文种模型。
-3. P3 工作台前端接入真实数据。
-4. P4 材料上传与文本提取。
-5. P5 AI 生成提纲。
-6. P6 AI 逐段正文生成。
-7. P8 基础质检。
-8. P9 登录与基础权限。
-9. P10 模板管理员后台。
-10. P11 导出体验增强。
+1. P2 草稿结构与文种模型。
+2. P3 工作台前端接入真实数据。
+3. P4 材料上传与文本提取。
+4. P5 AI 生成提纲。
+5. P6 AI 逐段正文生成。
+6. P8 基础质检。
+7. P9 登录与基础权限。
+8. P10 模板管理员后台。
+9. P11 导出体验增强。
 
 ## AI 接力清单
 
