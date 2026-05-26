@@ -1,4 +1,6 @@
 .superpowers/
+.tools/
+.gradle-user-home/
 
 # OS and editor noise
 .DS_Store
