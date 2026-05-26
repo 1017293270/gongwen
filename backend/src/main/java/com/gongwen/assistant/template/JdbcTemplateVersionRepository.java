@@ -4,6 +4,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -20,7 +21,9 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
     }
 
     @Override
+    @Transactional
     public TemplateVersion create(long templateId, String originalFileName, String contentType, long fileSizeBytes, String filePath) {
+        jdbcTemplate.queryForList("select id from document_template where id = ? for update", templateId);
         int versionNo = nextVersionNo(templateId);
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
@@ -74,6 +77,7 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
         jdbcTemplate.update("""
                 update document_template_version
                 set parse_status = 'FAILED',
+                    profile_hash = null,
                     parse_error_code = ?,
                     parse_error_message = ?
                 where id = ?

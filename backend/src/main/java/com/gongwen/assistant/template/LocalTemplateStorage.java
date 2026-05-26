@@ -21,7 +21,9 @@ public class LocalTemplateStorage implements TemplateStorage {
     public String save(String originalFileName, String fileExtension, byte[] content) throws IOException {
         Path directory = Path.of(properties.storageDir()).normalize();
         Files.createDirectories(directory);
-        String safeBaseName = StringUtils.cleanPath(originalFileName).replaceAll("[^A-Za-z0-9._-]", "_");
+        String safeBaseName = StringUtils.cleanPath(originalFileName)
+                .replaceAll("[^A-Za-z0-9._-]", "_")
+                .replace("..", "_");
         String fileName = Instant.now().toEpochMilli() + "-" + UUID.randomUUID() + "-" + safeBaseName;
         if (!fileName.endsWith("." + fileExtension)) {
             fileName = fileName + "." + fileExtension;
