@@ -39,7 +39,7 @@
 
 当前推荐下一阶段：
 
-- P5 AI 生成提纲。
+- P6 AI 逐段正文生成。
 
 ## 全局落地原则
 
@@ -260,7 +260,7 @@
 
 ### P5 AI 生成提纲
 
-状态：待开始。
+状态：已完成。
 
 目标：接入模型适配层，生成结构化公文提纲。
 
@@ -275,10 +275,36 @@
 
 验收标准：
 
-- 能基于文种、字段、材料摘要生成提纲。
+- 已能基于文种、草稿字段和 READY 材料摘要生成提纲。
 - 输出包含标题建议、正文结构、段落要点、缺失信息提示。
-- AI trace 不记录完整敏感正文。
+- AI trace 不记录完整敏感正文、完整材料提取文本或完整 prompt。
 - 失败时返回归一化错误。
+
+已实现 API：
+
+- `POST /api/drafts/{draftId}/ai/outline`
+
+已实现后端模块：
+
+- `com.gongwen.assistant.ai`
+- `PromptBuilder`
+- `ModelAdapter`
+- `MockModelAdapter`
+- `AiOutlineService`
+- `AiGenerationTraceRepository` / `JdbcAiGenerationTraceRepository`
+
+已实现前端能力：
+
+- 右栏提纲补充要求输入。
+- 生成提纲、生成中禁用、失败重试。
+- 标题建议、章节要点和缺失信息展示。
+- 成功和失败 Toast 反馈。
+
+验证状态：
+
+- 后端 P5 focused 测试通过。
+- 前端 `npm test` 通过。
+- 前端 `npm run build` 通过。
 
 ### P6 AI 逐段正文生成
 

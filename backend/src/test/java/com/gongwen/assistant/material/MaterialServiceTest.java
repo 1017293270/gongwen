@@ -1,5 +1,6 @@
 package com.gongwen.assistant.material;
 
+import com.gongwen.assistant.ai.MaterialPromptSummary;
 import com.gongwen.assistant.draft.CreateDraftRequest;
 import com.gongwen.assistant.draft.DraftBlockUpdateRequest;
 import com.gongwen.assistant.draft.DraftDetailDto;
@@ -122,6 +123,11 @@ class MaterialServiceTest {
                 return List.of();
             }
             return List.of(saved.toDto(1));
+        }
+
+        @Override
+        public List<MaterialPromptSummary> findReadyTextSummariesByDraftId(long draftId) {
+            return List.of();
         }
     }
 

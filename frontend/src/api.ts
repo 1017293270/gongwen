@@ -1,4 +1,4 @@
-import type { ApiResponse, DocumentType, DraftBlockUpdate, DraftDetail, Material } from './draftTypes';
+import type { AiOutline, ApiResponse, DocumentType, DraftBlockUpdate, DraftDetail, Material } from './draftTypes';
 
 function apiBaseUrl() {
   return import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -61,4 +61,11 @@ export function uploadDraftMaterial(draftId: number, file: File) {
   const formData = new FormData();
   formData.append('file', file);
   return requestFormData<Material>(`/api/drafts/${draftId}/materials`, formData);
+}
+
+export function generateDraftOutline(draftId: number, instruction: string) {
+  return requestJson<AiOutline>(`/api/drafts/${draftId}/ai/outline`, {
+    method: 'POST',
+    body: JSON.stringify({ instruction }),
+  });
 }

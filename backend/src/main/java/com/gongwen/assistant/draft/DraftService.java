@@ -2,6 +2,7 @@ package com.gongwen.assistant.draft;
 
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -9,9 +10,15 @@ import java.util.List;
 @Service
 public class DraftService {
     private final DraftRepository draftRepository;
+    private final Clock clock;
 
     public DraftService(DraftRepository draftRepository) {
+        this(draftRepository, Clock.systemDefaultZone());
+    }
+
+    DraftService(DraftRepository draftRepository, Clock clock) {
         this.draftRepository = draftRepository;
+        this.clock = clock;
     }
 
     public DraftDetailDto createDraft(CreateDraftRequest request) {
@@ -39,7 +46,7 @@ public class DraftService {
                 new DraftBlockUpdateRequest("BODY_PARAGRAPH", "", 30),
                 new DraftBlockUpdateRequest("ATTACHMENT", "无", 40),
                 new DraftBlockUpdateRequest("SIGNATURE", "办公室", 50),
-                new DraftBlockUpdateRequest("DATE", LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy年M月d日")), 60)
+                new DraftBlockUpdateRequest("DATE", LocalDate.now(clock).format(DateTimeFormatter.ofPattern("yyyy年M月d日")), 60)
         );
     }
 }

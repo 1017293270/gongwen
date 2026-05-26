@@ -1,5 +1,6 @@
 package com.gongwen.assistant.material;
 
+import com.gongwen.assistant.ai.MaterialPromptSummary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -73,6 +74,24 @@ public class JdbcMaterialRepository implements MaterialRepository {
                         rs.getString("status"),
                         rs.getInt("extracted_text_length"),
                         rs.getString("error_message")),
+                draftId);
+    }
+
+    @Override
+    public List<MaterialPromptSummary> findReadyTextSummariesByDraftId(long draftId) {
+        return jdbcTemplate.query("""
+                        select id,
+                               original_file_name,
+                               coalesce(extracted_text, '') as extracted_text
+                        from material
+                        where draft_id = ?
+                          and status = 'READY'
+                        order by created_at desc, id desc
+                        """,
+                (rs, rowNum) -> new MaterialPromptSummary(
+                        rs.getLong("id"),
+                        rs.getString("original_file_name"),
+                        rs.getString("extracted_text")),
                 draftId);
     }
 }

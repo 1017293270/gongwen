@@ -2,6 +2,9 @@ package com.gongwen.assistant.draft;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -10,7 +13,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DraftServiceTest {
     private final InMemoryDraftRepository repository = new InMemoryDraftRepository();
-    private final DraftService service = new DraftService(repository);
+    private final DraftService service = new DraftService(
+            repository,
+            Clock.fixed(Instant.parse("2026-05-25T00:00:00Z"), ZoneId.of("Asia/Shanghai"))
+    );
 
     @Test
     void createsNoticeDraftWithDefaultBlocks() {

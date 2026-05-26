@@ -44,3 +44,15 @@ export type Material = {
   extractedTextLength: number;
   errorMessage: string | null;
 };
+
+export type AiOutlineSection = {
+  heading: string;
+  points: string[];
+};
+
+export type AiOutline = {
+  traceId: string;
+  titleSuggestion: string;
+  sections: AiOutlineSection[];
+  missingInformation: string[];
+};

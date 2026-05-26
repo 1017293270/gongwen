@@ -121,6 +121,51 @@ describe('App', () => {
 
     expect(await screen.findByText('仅支持上传 Word 或 PDF 材料')).toBeInTheDocument();
   });
+
+  it('generates an outline from the AI panel', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('提纲测试草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(sampleOutline()));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByDisplayValue('提纲测试草稿');
+    await userEvent.type(screen.getByLabelText('提纲补充要求'), '突出执行要求');
+    await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+
+    expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/ai/outline', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ instruction: '突出执行要求' }),
+    }));
+    const outlineResult = await screen.findByLabelText('AI 提纲结果');
+    expect(within(outlineResult).getByText('AI 提纲标题')).toBeInTheDocument();
+    expect(within(outlineResult).getByText('一、主要事项')).toBeInTheDocument();
+    expect(within(outlineResult).getByText('缺失信息：会议时间')).toBeInTheDocument();
+  });
+
+  it('shows retry state when outline generation fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('提纲失败草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(errorResponse('AI_MODEL_UNAVAILABLE', 'AI 服务暂不可用，请稍后重试'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await screen.findByDisplayValue('提纲失败草稿');
+    await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+
+    expect(await within(screen.getByLabelText('AI 建议和质检')).findByRole('button', { name: '重试生成提纲' })).toBeInTheDocument();
+    expect(screen.getAllByText('AI 服务暂不可用，请稍后重试').length).toBeGreaterThan(0);
+  });
 });
 
 function jsonResponse<T>(data: T) {
@@ -175,5 +220,16 @@ function sampleMaterial(originalFileName: string, status: string) {
     status,
     extractedTextLength: status === 'READY' ? 4 : 0,
     errorMessage: null,
+  };
+}
+
+function sampleOutline() {
+  return {
+    traceId: '11111111-1111-1111-1111-111111111111',
+    titleSuggestion: 'AI 提纲标题',
+    sections: [
+      { heading: '一、主要事项', points: ['说明安排', '明确分工'] },
+    ],
+    missingInformation: ['会议时间'],
   };
 }

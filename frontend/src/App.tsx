@@ -2,6 +2,7 @@ import { AlertCircle, CheckCircle2, FileDown, FileText, Save, Sparkles, Upload }
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import {
   createDraft,
+  generateDraftOutline,
   getDraft,
   listDocumentTypes,
   listDraftMaterials,
@@ -9,7 +10,7 @@ import {
   uploadDraftMaterial,
 } from './api';
 import { ToastProvider, useToast } from './components/feedback/ToastProvider';
-import type { DocumentType, DraftBlock, DraftBlockUpdate, DraftDetail, Material } from './draftTypes';
+import type { AiOutline, DocumentType, DraftBlock, DraftBlockUpdate, DraftDetail, Material } from './draftTypes';
 
 const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
 const CURRENT_DRAFT_ID_KEY = 'gongwen.currentDraftId';
@@ -25,6 +26,7 @@ const BLOCK_SORT_ORDER: Record<string, number> = {
 
 type WorkbenchStatus = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
 type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
+type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 
 export function App() {
   return (
@@ -40,6 +42,10 @@ function Workbench() {
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [outline, setOutline] = useState<AiOutline | null>(null);
+  const [outlineStatus, setOutlineStatus] = useState<OutlineStatus>('idle');
+  const [outlineError, setOutlineError] = useState('');
+  const [outlineInstruction, setOutlineInstruction] = useState('');
   const [status, setStatus] = useState<WorkbenchStatus>('loading');
   const [materialStatus, setMaterialStatus] = useState<MaterialStatus>('loading');
   const [statusMessage, setStatusMessage] = useState('正在加载草稿');
@@ -189,6 +195,26 @@ function Workbench() {
       showToast({ title: message, tone: 'error' });
     } finally {
       event.target.value = '';
+    }
+  }
+
+  async function handleGenerateOutline() {
+    if (!draft) {
+      return;
+    }
+
+    try {
+      setOutlineStatus('generating');
+      setOutlineError('');
+      const generatedOutline = await generateDraftOutline(draft.id, outlineInstruction);
+      setOutline(generatedOutline);
+      setOutlineStatus('success');
+      showToast({ title: '提纲已生成', description: generatedOutline.titleSuggestion, tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '提纲生成失败';
+      setOutlineStatus('error');
+      setOutlineError(message);
+      showToast({ title: message, tone: 'error' });
     }
   }
 
@@ -343,10 +369,46 @@ function Workbench() {
             <div className={materials.length > 0 ? 'check-item success' : 'check-item warning'}>
               参考材料 {materials.length} 项
             </div>
-            <button className="btn secondary" type="button">
+            <label className="field-group">
+              <span className="field-label">补充要求</span>
+              <textarea
+                aria-label="提纲补充要求"
+                className="field outline-instruction"
+                disabled={!draft || outlineStatus === 'generating'}
+                maxLength={1000}
+                onChange={(event) => setOutlineInstruction(event.target.value)}
+                placeholder="可补充会议重点、语气、必须覆盖的信息"
+                value={outlineInstruction}
+              />
+            </label>
+            <button
+              className="btn secondary"
+              disabled={!draft || outlineStatus === 'generating' || status === 'loading'}
+              onClick={handleGenerateOutline}
+              type="button"
+            >
               <Sparkles aria-hidden="true" className="btn-icon" />
-              优化选中段落
+              {outlineStatus === 'generating' ? '正在生成提纲' : outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
             </button>
+            {outlineStatus === 'error' && <div className="check-item warning">{outlineError}</div>}
+            {outline && (
+              <div className="outline-result" aria-label="AI 提纲结果">
+                <div className="outline-title">{outline.titleSuggestion}</div>
+                {outline.sections.map((section) => (
+                  <div className="outline-section" key={section.heading}>
+                    <div className="outline-heading">{section.heading}</div>
+                    <ul>
+                      {section.points.map((point) => <li key={point}>{point}</li>)}
+                    </ul>
+                  </div>
+                ))}
+                {outline.missingInformation.length > 0 && (
+                  <div className="outline-missing">
+                    缺失信息：{outline.missingInformation.join('、')}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
       </main>

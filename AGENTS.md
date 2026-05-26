@@ -276,7 +276,7 @@ UI 改动必须验证：
 
 ## 14. 当前状态
 
-当前状态：P4 材料上传与文本提取已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表，以及工作台真实草稿加载、编辑、预览、保存、材料上传和材料列表能力。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用到 v4。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
+当前状态：P5 AI 生成提纲已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表，以及工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表和 AI 提纲生成能力。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用到 v5。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
 
 当前核心 API：
 
@@ -289,6 +289,16 @@ UI 改动必须验证：
 - `PUT /api/drafts/{id}/blocks`
 - `GET /api/drafts/{draftId}/materials`
 - `POST /api/drafts/{draftId}/materials`
+- `POST /api/drafts/{draftId}/ai/outline`
+
+AI 提纲生成当前约定：
+
+- 默认使用 `MockModelAdapter`，无需云模型密钥即可本地测试和演示。
+- `PromptBuilder` 集中构建结构化提纲输入，不在 controller 或前端散落 prompt。
+- `ai_generation_trace` 记录任务类型、provider、model、状态、prompt 版本、输入摘要、输出摘要、错误摘要和耗时。
+- trace 不保存完整草稿正文、完整材料提取文本或完整 prompt。
+- 提纲 API 返回标题建议、正文结构、段落要点和缺失信息提示。
+- 前端右栏已接入生成中、成功、失败和重试状态。
 
 材料上传当前约定：
 
