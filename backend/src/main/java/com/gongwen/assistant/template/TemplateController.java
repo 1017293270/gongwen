@@ -27,22 +27,35 @@ public class TemplateController {
     private final TemplateUploadService uploadService;
     private final TemplateProfileRepository profileRepository;
     private final TemplateVersionRepository versionRepository;
+    private final TemplateRepository templateRepository;
 
     public TemplateController(
             DocxPlaceholderParser parser,
             TemplateUploadService uploadService,
             TemplateProfileRepository profileRepository,
-            TemplateVersionRepository versionRepository
+            TemplateVersionRepository versionRepository,
+            TemplateRepository templateRepository
     ) {
         this.parser = parser;
         this.uploadService = uploadService;
         this.profileRepository = profileRepository;
         this.versionRepository = versionRepository;
+        this.templateRepository = templateRepository;
     }
 
     @PostMapping("/parse")
     public ApiResponse<TemplateParseResponse> parse(@RequestPart("file") MultipartFile file) throws IOException {
         return ApiResponse.ok(new TemplateParseResponse(parser.parsePlaceholders(file.getBytes())));
+    }
+
+    @GetMapping
+    public ApiResponse<List<TemplateSummary>> listTemplates(@RequestParam(required = false) String documentTypeCode) {
+        return ApiResponse.ok(templateRepository.findAll(documentTypeCode));
+    }
+
+    @PostMapping
+    public ApiResponse<TemplateSummary> createTemplate(@org.springframework.web.bind.annotation.RequestBody CreateTemplateRequest request) {
+        return ApiResponse.ok(templateRepository.create(request.templateName(), request.documentTypeCode()));
     }
 
     @PostMapping("/{templateId}/versions")

@@ -289,7 +289,7 @@
 
 .ui-dialog-layer {
   position: fixed;
-  z-index: 40;
+  z-index: 100;
   inset: 0;
   display: grid;
   place-items: center;
@@ -300,14 +300,16 @@
   position: absolute;
   inset: 0;
   border: 0;
-  background: rgba(var(--rgb-slate-dark), 0.28);
+  background: rgb(var(--rgb-slate-dark) / 0.42);
   cursor: default;
 }
 
 .ui-dialog {
   position: relative;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(460px, 100%);
+  max-height: calc(100vh - var(--space-8));
   gap: var(--space-4);
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
@@ -337,6 +339,8 @@
 }
 
 .ui-dialog-body {
+  min-height: 0;
+  overflow: auto;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   line-height: var(--leading-body);

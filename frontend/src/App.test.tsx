@@ -17,6 +17,7 @@ describe('App', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     window.localStorage.clear();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -134,6 +135,7 @@ describe('App', () => {
   });
 
   it('opens outline generation in a modal with progress feedback', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     let resolveOutline: (response: Response) => void = () => undefined;
     const outlinePromise = new Promise<Response>((resolve) => {
       resolveOutline = resolve;
@@ -155,7 +157,11 @@ describe('App', () => {
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
 
     const dialog = await screen.findByRole('dialog', { name: '生成提纲' });
-    expect(within(dialog).getByRole('progressbar', { name: '生成提纲进度' })).toBeInTheDocument();
+    const progress = within(dialog).getByRole('progressbar', { name: '生成提纲进度' });
+    expect(progress).toHaveAttribute('aria-valuenow', '0');
+    expect(within(dialog).getByText('0%')).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(Number(progress.getAttribute('aria-valuenow'))).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/ai/outline', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ instruction: '突出执行要求' }),

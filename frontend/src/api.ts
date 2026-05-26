@@ -13,6 +13,9 @@ import type {
   DraftDetail,
   Material,
   QualityCheckResult,
+  TemplateProfile,
+  TemplateSummary,
+  TemplateUploadResult,
   TemplateVersionSummary,
 } from './draftTypes';
 
@@ -79,6 +82,28 @@ export function updateDraftTemplateVersion(draftId: number, templateVersionId: n
 export function listTemplateVersions(documentTypeCode?: string) {
   const query = documentTypeCode ? `?documentTypeCode=${encodeURIComponent(documentTypeCode)}` : '';
   return requestJson<TemplateVersionSummary[]>(`/api/templates/versions${query}`);
+}
+
+export function listTemplates(documentTypeCode?: string) {
+  const query = documentTypeCode ? `?documentTypeCode=${encodeURIComponent(documentTypeCode)}` : '';
+  return requestJson<TemplateSummary[]>(`/api/templates${query}`);
+}
+
+export function createTemplate(templateName: string, documentTypeCode: string) {
+  return requestJson<TemplateSummary>('/api/templates', {
+    method: 'POST',
+    body: JSON.stringify({ templateName, documentTypeCode }),
+  });
+}
+
+export function uploadTemplateVersion(templateId: number, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return requestFormData<TemplateUploadResult>(`/api/templates/${templateId}/versions`, formData);
+}
+
+export function getTemplateProfile(templateVersionId: number) {
+  return requestJson<TemplateProfile>(`/api/templates/versions/${templateVersionId}/profile`);
 }
 
 export function listDraftMaterials(draftId: number) {

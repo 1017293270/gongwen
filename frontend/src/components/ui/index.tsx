@@ -274,6 +274,9 @@ export function Dialog({
       return undefined;
     }
 
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         onClose();
@@ -281,7 +284,10 @@ export function Dialog({
     }
 
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+    };
   }, [onClose, open]);
 
   if (!open) {

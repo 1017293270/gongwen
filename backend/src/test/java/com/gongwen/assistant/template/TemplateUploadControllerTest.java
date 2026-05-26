@@ -39,6 +39,9 @@ class TemplateUploadControllerTest {
     @MockBean
     private TemplateVersionRepository versionRepository;
 
+    @MockBean
+    private TemplateRepository templateRepository;
+
     @Test
     void uploadsTemplateVersion() throws Exception {
         when(uploadService.upload(eq(1L), eq("notice.docx"), any(), any()))

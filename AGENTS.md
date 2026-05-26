@@ -170,6 +170,8 @@ UI 使用 Anthropic-inspired 风格：
 前端代码要求：
 
 - 所有颜色必须来自 `DESIGN.md` 定义的 CSS 变量。
+- 所有常规 UI 必须优先复用全局组件和全局样式，例如按钮、表单、状态提示、卡片、空状态、弹窗、Toast、布局容器和交互状态；禁止为普通按钮或常规组件编写局部 class 覆盖颜色、字号、图标尺寸、内边距、对齐和状态。
+- 局部样式只允许用于极为特殊、全局组件无法表达的业务布局或一次性结构，并且必须继续使用 `DESIGN.md` token，避免污染子组件选择器，例如不要用页面级 `.xxx span` 覆盖全局按钮文字。
 - 所有组件状态必须覆盖 default、hover、focus-visible、active、disabled、loading、error。
 - 工作台必须保持三栏主结构：左侧字段/材料/模板，中间 Word 风格预览，右侧 AI 建议/质检/导出。
 - 不允许使用大面积蓝紫渐变、AI 光晕、装饰 blob、玻璃拟态或营销页式 hero。
@@ -428,15 +430,16 @@ P8 基础质检当前约定：
 - 质检结果保存到 `quality_check_result.result_json`，并提供 `GET /api/drafts/{draftId}/quality-check/latest` 获取最近一次结果。
 - `ai_generation_trace` 使用 `QUALITY_CHECK` task type 记录 provider、model、状态、prompt 版本、输入摘要、建议数量、错误摘要和耗时；trace 不保存完整正文或完整材料文本。
 - AI 质检失败不会阻断规则质检，结果中追加 `AI_QUALITY_UNAVAILABLE` 或 `AI_QUALITY_RESPONSE_INVALID` 警告；规则、模板适配或 AI 返回的 `ERROR` 会让 `exportBlocked=true`。
-- 工作台左栏已提供“套版模板”选择，调用 `PUT /api/drafts/{id}/template-version` 绑定具体模板版本；质检会读取该版本的 `TemplateProfile` 检查占位符缺值、未映射占位符和跨 run 风险。`n- 前端右栏“基础质检”面板已接入未检查、检查中、成功、警告、错误和重试状态；AI 建议首版只展示，不自动改正文。
+- 工作台左栏已提供“套版模板”选择，调用 `PUT /api/drafts/{id}/template-version` 绑定具体模板版本；质检会读取该版本的 `TemplateProfile` 检查占位符缺值、未映射占位符和跨 run 风险。
+- 前端右栏“基础质检”面板已接入未检查、检查中、成功、警告、错误和重试状态；AI 建议首版只展示，不自动改正文。
 
 模板引擎当前约定：
 
 - 模板模块按 Word 样式体系优先设计，底层保存 `TemplateProfile`，后续映射、质检和导出都应以具体模板版本为锚点。
 - 模板版本不可变；导出记录后续必须绑定具体模板版本，确保导出文件可追溯。
 - `TemplateProfile` 保存占位符、样式、section、表格、页眉页脚、媒体和解析风险摘要；profile JSON 使用 PostgreSQL JSONB 持久化。
-- 当前 T1 后端底座已提供 `POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。
-- 首版模板后台尚未完成；当前 API 先服务后续 P8A/P10/P11，不在工作台提前扩成完整模板管理 UI。
+- 当前 T1/P10 底座已提供 `GET /api/templates`、`POST /api/templates`、`POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。
+- 模板管理入口采用“文种文件夹 -> 模板卡片 -> 新增模板/上传版本”的层级 UI；首屏选择文种，进入后展示该文种模板卡片，新增模板沿用上传解析表单，并可查看最新版本 `TemplateProfile` 的占位符和解析风险。
 
 材料上传当前约定：
 
@@ -452,14 +455,14 @@ P8 基础质检当前约定：
 - 已引入 `@radix-ui/react-toast`。
 - 保存、上传、失败等轻反馈通过 `ToastProvider` / `useToast` 统一展示。
 - Toast 样式必须继续使用 `DESIGN.md` CSS 变量，避免引入与当前 Anthropic-inspired 风格冲突的成套视觉主题。
-- 工作台右栏 AI 动作只保留入口、必要输入和简短摘要；提纲结果、质检明细和局部段落建议等长内容必须在对应弹窗中承载，生成中使用符合 `DESIGN.md` 的进度反馈与取消入口，避免右栏被长结果撑高。
+- 工作台右栏 AI 动作只保留入口、必要输入和简短摘要；提纲结果、质检明细和局部段落建议等长内容必须在对应弹窗中承载，避免右栏被长结果撑高。生成中进度必须从 0% 开始以百分比递增展示，弹窗必须有明确遮罩、锁定背景滚动、内容区内部滚动和取消入口。
 
 前端应用壳约定：
 
 - 默认进入总览页，左侧侧边栏提供总览、工作台、草稿列表、模板管理、材料库、导出记录、AI 任务和系统设置入口。
 - 侧边栏采用 Anthropic/OpenAI-like 紧凑工作区导航：导航项单行展示，隐藏解释性副文案，当前页使用暖白 active pill 和细 accent 左侧标记；移动端改为两列 44px 触控项。
 - 工作台仍保持项目规定的三栏主结构；侧边栏只负责全局导航，不替代工作台内部的字段、预览和 AI 建议布局。
-- 草稿列表、模板管理、材料库、导出记录和 AI 任务当前是预留入口，后续阶段接入真实列表、权限和操作。
+- 草稿列表、材料库、导出记录和 AI 任务当前是预留入口，后续阶段接入真实列表、权限和操作；模板管理已接入文种卡片、模板卡片、新增模板和版本解析结果首版。
 - 系统设置当前已有真实 AI 配置页面；后续再扩展权限、账号、部署和审计配置时，不要覆盖现有 AI 配置能力。
 - 总览页展示当前草稿、正文段落、READY 材料和阶段提醒，必须区分加载、空、错误和可操作状态。
 

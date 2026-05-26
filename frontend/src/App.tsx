@@ -1,12 +1,16 @@
 import {
   AlertCircle,
   Archive,
+  ArrowLeft,
   CheckCircle2,
+  ClipboardList,
+  Eye,
   FileDown,
   FileText,
   FolderOpen,
   LayoutDashboard,
   LibraryBig,
+  Plus,
   Save,
   Settings,
   Sparkles,
@@ -15,13 +19,16 @@ import {
 import { ChangeEvent, MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDraft,
+  createTemplate,
   getAiProviderSettings,
+  getTemplateProfile,
   generateDraftOutline,
   generateDraftParagraph,
   generateLocalOperation,
   getDraft,
   listDocumentTypes,
   listDraftMaterials,
+  listTemplates,
   listTemplateVersions,
   runQualityCheck,
   saveDraftBlocks,
@@ -29,6 +36,7 @@ import {
   updateAiProviderSettings,
   updateDraftTemplateVersion,
   uploadDraftMaterial,
+  uploadTemplateVersion,
 } from './api';
 import { ToastProvider, useToast } from './components/feedback/ToastProvider';
 import {
@@ -53,6 +61,9 @@ import type {
   Material,
   QualityCheckItem,
   QualityCheckResult,
+  TemplateProfile,
+  TemplateSummary,
+  TemplateUploadResult,
   TemplateVersionSummary,
 } from './draftTypes';
 
@@ -159,6 +170,18 @@ function Workbench() {
   const [status, setStatus] = useState<WorkbenchStatus>('loading');
   const [materialStatus, setMaterialStatus] = useState<MaterialStatus>('loading');
   const [statusMessage, setStatusMessage] = useState('正在加载草稿');
+  const outlineProgress = useEstimatedProgress(outlineStatus === 'generating');
+  const qualityProgress = useEstimatedProgress(qualityCheckStatus === 'checking');
+  const localOperationProgress = useEstimatedProgress(localOperationStatus === 'generating');
+  const allParagraphProgress = useMemo(() => {
+    if (!outline || outline.sections.length === 0) {
+      return 0;
+    }
+    const completedCount = outline.sections
+      .filter((section) => paragraphStatuses[section.heading] === 'success')
+      .length;
+    return Math.round((completedCount / outline.sections.length) * 100);
+  }, [outline, paragraphStatuses]);
 
   useEffect(() => () => {
     outlineRequestRef.current?.abort();
@@ -1106,6 +1129,16 @@ function Workbench() {
               settings={aiSettings}
               status={aiSettingsStatus}
             />
+          ) : activeView === 'templates' ? (
+            <TemplateManagementPage
+              defaultDocumentTypeCode={draft?.documentTypeCode ?? 'NOTICE'}
+              documentTypes={documentTypes}
+              onTemplateVersionCreated={async () => {
+                if (draft) {
+                  setTemplateVersions(await listTemplateVersions(draft.documentTypeCode));
+                }
+              }}
+            />
           ) : (
             <PlaceholderPage view={activeView} />
           )
@@ -1125,7 +1158,7 @@ function Workbench() {
         >
           <div className="ai-dialog-stack">
             {outlineStatus === 'generating' && (
-              <AiProgress detail="正在分析文种字段、草稿块和参考材料" label="生成提纲进度" />
+              <AiProgress detail="正在分析文种字段、草稿块和参考材料" label="生成提纲进度" value={outlineProgress} />
             )}
             {outlineStatus === 'error' && (
               <StatusMessage title={outlineError} tone="warning">
@@ -1151,7 +1184,7 @@ function Workbench() {
                   </Button>
                 </div>
                 {allParagraphStatus === 'generating' && (
-                  <AiProgress detail="按提纲顺序逐段保存到 Word 预览" label="正文生成进度" />
+                  <AiProgress detail="按提纲顺序逐段保存到 Word 预览" label="正文生成进度" value={allParagraphProgress} />
                 )}
                 {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
                 {outline.sections.map((section, index) => (
@@ -1205,7 +1238,7 @@ function Workbench() {
         >
           <div className="ai-dialog-stack">
             {qualityCheckStatus === 'checking' && (
-              <AiProgress detail="正在检查必填字段、正文结构、材料依据和表达风险" label="运行质检进度" />
+              <AiProgress detail="正在检查必填字段、正文结构、材料依据和表达风险" label="运行质检进度" value={qualityProgress} />
             )}
             {qualityCheckStatus === 'error' && (
               <StatusMessage title={qualityCheckError} tone="warning">
@@ -1247,7 +1280,11 @@ function Workbench() {
         >
           <div className="ai-dialog-stack">
             {localOperationStatus === 'generating' && (
-              <AiProgress detail={`正在生成${localOperationLabel(localOperationType)}建议，不会直接覆盖原文`} label="生成段落建议进度" />
+              <AiProgress
+                detail={`正在生成${localOperationLabel(localOperationType)}建议，不会直接覆盖原文`}
+                label="生成段落建议进度"
+                value={localOperationProgress}
+              />
             )}
             {localOperationError && (
               <StatusMessage title={localOperationError} tone="warning">
@@ -1407,6 +1444,378 @@ function OverviewPage({
           </div>
           <StatusMessage title="提纲生成与逐段正文生成已接入。" tone="success" />
         </div>
+      </section>
+    </main>
+  );
+}
+
+function TemplateManagementPage({
+  defaultDocumentTypeCode,
+  documentTypes,
+  onTemplateVersionCreated,
+}: {
+  defaultDocumentTypeCode: string;
+  documentTypes: DocumentType[];
+  onTemplateVersionCreated: () => Promise<void>;
+}) {
+  const { showToast } = useToast();
+  const fallbackDocumentTypes = documentTypes.length > 0 ? documentTypes : [{ code: defaultDocumentTypeCode, name: '通知' }];
+  const [documentTypeCode, setDocumentTypeCode] = useState<string | null>(null);
+  const [pageMode, setPageMode] = useState<'folders' | 'list' | 'create'>('folders');
+  const [templateName, setTemplateName] = useState('');
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [versions, setVersions] = useState<TemplateVersionSummary[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [profile, setProfile] = useState<TemplateProfile | null>(null);
+  const [uploadResult, setUploadResult] = useState<TemplateUploadResult | null>(null);
+  const [selectedTemplateFile, setSelectedTemplateFile] = useState<File | null>(null);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'uploading' | 'error'>('loading');
+  const [message, setMessage] = useState('正在加载模板');
+  const activeDocumentType = fallbackDocumentTypes.find((type) => type.code === documentTypeCode);
+  const activeDocumentTypeCode = documentTypeCode ?? defaultDocumentTypeCode;
+  const versionsByTemplateId = useMemo(() => {
+    const grouped = new Map<number, TemplateVersionSummary[]>();
+    versions.forEach((version) => {
+      const items = grouped.get(version.templateId) ?? [];
+      items.push(version);
+      grouped.set(version.templateId, items);
+    });
+    grouped.forEach((items) => {
+      items.sort((left, right) => right.versionNo - left.versionNo);
+    });
+    return grouped;
+  }, [versions]);
+
+  useEffect(() => {
+    if (!documentTypeCode) {
+      setStatus('idle');
+      setMessage('请选择文种');
+      return undefined;
+    }
+    const code = documentTypeCode;
+    let mounted = true;
+    async function loadTemplates() {
+      try {
+        setStatus('loading');
+        const [loadedTemplates, loadedVersions] = await Promise.all([
+          listTemplates(code),
+          listTemplateVersions(code),
+        ]);
+        if (!mounted) {
+          return;
+        }
+        setTemplates(loadedTemplates);
+        setVersions(loadedVersions);
+        setSelectedTemplateId((current) => {
+          if (current && loadedTemplates.some((template) => template.id === current)) {
+            return current;
+          }
+          return null;
+        });
+        setStatus('idle');
+        setMessage('模板已加载');
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        const errorMessage = error instanceof Error ? error.message : '模板加载失败';
+        setStatus('error');
+        setMessage(errorMessage);
+      }
+    }
+    void loadTemplates();
+    return () => {
+      mounted = false;
+    };
+  }, [documentTypeCode]);
+
+  function handleSelectDocumentType(code: string) {
+    setDocumentTypeCode(code);
+    setPageMode('list');
+    setTemplateName('');
+    setSelectedTemplateId(null);
+    setProfile(null);
+    setUploadResult(null);
+    setSelectedTemplateFile(null);
+  }
+
+  function handleBackToFolders() {
+    setPageMode('folders');
+    setDocumentTypeCode(null);
+    setTemplateName('');
+    setSelectedTemplateId(null);
+    setProfile(null);
+    setUploadResult(null);
+    setSelectedTemplateFile(null);
+    setTemplates([]);
+    setVersions([]);
+  }
+
+  function handleStartCreate(template?: TemplateSummary) {
+    setSelectedTemplateId(template?.id ?? null);
+    setTemplateName(template?.templateName ?? '');
+    setProfile(null);
+    setUploadResult(null);
+    setSelectedTemplateFile(null);
+    setPageMode('create');
+  }
+
+  async function handleViewProfile(version: TemplateVersionSummary) {
+    try {
+      setStatus('loading');
+      const parsedProfile = await getTemplateProfile(version.templateVersionId);
+      setProfile(parsedProfile);
+      setUploadResult(null);
+      setStatus('idle');
+      setMessage(`${version.templateName} v${version.versionNo} 解析结果已加载`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '解析结果加载失败';
+      setStatus('error');
+      setMessage(errorMessage);
+      showToast({ title: errorMessage, tone: 'error' });
+    }
+  }
+
+  function handleSelectTemplateFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    setSelectedTemplateFile(file);
+  }
+
+  async function handleConfirmUpload() {
+    const file = selectedTemplateFile;
+    if (!file) {
+      showToast({ title: '请先选择 Word 模板文件', tone: 'error' });
+      return;
+    }
+    try {
+      setStatus('uploading');
+      const name = templateName.trim() || file.name.replace(/\.docx$/i, '');
+      const template = selectedTemplateId
+        ? templates.find((candidate) => candidate.id === selectedTemplateId) ?? await createTemplate(name, activeDocumentTypeCode)
+        : await createTemplate(name, activeDocumentTypeCode);
+      setSelectedTemplateId(template.id);
+      const result = await uploadTemplateVersion(template.id, file);
+      const parsedProfile = await getTemplateProfile(result.templateVersionId);
+      const [loadedTemplates, loadedVersions] = await Promise.all([
+        listTemplates(activeDocumentTypeCode),
+        listTemplateVersions(activeDocumentTypeCode),
+      ]);
+      setTemplates(loadedTemplates);
+      setVersions(loadedVersions);
+      setUploadResult(result);
+      setProfile(parsedProfile);
+      setPageMode('list');
+      setStatus('idle');
+      setMessage('模板已解析');
+      await onTemplateVersionCreated();
+      showToast({ title: '模板版本已上传', description: `${name} v${result.versionNo}`, tone: 'success' });
+      setSelectedTemplateFile(null);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '模板上传失败';
+      setStatus('error');
+      setMessage(errorMessage);
+      showToast({ title: errorMessage, tone: 'error' });
+    }
+  }
+
+  return (
+    <main className="settings-page" aria-label="模板管理">
+      <section className="settings-panel template-admin-panel">
+        <div className="settings-header">
+          <div>
+            <div className="eyebrow">模板库</div>
+            <h2>
+              {pageMode === 'create' ? (selectedTemplateId ? '上传新版本' : '新增模板') : '模板管理'}
+              {activeDocumentType && <span className="template-title-suffix"> - {activeDocumentType.name}</span>}
+            </h2>
+            <p>{activeDocumentType ? '新增模板后会解析占位符和风险。' : '先选择文种，再管理该文种下的模板。'}</p>
+          </div>
+          {pageMode !== 'folders' && (
+            <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+              {status === 'uploading' ? '解析中' : `${templates.length} 个模板 · ${versions.length} 个版本`}
+            </span>
+          )}
+        </div>
+
+        {pageMode === 'folders' && (
+          <div className="template-folder-grid">
+            {fallbackDocumentTypes.map((type) => (
+              <button
+                className="template-folder-card"
+                key={type.code}
+                onClick={() => handleSelectDocumentType(type.code)}
+                type="button"
+              >
+                <FolderOpen aria-hidden="true" />
+                <span>{type.name}</span>
+                <small>{type.code}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {pageMode === 'list' && (
+          <>
+            <div className="template-list-toolbar">
+              <Button icon={<ArrowLeft aria-hidden="true" />} onClick={handleBackToFolders} variant="secondary">
+                返回文种
+              </Button>
+              <Button icon={<Plus aria-hidden="true" />} onClick={() => handleStartCreate()}>
+                新增模板
+              </Button>
+            </div>
+
+            {status === 'error' && <StatusMessage title={message} tone="warning" />}
+
+            {status === 'loading' && templates.length === 0 ? (
+              <div className="template-card-grid" aria-live="polite">
+                <div className="template-card skeleton-row" />
+                <div className="template-card skeleton-row" />
+              </div>
+            ) : templates.length === 0 ? (
+              <div className="template-empty-panel">
+                <FileText aria-hidden="true" />
+                <div>
+                  <strong>暂无模板</strong>
+                  <span>为{activeDocumentType?.name ?? activeDocumentTypeCode}上传第一个 Word 模板。</span>
+                </div>
+              </div>
+            ) : (
+              <div className="template-card-grid">
+                {templates.map((template) => {
+                  const templateVersions = versionsByTemplateId.get(template.id) ?? [];
+                  const latestVersion = templateVersions[0];
+                  return (
+                    <article className="template-card" key={template.id}>
+                      <div className="template-card-title">
+                        <FileText aria-hidden="true" />
+                        <div>
+                          <h3>{template.templateName}</h3>
+                          <span>{template.status} · {templateVersions.length} 个版本</span>
+                        </div>
+                      </div>
+                      <p>{latestVersion ? `最新版本 v${latestVersion.versionNo} · ${latestVersion.originalFileName}` : '尚未上传 Word 版本'}</p>
+                      <div className="template-card-actions">
+                        <Button disabled={!latestVersion || status === 'loading'} icon={<Eye aria-hidden="true" />} onClick={() => latestVersion && handleViewProfile(latestVersion)} variant="secondary">
+                          解析结果
+                        </Button>
+                        <Button disabled={status === 'loading'} icon={<Upload aria-hidden="true" />} onClick={() => handleStartCreate(template)} variant="ghost">
+                          上传新版本
+                        </Button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {pageMode === 'create' && (
+          <>
+            <div className="template-list-toolbar">
+              <div className="template-toolbar-context">
+                <Button icon={<ArrowLeft aria-hidden="true" />} onClick={() => setPageMode('list')} variant="secondary">
+                  返回模板
+                </Button>
+              </div>
+            </div>
+
+            {status === 'error' && <StatusMessage title={message} tone="warning" />}
+
+            <div className="settings-grid">
+              <TextField
+                disabled
+                label="文种"
+                value={activeDocumentType?.name ?? activeDocumentTypeCode}
+              />
+              <TextField
+                disabled={status === 'uploading' || selectedTemplateId !== null}
+                label="模板名称"
+                onChange={(event) => setTemplateName(event.target.value)}
+                placeholder="如：通知标准模板"
+                value={templateName}
+              />
+            </div>
+
+            <div className="template-upload-row">
+              <input
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                aria-label="上传 Word 模板"
+                className="visually-hidden"
+                disabled={status === 'uploading'}
+                id="template-version-upload"
+                onChange={handleSelectTemplateFile}
+                type="file"
+              />
+              <label
+                aria-disabled={status === 'uploading'}
+                className="ui-button ui-button-secondary upload-label"
+                htmlFor="template-version-upload"
+              >
+                <Upload aria-hidden="true" />
+                {selectedTemplateFile ? selectedTemplateFile.name : '选择 Word 模板'}
+              </label>
+              <Button
+                disabled={!selectedTemplateFile || status === 'uploading'}
+                icon={<CheckCircle2 aria-hidden="true" />}
+                isLoading={status === 'uploading'}
+                loadingLabel="正在解析"
+                onClick={handleConfirmUpload}
+              >
+                确认创建并解析
+              </Button>
+            </div>
+          </>
+        )}
+
+        {uploadResult && (
+          <div className="template-profile-summary">
+            <div className="metric-card">
+              <span>占位符</span>
+              <strong>{uploadResult.placeholderCount}</strong>
+            </div>
+            <div className="metric-card">
+              <span>样式</span>
+              <strong>{uploadResult.styleCount}</strong>
+            </div>
+            <div className="metric-card">
+              <span>风险</span>
+              <strong>{uploadResult.validationCount}</strong>
+            </div>
+          </div>
+        )}
+
+        {profile && (
+          <div className="template-profile-grid">
+            <section className="template-profile-box">
+              <h3>占位符</h3>
+              {profile.placeholders.length === 0 ? (
+                <p className="empty-note">未解析到占位符。</p>
+              ) : profile.placeholders.map((placeholder) => (
+                <div className="template-profile-item" key={`${placeholder.key}-${placeholder.paragraphKey}`}>
+                  <ClipboardList aria-hidden="true" />
+                  <span>{placeholder.key}</span>
+                  {placeholder.splitAcrossRuns && <small>跨 run</small>}
+                </div>
+              ))}
+            </section>
+            <section className="template-profile-box">
+              <h3>解析风险</h3>
+              {profile.validationItems.length === 0 ? (
+                <p className="empty-note">未发现解析风险。</p>
+              ) : profile.validationItems.map((item) => (
+                <div className="template-profile-risk" key={`${item.code}-${item.message}`}>
+                  <strong>{item.code}</strong>
+                  <span>{item.message}</span>
+                </div>
+              ))}
+            </section>
+          </div>
+        )}
       </section>
     </main>
   );
@@ -1586,18 +1995,54 @@ function QualityCheckItemView({ item }: { item: QualityCheckItem }) {
   );
 }
 
-function AiProgress({ detail, label }: { detail: string; label: string }) {
+function AiProgress({ detail, label, value }: { detail: string; label: string; value: number }) {
+  const normalizedValue = Math.min(100, Math.max(0, Math.round(value)));
+
   return (
-    <div className="ai-progress" role="progressbar" aria-label={label} aria-valuetext={detail}>
+    <div
+      aria-label={label}
+      aria-valuemax={100}
+      aria-valuemin={0}
+      aria-valuenow={normalizedValue}
+      aria-valuetext={`${detail}，${normalizedValue}%`}
+      className="ai-progress"
+      role="progressbar"
+    >
       <div className="ai-progress-header">
         <span>{detail}</span>
-        <span>进行中</span>
+        <span>{normalizedValue}%</span>
       </div>
       <div className="ai-progress-track" aria-hidden="true">
-        <span className="ai-progress-bar" />
+        <span className="ai-progress-bar" style={{ width: `${normalizedValue}%` }} />
       </div>
     </div>
   );
+}
+
+function useEstimatedProgress(isActive: boolean) {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (!isActive) {
+      setProgress(0);
+      return undefined;
+    }
+
+    setProgress(0);
+    const intervalId = window.setInterval(() => {
+      setProgress((current) => {
+        if (current >= 92) {
+          return current;
+        }
+        const increment = Math.max(4, Math.round((92 - current) * 0.18));
+        return Math.min(92, current + increment);
+      });
+    }, 400);
+
+    return () => window.clearInterval(intervalId);
+  }, [isActive]);
+
+  return progress;
 }
 
 function qualitySummary(result: QualityCheckResult) {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   Button,
   ConfirmDialog,
+  Dialog,
   EmptyState,
   Panel,
   SelectField,
@@ -104,5 +105,24 @@ describe('UI primitives', () => {
     expect(screen.getByText('建议内容不会写入草稿。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '继续编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '放弃建议' })).toHaveClass('ui-button-danger');
+  });
+
+  it('locks page scroll while a dialog is open and restores it after close', () => {
+    const originalOverflow = document.body.style.overflow;
+    const { rerender } = render(
+      <Dialog onClose={() => undefined} open title="生成提纲">
+        内容
+      </Dialog>,
+    );
+
+    expect(document.body.style.overflow).toBe('hidden');
+
+    rerender(
+      <Dialog onClose={() => undefined} open={false} title="生成提纲">
+        内容
+      </Dialog>,
+    );
+
+    expect(document.body.style.overflow).toBe(originalOverflow);
   });
 });

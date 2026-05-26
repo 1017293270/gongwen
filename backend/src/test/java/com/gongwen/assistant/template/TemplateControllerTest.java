@@ -30,6 +30,9 @@ class TemplateControllerTest {
     @MockBean
     private TemplateVersionRepository versionRepository;
 
+    @MockBean
+    private TemplateRepository templateRepository;
+
     @Test
     void parsesUploadedTemplatePlaceholders() throws Exception {
         byte[] template = DocxTestFactory.docxWithParagraphs("{{标题}}", "{{正文}}");

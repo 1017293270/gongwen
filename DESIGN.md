@@ -4,6 +4,12 @@ Source style: Anthropic-inspired, derived from public Anthropic and Claude web s
 
 This file is the concrete UI contract for the project. Frontend code must use these tokens and rules instead of inventing ad hoc colors, spacing, or component styles.
 
+Global style rule:
+
+- All regular UI must use global components and global styles first, including buttons, form fields, status messages, cards, empty states, dialogs, toasts, layout shells, and interaction states.
+- Do not create page-local classes that override common component color, font size, icon size, padding, alignment, hover, focus, disabled, or loading states.
+- Page-local CSS is allowed only for genuinely special business layout or one-off structure that global components cannot express. Even then, it must use the tokens in this file and must not use broad child selectors such as `.page span` that can accidentally override global components.
+
 ## 1. Visual Theme & Atmosphere
 
 The interface should feel like a quiet professional writing room: warm ivory surfaces, dark ink text, restrained borders, strong readability, and low visual noise. The product is for public-sector and enterprise document work, so the UI must feel trustworthy, calm, and precise.
@@ -520,4 +526,3 @@ Observed public source references:
 - Claude product pages use the same restrained surface language with stronger product accent colors.
 
 This design system is inspired by those public surfaces and adapted for a Chinese enterprise/government document workbench. It must not claim official Anthropic branding or use proprietary brand assets unless the project has explicit rights.
-

@@ -37,6 +37,38 @@ export type TemplateVersionSummary = {
   originalFileName: string;
 };
 
+export type TemplateSummary = {
+  id: number;
+  templateName: string;
+  documentTypeCode: string | null;
+  status: string;
+};
+
+export type TemplateUploadResult = {
+  templateVersionId: number;
+  versionNo: number;
+  parseStatus: string;
+  placeholderCount: number;
+  styleCount: number;
+  validationCount: number;
+  validationCodes: string[];
+};
+
+export type TemplateProfile = {
+  schemaVersion: number;
+  placeholders: Array<{
+    key: string;
+    locationType: string;
+    paragraphKey: string;
+    splitAcrossRuns: boolean;
+  }>;
+  validationItems: Array<{
+    severity: string;
+    code: string;
+    message: string;
+  }>;
+};
+
 export type DraftBlockUpdate = {
   blockType: string;
   content: string;
