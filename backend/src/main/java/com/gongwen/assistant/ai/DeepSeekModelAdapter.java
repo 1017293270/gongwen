@@ -85,6 +85,26 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         return new AiLocalOperationModelResponse(payload.suggestionText());
     }
 
+    @Override
+    public AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
+        DeepSeekQualityPayload payload = postJson(
+                List.of(
+                        Map.of("role", "system", "content", systemPrompt("你负责审阅中文公文草稿，给出克制、可执行的质检建议。")),
+                        Map.of("role", "user", "content", qualityReviewUserPrompt(prompt))
+                ),
+                DeepSeekQualityPayload.class
+        );
+        return new AiQualityReviewResponse(payload.suggestions().stream()
+                .map(suggestion -> new AiQualitySuggestion(
+                        suggestion.severity(),
+                        suggestion.category(),
+                        suggestion.code(),
+                        suggestion.message(),
+                        suggestion.suggestion()
+                ))
+                .toList());
+    }
+
     public AiProviderStatus testConnection() {
         long startedAt = System.currentTimeMillis();
         DeepSeekRuntimeConfig config = configurationState.deepSeekRuntimeConfig();
@@ -217,6 +237,41 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         );
     }
 
+    private String qualityReviewUserPrompt(QualityCheckPrompt prompt) {
+        return """
+                请审阅以下中文公文草稿，返回 JSON：
+                {
+                  "suggestions": [
+                    {
+                      "severity": "INFO|WARNING|ERROR",
+                      "category": "AI_EXPRESSION|AI_STRUCTURE|AI_RISK|AI_MATERIAL",
+                      "code": "稳定的大写英文代码",
+                      "message": "面向起草人的问题描述",
+                      "suggestion": "具体修改建议"
+                    }
+                  ]
+                }
+                要求：
+                1. 不要重复规则检查已发现的问题，重点看表达、语气、结构衔接、事实风险和公文规范性。
+                2. 不要直接重写全文，不要输出 Markdown。
+                3. 不要编造材料中不存在的事实；事实不足时给出补充材料建议。
+                4. 最多返回 5 条建议，severity 只允许 INFO、WARNING、ERROR。
+                文种：%s
+                标题：%s
+                字段摘要：%s
+                正文摘要：%s
+                材料摘要：%s
+                已有规则检查：%s
+                """.formatted(
+                prompt.documentTypeCode(),
+                prompt.title(),
+                prompt.fieldSummaries(),
+                prompt.bodySummaries(),
+                prompt.materialSummaries(),
+                prompt.ruleSummaries()
+        );
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DeepSeekChatResponse(List<DeepSeekChoice> choices) {
         private String firstContent() {
@@ -260,5 +315,22 @@ public class DeepSeekModelAdapter implements ModelAdapter {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DeepSeekLocalOperationPayload(String suggestionText) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekQualityPayload(List<DeepSeekQualitySuggestionPayload> suggestions) {
+        private DeepSeekQualityPayload {
+            suggestions = suggestions == null ? List.of() : suggestions;
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekQualitySuggestionPayload(
+            String severity,
+            String category,
+            String code,
+            String message,
+            String suggestion
+    ) {
     }
 }

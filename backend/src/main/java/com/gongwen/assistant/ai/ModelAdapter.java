@@ -14,4 +14,8 @@ public interface ModelAdapter {
     default AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
         throw new ModelAdapterException("MODEL_UNSUPPORTED_TASK", "模型暂不支持局部改写");
     }
+
+    default AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
+        throw new ModelAdapterException("MODEL_UNSUPPORTED_TASK", "模型暂不支持质检");
+    }
 }

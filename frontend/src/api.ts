@@ -12,6 +12,7 @@ import type {
   DraftBlockUpdate,
   DraftDetail,
   Material,
+  QualityCheckResult,
 } from './draftTypes';
 
 function apiBaseUrl() {
@@ -115,6 +116,17 @@ export function generateLocalOperation(
       instruction,
     }),
   });
+}
+
+export function runQualityCheck(draftId: number) {
+  return requestJson<QualityCheckResult>(`/api/drafts/${draftId}/quality-check`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function getLatestQualityCheck(draftId: number) {
+  return requestJson<QualityCheckResult>(`/api/drafts/${draftId}/quality-check/latest`);
 }
 
 export function getAiProviderSettings() {

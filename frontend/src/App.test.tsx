@@ -431,6 +431,57 @@ describe('App', () => {
     expect(screen.queryByText('即将放弃的建议')).not.toBeInTheDocument();
   });
 
+  it('runs quality check and shows blocking rule errors with AI suggestions', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('质检草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({
+        id: '22222222-2222-2222-2222-222222222222',
+        draftId: 1,
+        status: 'ERROR',
+        exportBlocked: true,
+        aiTraceId: '33333333-3333-3333-3333-333333333333',
+        checkedAt: '2026-05-26T10:00:00Z',
+        items: [
+          {
+            severity: 'ERROR',
+            category: 'REQUIRED_FIELD',
+            code: 'REQUIRED_RECIPIENT_MISSING',
+            message: '主送对象不能为空。',
+            targetBlockType: 'RECIPIENT',
+            targetBlockId: 2,
+            suggestion: '请先补齐该字段后再导出。',
+          },
+          {
+            severity: 'WARNING',
+            category: 'AI_EXPRESSION',
+            code: 'AI_EXPRESSION_CLARITY',
+            message: '责任要求还可以更明确。',
+            targetBlockType: null,
+            targetBlockId: null,
+            suggestion: '建议补充责任部门和完成时限。',
+          },
+        ],
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await screen.findByDisplayValue('质检草稿');
+    await userEvent.click(within(screen.getByLabelText('基础质检')).getByRole('button', { name: '运行质检' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(await within(screen.getByLabelText('基础质检')).findByText('主送对象不能为空。')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('基础质检')).getByText('责任要求还可以更明确。')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('基础质检')).getByText('存在 ERROR 项，后续导出前需要先处理。')).toBeInTheDocument();
+  });
+
   it('shows retry state when outline generation fails', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([

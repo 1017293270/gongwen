@@ -22,6 +22,7 @@ import {
   getDraft,
   listDocumentTypes,
   listDraftMaterials,
+  runQualityCheck,
   saveDraftBlocks,
   testAiProviderConnection,
   updateAiProviderSettings,
@@ -47,6 +48,8 @@ import type {
   DraftBlockUpdate,
   DraftDetail,
   Material,
+  QualityCheckItem,
+  QualityCheckResult,
 } from './draftTypes';
 
 const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
@@ -66,6 +69,7 @@ type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
 type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
+type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
 type AppView = 'overview' | 'workbench' | 'drafts' | 'templates' | 'materials' | 'exports' | 'ai-tasks' | 'settings';
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
 
@@ -132,6 +136,9 @@ function Workbench() {
   const [localOperationStatus, setLocalOperationStatus] = useState<LocalOperationStatus>('idle');
   const [localOperationError, setLocalOperationError] = useState('');
   const [localOperationSuggestion, setLocalOperationSuggestion] = useState<AiLocalOperation | null>(null);
+  const [qualityCheck, setQualityCheck] = useState<QualityCheckResult | null>(null);
+  const [qualityCheckStatus, setQualityCheckStatus] = useState<QualityCheckStatus>('idle');
+  const [qualityCheckError, setQualityCheckError] = useState('');
   const [discardSuggestionConfirmOpen, setDiscardSuggestionConfirmOpen] = useState(false);
   const paragraphRefs = useRef<Record<number, HTMLElement | null>>({});
   const [aiSettings, setAiSettings] = useState<AiProviderSettings>(DEFAULT_AI_SETTINGS);
@@ -466,6 +473,30 @@ function Workbench() {
       const message = error instanceof Error ? error.message : '段落建议生成失败';
       setLocalOperationStatus('error');
       setLocalOperationError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleRunQualityCheck() {
+    if (!draft) {
+      return;
+    }
+
+    try {
+      setQualityCheckStatus('checking');
+      setQualityCheckError('');
+      const result = await runQualityCheck(draft.id);
+      setQualityCheck(result);
+      setQualityCheckStatus('success');
+      showToast({
+        title: result.exportBlocked ? '质检发现需处理问题' : '质检完成',
+        description: qualitySummary(result),
+        tone: result.exportBlocked ? 'error' : 'success',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '质检失败';
+      setQualityCheckStatus('error');
+      setQualityCheckError(message);
       showToast({ title: message, tone: 'error' });
     }
   }
@@ -885,6 +916,45 @@ function Workbench() {
                 )}
               </div>
             )}
+            <div className="quality-check" aria-label="基础质检">
+              <div className="quality-check-header">
+                <div>
+                  <div className="outline-title">基础质检</div>
+                  <div className="panel-kicker">
+                    {qualityCheck ? qualitySummary(qualityCheck) : '规则检查 + AI 表达建议'}
+                  </div>
+                </div>
+                {qualityCheck && (
+                  <span className={`quality-badge ${qualityCheck.status.toLowerCase()}`}>
+                    {qualityStatusLabel(qualityCheck.status)}
+                  </span>
+                )}
+              </div>
+              <Button
+                disabled={!draft || qualityCheckStatus === 'checking' || status === 'loading'}
+                icon={<CheckCircle2 aria-hidden="true" />}
+                isLoading={qualityCheckStatus === 'checking'}
+                loadingLabel="正在质检"
+                onClick={() => void handleRunQualityCheck()}
+                variant="secondary"
+              >
+                {qualityCheckStatus === 'error' ? '重试质检' : '运行质检'}
+              </Button>
+              {qualityCheckStatus === 'error' && <StatusMessage title={qualityCheckError} tone="warning" />}
+              {qualityCheck?.exportBlocked && (
+                <StatusMessage title="存在 ERROR 项，后续导出前需要先处理。" tone="warning" />
+              )}
+              {qualityCheck && qualityCheck.items.length === 0 && (
+                <StatusMessage title="未发现阻断问题，AI 暂无额外建议。" tone="success" />
+              )}
+              {qualityCheck && qualityCheck.items.length > 0 && (
+                <div className="quality-list">
+                  {qualityCheck.items.map((item) => (
+                    <QualityCheckItemView item={item} key={`${item.code}-${item.targetBlockId ?? 'draft'}`} />
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="local-operation" aria-label="局部段落操作">
               <div className="local-operation-header">
                 <div>
@@ -1256,6 +1326,51 @@ function viewTitle(view: AppView) {
 
 function viewSubtitle(view: AppView) {
   return NAV_ITEMS.find((item) => item.view === view)?.description ?? '近期工作与状态';
+}
+
+function QualityCheckItemView({ item }: { item: QualityCheckItem }) {
+  const Icon = item.severity === 'ERROR' ? AlertCircle : CheckCircle2;
+  return (
+    <div className={`quality-item ${item.severity.toLowerCase()}`}>
+      <Icon aria-hidden="true" className="quality-item-icon" />
+      <div>
+        <div className="quality-item-title">{item.message}</div>
+        {item.suggestion && <div className="quality-item-suggestion">{item.suggestion}</div>}
+        <div className="quality-item-meta">
+          {qualitySeverityLabel(item.severity)} · {qualityCategoryLabel(item.category)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function qualitySummary(result: QualityCheckResult) {
+  const errorCount = result.items.filter((item) => item.severity === 'ERROR').length;
+  const warningCount = result.items.filter((item) => item.severity === 'WARNING').length;
+  const infoCount = result.items.filter((item) => item.severity === 'INFO').length;
+  return `错误 ${errorCount} · 警告 ${warningCount} · 建议 ${infoCount}`;
+}
+
+function qualityStatusLabel(status: QualityCheckResult['status']) {
+  return status === 'PASS' ? '通过' : status === 'WARNING' ? '有建议' : '需处理';
+}
+
+function qualitySeverityLabel(severity: QualityCheckItem['severity']) {
+  return severity === 'ERROR' ? '错误' : severity === 'WARNING' ? '警告' : '建议';
+}
+
+function qualityCategoryLabel(category: string) {
+  const labels: Record<string, string> = {
+    REQUIRED_FIELD: '必填字段',
+    STRUCTURE: '结构完整性',
+    MATERIAL: '材料依据',
+    AI_EXPRESSION: 'AI 表达建议',
+    AI_STRUCTURE: 'AI 结构建议',
+    AI_RISK: 'AI 风险建议',
+    AI_MATERIAL: 'AI 材料建议',
+    AI_SERVICE: 'AI 服务',
+  };
+  return labels[category] ?? category;
 }
 
 function paragraphDisplayTitle(block: DraftBlock, index: number) {

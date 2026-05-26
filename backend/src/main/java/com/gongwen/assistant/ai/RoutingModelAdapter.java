@@ -45,6 +45,11 @@ public class RoutingModelAdapter implements ModelAdapter {
         return activeAdapter().generateLocalOperation(prompt);
     }
 
+    @Override
+    public AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
+        return activeAdapter().generateQualityReview(prompt);
+    }
+
     private ModelAdapter activeAdapter() {
         return configurationState.useDeepSeek() ? deepSeekModelAdapter : mockModelAdapter;
     }

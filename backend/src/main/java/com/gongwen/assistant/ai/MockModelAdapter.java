@@ -68,6 +68,30 @@ public class MockModelAdapter implements ModelAdapter {
         return new AiLocalOperationModelResponse(suggestion);
     }
 
+    @Override
+    public AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
+        List<AiQualitySuggestion> suggestions = new ArrayList<>();
+        if (!prompt.bodySummaries().isEmpty()) {
+            suggestions.add(new AiQualitySuggestion(
+                    "WARNING",
+                    "AI_EXPRESSION",
+                    "AI_EXPRESSION_CLARITY",
+                    "建议进一步压实责任表述，避免只写原则性要求。",
+                    "可补充牵头部门、完成时限和反馈方式。"
+            ));
+        }
+        if (prompt.materialSummaries().isEmpty()) {
+            suggestions.add(new AiQualitySuggestion(
+                    "INFO",
+                    "AI_MATERIAL",
+                    "AI_MATERIAL_REFERENCE",
+                    "当前未看到 READY 材料摘要，建议补充依据材料后再定稿。",
+                    "上传会议纪要、制度依据或工作方案后再运行质检。"
+            ));
+        }
+        return new AiQualityReviewResponse(suggestions);
+    }
+
     private boolean isBlankField(OutlinePrompt prompt, String blockType) {
         return prompt.fieldSummaries().stream()
                 .filter(summary -> summary.startsWith(blockType + ":"))

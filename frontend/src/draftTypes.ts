@@ -72,6 +72,26 @@ export type AiLocalOperation = {
   suggestionText: string;
 };
 
+export type QualityCheckItem = {
+  severity: 'ERROR' | 'WARNING' | 'INFO';
+  category: string;
+  code: string;
+  message: string;
+  targetBlockType: string | null;
+  targetBlockId: number | null;
+  suggestion: string;
+};
+
+export type QualityCheckResult = {
+  id: string;
+  draftId: number;
+  status: 'PASS' | 'WARNING' | 'ERROR';
+  exportBlocked: boolean;
+  aiTraceId: string | null;
+  checkedAt: string;
+  items: QualityCheckItem[];
+};
+
 export type AiProviderSettings = {
   provider: 'mock' | 'deepseek';
   deepSeekEnabled: boolean;

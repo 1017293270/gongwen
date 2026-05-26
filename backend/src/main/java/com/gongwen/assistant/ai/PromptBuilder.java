@@ -11,6 +11,7 @@ public class PromptBuilder {
     public static final String OUTLINE_PROMPT_VERSION = "outline-v1";
     public static final String PARAGRAPH_PROMPT_VERSION = "paragraph-v1";
     public static final String LOCAL_OPERATION_PROMPT_VERSION = "local-operation-v1";
+    public static final String QUALITY_CHECK_PROMPT_VERSION = "quality-check-v1";
     private static final int BLOCK_TEXT_LIMIT = 160;
     private static final int MATERIAL_TEXT_LIMIT = 240;
 
@@ -115,6 +116,45 @@ public class PromptBuilder {
                         materials.size(),
                         materialSummaries.stream().mapToInt(String::length).sum(),
                         instruction.length()
+                )
+        );
+    }
+
+    public QualityCheckPrompt buildQualityCheckPrompt(
+            DraftDetailDto draft,
+            List<MaterialPromptSummary> materials,
+            List<String> ruleSummaries
+    ) {
+        List<String> fieldSummaries = draft.blocks().stream()
+                .filter(block -> !"BODY_PARAGRAPH".equals(block.blockType()))
+                .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
+                .toList();
+        List<String> bodySummaries = draft.blocks().stream()
+                .filter(block -> "BODY_PARAGRAPH".equals(block.blockType()))
+                .map(block -> "sortOrder=" + block.sortOrder() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
+                .toList();
+        List<String> materialSummaries = materials.stream()
+                .map(material -> material.originalFileName() + ": " + summarize(material.text(), MATERIAL_TEXT_LIMIT))
+                .toList();
+        List<String> safeRuleSummaries = ruleSummaries == null ? List.of() : ruleSummaries.stream()
+                .filter(summary -> summary != null && !summary.isBlank())
+                .map(String::strip)
+                .toList();
+        return new QualityCheckPrompt(
+                QUALITY_CHECK_PROMPT_VERSION,
+                draft.documentTypeCode(),
+                draft.title(),
+                fieldSummaries,
+                bodySummaries,
+                materialSummaries,
+                safeRuleSummaries,
+                "documentType=%s;draftBlocks=%d;bodyBlocks=%d;materials=%d;materialSummaryChars=%d;ruleItems=%d".formatted(
+                        draft.documentTypeCode(),
+                        draft.blocks().size(),
+                        bodySummaries.size(),
+                        materials.size(),
+                        materialSummaries.stream().mapToInt(String::length).sum(),
+                        safeRuleSummaries.size()
                 )
         );
     }
