@@ -1,7 +1,9 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.support.DocxTestFactory;
 import com.gongwen.assistant.template.profile.TemplatePlaceholderProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
+import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,6 +13,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +30,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TemplateUploadServiceTest {
+    private static final String DOCX_CONTENT_TYPE =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
     @Test
     void localStorageSavesTemplateUnderConfiguredDirectory() throws IOException {
         Path storageDir = Files.createTempDirectory("template-storage-test");
@@ -114,12 +120,138 @@ class TemplateUploadServiceTest {
         assertThat(repository.findByTemplateVersionId(9L)).contains(profile);
     }
 
+    @Test
+    void uploadStoresTemplateVersionAndProfile() {
+        byte[] content = DocxTestFactory.docxWithOfficialStyles();
+        InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
+        InMemoryTemplateProfileRepository profileRepository = new InMemoryTemplateProfileRepository();
+        TemplateUploadService service = new TemplateUploadService(
+                (originalFileName, fileExtension, bytes) -> "storage/templates/notice.docx",
+                versionRepository,
+                profileRepository,
+                new TemplateProfileParser(),
+                new TemplateProperties("storage/templates", 20)
+        );
+
+        TemplateUploadResponse response = service.upload(3L, "notice.docx", DOCX_CONTENT_TYPE, content);
+
+        assertThat(response.templateVersionId()).isEqualTo(1L);
+        assertThat(response.versionNo()).isEqualTo(1);
+        assertThat(response.parseStatus()).isEqualTo("READY");
+        assertThat(response.placeholderCount()).isEqualTo(2);
+        assertThat(response.styleCount()).isEqualTo(2);
+        assertThat(response.validationCount()).isZero();
+        assertThat(response.validationCodes()).isEmpty();
+        assertThat(profileRepository.findByTemplateVersionId(1L)).isPresent();
+        assertThat(profileRepository.profileHashes.get(1L)).hasSize(64);
+        assertThat(versionRepository.findById(1L))
+                .get()
+                .extracting(TemplateVersion::parseStatus, TemplateVersion::profileHash)
+                .containsExactly("READY", profileRepository.profileHashes.get(1L));
+    }
+
+    @Test
+    void uploadRejectsNonDocxTemplate() {
+        InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
+        TemplateUploadService service = new TemplateUploadService(
+                (originalFileName, fileExtension, bytes) -> "storage/templates/bad.pdf",
+                versionRepository,
+                new InMemoryTemplateProfileRepository(),
+                new TemplateProfileParser(),
+                new TemplateProperties("storage/templates", 20)
+        );
+
+        assertThatThrownBy(() -> service.upload(3L, "bad.pdf", "application/pdf", "pdf".getBytes()))
+                .isInstanceOfSatisfying(TemplateException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo("TEMPLATE_TYPE_NOT_ALLOWED"));
+
+        assertThat(versionRepository.versions).isEmpty();
+    }
+
+    private static class InMemoryTemplateVersionRepository implements TemplateVersionRepository {
+        private final Map<Long, TemplateVersion> versions = new HashMap<>();
+        private long nextId = 1;
+
+        @Override
+        public TemplateVersion create(long templateId, String originalFileName, String contentType, long fileSizeBytes, String filePath) {
+            long id = nextId++;
+            TemplateVersion version = new TemplateVersion(
+                    id,
+                    templateId,
+                    nextVersionNo(templateId),
+                    originalFileName,
+                    contentType,
+                    fileSizeBytes,
+                    filePath,
+                    null,
+                    "PENDING",
+                    null,
+                    null,
+                    Instant.now()
+            );
+            versions.put(id, version);
+            return version;
+        }
+
+        @Override
+        public int nextVersionNo(long templateId) {
+            return (int) versions.values().stream()
+                    .filter(version -> version.templateId() == templateId)
+                    .count() + 1;
+        }
+
+        @Override
+        public Optional<TemplateVersion> findById(long id) {
+            return Optional.ofNullable(versions.get(id));
+        }
+
+        @Override
+        public void markParsed(long id, String profileHash) {
+            TemplateVersion current = versions.get(id);
+            versions.put(id, new TemplateVersion(
+                    current.id(),
+                    current.templateId(),
+                    current.versionNo(),
+                    current.originalFileName(),
+                    current.contentType(),
+                    current.fileSizeBytes(),
+                    current.filePath(),
+                    profileHash,
+                    "READY",
+                    null,
+                    null,
+                    current.createdAt()
+            ));
+        }
+
+        @Override
+        public void markFailed(long id, String errorCode, String errorMessage) {
+            TemplateVersion current = versions.get(id);
+            versions.put(id, new TemplateVersion(
+                    current.id(),
+                    current.templateId(),
+                    current.versionNo(),
+                    current.originalFileName(),
+                    current.contentType(),
+                    current.fileSizeBytes(),
+                    current.filePath(),
+                    null,
+                    "FAILED",
+                    errorCode,
+                    errorMessage,
+                    current.createdAt()
+            ));
+        }
+    }
+
     private static class InMemoryTemplateProfileRepository implements TemplateProfileRepository {
         private final Map<Long, TemplateProfile> profiles = new HashMap<>();
+        private final Map<Long, String> profileHashes = new HashMap<>();
 
         @Override
         public void save(long templateVersionId, TemplateProfile profile, String profileHash) {
             profiles.put(templateVersionId, profile);
+            profileHashes.put(templateVersionId, profileHash);
         }
 
         @Override
