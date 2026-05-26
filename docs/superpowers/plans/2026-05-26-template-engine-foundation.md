@@ -37,7 +37,7 @@ Not included:
 
 Create:
 
-- `backend/src/main/resources/db/migration/V6__template_engine_foundation.sql`  
+- `backend/src/main/resources/db/migration/V7__template_engine_foundation.sql`  
   Adds `document_template_version`, `template_profile`, `template_block_mapping`, `template_rule`, and `template_validation_result`.
 
 - `backend/src/main/java/com/gongwen/assistant/template/TemplateProperties.java`  
@@ -135,11 +135,11 @@ Modify:
 
 **Files:**
 
-- Create: `backend/src/main/resources/db/migration/V6__template_engine_foundation.sql`
+- Create: `backend/src/main/resources/db/migration/V7__template_engine_foundation.sql`
 
 - [ ] **Step 1: Write the migration**
 
-Create `backend/src/main/resources/db/migration/V6__template_engine_foundation.sql`:
+Create `backend/src/main/resources/db/migration/V7__template_engine_foundation.sql`:
 
 ```sql
 create table document_template_version (
@@ -229,7 +229,7 @@ Expected: existing parser tests still pass and Flyway migration parsing does not
 - [ ] **Step 3: Commit**
 
 ```powershell
-git add backend/src/main/resources/db/migration/V6__template_engine_foundation.sql
+git add backend/src/main/resources/db/migration/V7__template_engine_foundation.sql
 git commit -m "feat: add template engine schema"
 ```
 
