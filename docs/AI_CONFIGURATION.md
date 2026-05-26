@@ -16,11 +16,12 @@
 - 后端新增模型路由层，提纲生成和逐段正文生成都通过统一 `ModelAdapter` 入口。
 - DeepSeek 通过 OpenAI 兼容 `/chat/completions` 接入。
 - DeepSeek 输出要求为 JSON，并在后端解析成已有提纲和段落响应结构。
-- API Key 只存在当前后端运行时内存和环境变量中，不写入数据库，不写入 trace，不出现在响应明文里。
+- AI 配置持久化到数据库，后端重启后会优先读取已保存配置。
+- DeepSeek API Key 会以 AES-GCM 加密密文保存到数据库，密钥文件默认位于 `storage/ai-settings.key`，该目录不提交。
+- API Key 不写入 trace，不出现在响应明文里。
 
 当前没有完成：
 
-- AI 配置持久化到数据库。
 - 多用户/多角色下的系统设置权限控制。
 - DeepSeek 账单、额度、模型列表远程拉取。
 - 流式输出。
@@ -113,6 +114,10 @@
 - `backend/src/main/java/com/gongwen/assistant/ai/AiProviderSettings.java`
 - `backend/src/main/java/com/gongwen/assistant/ai/AiProviderSettingsUpdateRequest.java`
 - `backend/src/main/java/com/gongwen/assistant/ai/AiProviderStatus.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsRepository.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/JdbcAiSettingsRepository.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsSecretCodec.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsSnapshot.java`
 - `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsController.java`
 - `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsService.java`
 - `backend/src/main/java/com/gongwen/assistant/ai/DeepSeekRuntimeConfig.java`
@@ -138,6 +143,7 @@ Controller
 application.yml / environment
 -> AiRuntimeProperties
 -> AiConfigurationState
+-> ai_provider_settings
 -> AiSettingsController
 -> RoutingModelAdapter
 ```
@@ -148,6 +154,7 @@ application.yml / environment
 
 ```env
 GONGWEN_AI_PROVIDER=mock
+GONGWEN_AI_SETTINGS_KEY_FILE=storage/ai-settings.key
 GONGWEN_DEEPSEEK_ENABLED=false
 GONGWEN_DEEPSEEK_BASE_URL=https://api.deepseek.com
 GONGWEN_DEEPSEEK_MODEL=deepseek-v4-flash
@@ -159,7 +166,9 @@ DEEPSEEK_API_KEY=
 
 - 本地无 Key 时保持 `GONGWEN_AI_PROVIDER=mock`。
 - 需要真实 DeepSeek 时，设置 `DEEPSEEK_API_KEY`，或在系统设置页运行时输入。
-- 系统设置页写入的是后端内存态配置；后端重启后会回到环境变量。
+- 系统设置页保存后会写入 `ai_provider_settings`。后端重启时优先读取数据库配置；没有数据库配置时才回到环境变量。
+- 如果通过系统设置页输入 API Key，后端会生成或复用 `GONGWEN_AI_SETTINGS_KEY_FILE` 指向的本机密钥文件，并把 API Key 加密后保存到数据库。
+- 迁移部署时需要同时保留数据库中的密文和本机密钥文件，否则已保存 API Key 无法解密，需要重新输入。
 - 不要把真实 Key 写入仓库、测试 fixture、日志或文档示例。
 
 ## 支持模型
@@ -184,7 +193,7 @@ DEEPSEEK_API_KEY=
 必须保持：
 
 - API Key 不明文返回前端。
-- API Key 不写入数据库。
+- API Key 只以加密密文写入数据库；密钥文件不提交，不写日志。
 - API Key 不写入 `ai_generation_trace`。
 - trace 仍只记录 provider、model、任务类型、prompt 版本、输入摘要、输出摘要、错误摘要和耗时。
 - DeepSeek prompt 不应包含完整敏感正文或完整材料全文。
@@ -193,7 +202,7 @@ DEEPSEEK_API_KEY=
 后续生产化建议：
 
 - 增加系统设置权限校验，仅模板管理员或系统管理员可改 AI 配置。
-- 将 Key 改为受保护的密钥存储，而不是普通数据库字段。
+- 将 Key 进一步接入受保护密钥服务或 KMS，替代当前本机文件密钥。
 - 增加密钥轮换、清除 Key、连接审计记录。
 - 增加成本、耗时和错误率统计。
 

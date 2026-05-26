@@ -23,14 +23,21 @@ public class AiConfigurationState {
     private String deepSeekModel;
     private String deepSeekApiKey;
     private int deepSeekTimeoutSeconds;
+    private final AiSettingsRepository settingsRepository;
 
-    public AiConfigurationState(AiRuntimeProperties properties) {
-        this.provider = normalizeProvider(properties.provider());
-        this.deepSeekEnabled = properties.deepseek().enabled();
-        this.deepSeekBaseUrl = normalizeBaseUrl(properties.deepseek().baseUrl());
-        this.deepSeekModel = normalizeModel(properties.deepseek().model());
-        this.deepSeekApiKey = properties.deepseek().apiKey();
-        this.deepSeekTimeoutSeconds = properties.deepseek().timeoutSeconds();
+    public AiConfigurationState(AiRuntimeProperties properties, AiSettingsRepository settingsRepository) {
+        this.settingsRepository = settingsRepository;
+        AiSettingsSnapshot defaults = new AiSettingsSnapshot(
+                normalizeProvider(properties.provider()),
+                properties.deepseek().enabled(),
+                normalizeBaseUrl(properties.deepseek().baseUrl()),
+                normalizeModel(properties.deepseek().model()),
+                properties.deepseek().apiKey(),
+                properties.deepseek().timeoutSeconds()
+        );
+        apply(settingsRepository.find()
+                .map(saved -> mergeWithEnvironmentSecret(saved, defaults))
+                .orElse(defaults));
     }
 
     public synchronized AiProviderSettings currentSettings() {
@@ -64,6 +71,7 @@ public class AiConfigurationState {
         if (PROVIDER_DEEPSEEK.equals(provider) && deepSeekEnabled && !hasDeepSeekApiKey()) {
             throw new AiSettingsException("AI_DEEPSEEK_API_KEY_REQUIRED", "启用 DeepSeek 时必须配置 API Key");
         }
+        settingsRepository.save(snapshot());
         return currentSettings();
     }
 
@@ -82,6 +90,40 @@ public class AiConfigurationState {
 
     private boolean hasDeepSeekApiKey() {
         return deepSeekApiKey != null && !deepSeekApiKey.isBlank();
+    }
+
+    private void apply(AiSettingsSnapshot settings) {
+        provider = normalizeProvider(settings.provider());
+        deepSeekEnabled = settings.deepSeekEnabled();
+        deepSeekBaseUrl = normalizeBaseUrl(settings.deepSeekBaseUrl());
+        deepSeekModel = normalizeModel(settings.deepSeekModel());
+        deepSeekApiKey = settings.deepSeekApiKey() == null ? "" : settings.deepSeekApiKey();
+        deepSeekTimeoutSeconds = settings.deepSeekTimeoutSeconds() <= 0 ? 60 : settings.deepSeekTimeoutSeconds();
+    }
+
+    private AiSettingsSnapshot mergeWithEnvironmentSecret(AiSettingsSnapshot saved, AiSettingsSnapshot defaults) {
+        if (saved.deepSeekApiKey() != null && !saved.deepSeekApiKey().isBlank()) {
+            return saved;
+        }
+        return new AiSettingsSnapshot(
+                saved.provider(),
+                saved.deepSeekEnabled(),
+                saved.deepSeekBaseUrl(),
+                saved.deepSeekModel(),
+                defaults.deepSeekApiKey(),
+                saved.deepSeekTimeoutSeconds()
+        );
+    }
+
+    private AiSettingsSnapshot snapshot() {
+        return new AiSettingsSnapshot(
+                provider,
+                deepSeekEnabled,
+                deepSeekBaseUrl,
+                deepSeekModel,
+                deepSeekApiKey,
+                deepSeekTimeoutSeconds
+        );
     }
 
     private String normalizeProvider(String value) {

@@ -49,15 +49,13 @@ public class AiParagraphService {
 
         try {
             AiParagraphModelResponse modelResponse = modelAdapter.generateParagraph(prompt);
-            if (modelResponse.content() == null || modelResponse.content().isBlank()) {
-                throw new IllegalArgumentException("content is required");
-            }
+            String paragraphContent = normalizeParagraphContent(modelResponse.content(), prompt.heading());
             int sortOrder = request.sortOrder() == null || request.sortOrder() <= 0
                     ? nextBodySortOrder(draft)
                     : request.sortOrder();
             DraftDetailDto updatedDraft = draftService.updateBlocks(
                     draftId,
-                    new UpdateDraftBlocksRequest(upsertParagraphBlock(draft, modelResponse.content().strip(), sortOrder))
+                    new UpdateDraftBlocksRequest(upsertParagraphBlock(draft, paragraphContent, sortOrder))
             );
             DraftBlockDto generatedBlock = updatedDraft.blocks().stream()
                     .filter(block -> "BODY_PARAGRAPH".equals(block.blockType()) && block.sortOrder() == sortOrder)
@@ -108,6 +106,30 @@ public class AiParagraphService {
                 .mapToInt(DraftBlockDto::sortOrder)
                 .max()
                 .orElse(20) + 10;
+    }
+
+    private String normalizeParagraphContent(String content, String heading) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("content is required");
+        }
+        String normalized = content.strip();
+        String normalizedHeading = heading == null ? "" : heading.strip();
+        if (normalizedHeading.isBlank() || normalized.startsWith(normalizedHeading)) {
+            return normalized;
+        }
+        String separator = startsWithPunctuation(normalized) ? "" : "：";
+        return normalizedHeading + separator + normalized;
+    }
+
+    private boolean startsWithPunctuation(String value) {
+        return value.startsWith("：")
+                || value.startsWith(":")
+                || value.startsWith("，")
+                || value.startsWith(",")
+                || value.startsWith("。")
+                || value.startsWith("；")
+                || value.startsWith(";")
+                || value.startsWith("、");
     }
 
     private boolean isBlank(String value) {

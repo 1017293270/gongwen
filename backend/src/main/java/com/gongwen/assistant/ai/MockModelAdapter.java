@@ -53,6 +53,21 @@ public class MockModelAdapter implements ModelAdapter {
         return new AiParagraphModelResponse(prompt.heading() + "：" + points + "。" + instruction);
     }
 
+    @Override
+    public AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
+        String instruction = prompt.instruction().isBlank() ? "" : "（已结合补充要求：" + prompt.instruction() + "）";
+        String suggestion = switch (prompt.operationType()) {
+            case FORMALIZE -> "现就有关事项进一步明确如下：" + prompt.originalText() + instruction;
+            case COMPRESS -> prompt.originalText().length() > 80
+                    ? prompt.originalText().substring(0, 80) + "。" + instruction
+                    : prompt.originalText() + instruction;
+            case EXPAND -> prompt.originalText() + "请各相关单位结合实际细化落实举措，明确责任分工和完成时限。" + instruction;
+            case REWRITE -> "为确保相关工作有序推进，" + prompt.originalText() + instruction;
+            case SUPPLEMENT -> prompt.originalText() + "同时，应加强过程跟踪和结果反馈，确保工作闭环落实。" + instruction;
+        };
+        return new AiLocalOperationModelResponse(suggestion);
+    }
+
     private boolean isBlankField(OutlinePrompt prompt, String blockType) {
         return prompt.fieldSummaries().stream()
                 .filter(summary -> summary.startsWith(blockType + ":"))

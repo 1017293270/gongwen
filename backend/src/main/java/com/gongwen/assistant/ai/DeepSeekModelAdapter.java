@@ -73,6 +73,18 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         return new AiParagraphModelResponse(payload.content());
     }
 
+    @Override
+    public AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
+        DeepSeekLocalOperationPayload payload = postJson(
+                List.of(
+                        Map.of("role", "system", "content", systemPrompt("你负责对单个中文公文正文段落给出局部修改建议。")),
+                        Map.of("role", "user", "content", localOperationUserPrompt(prompt))
+                ),
+                DeepSeekLocalOperationPayload.class
+        );
+        return new AiLocalOperationModelResponse(payload.suggestionText());
+    }
+
     public AiProviderStatus testConnection() {
         long startedAt = System.currentTimeMillis();
         DeepSeekRuntimeConfig config = configurationState.deepSeekRuntimeConfig();
@@ -159,6 +171,11 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         return """
                 请基于以下信息生成一个公文正文段落，返回 JSON：
                 {"content":"正文段落"}
+                要求：
+                1. content 必须以“段落标题”原文开头，不要省略、改写或另造标题。
+                2. content 只生成这一段，不要生成其他提纲章节，也不要解释生成过程。
+                3. 如果段落标题已经带有序号，直接保留该序号；不要新增第二套序号。
+                4. 正文应承接标题，语气严肃克制，事实只能来自字段摘要、材料摘要和补充要求。
                 文种：%s
                 标题：%s
                 段落标题：%s
@@ -171,6 +188,29 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 prompt.title(),
                 prompt.heading(),
                 prompt.points(),
+                prompt.fieldSummaries(),
+                prompt.materialSummaries(),
+                prompt.instruction()
+        );
+    }
+
+    private String localOperationUserPrompt(LocalOperationPrompt prompt) {
+        return """
+                请对一个公文正文段落执行局部操作，返回 JSON：
+                {"suggestionText":"修改建议文本"}
+                要求：只返回修改后的段落文本，不解释过程，不新增材料中不存在的事实。
+                文种：%s
+                标题：%s
+                操作类型：%s
+                原段落：%s
+                字段摘要：%s
+                材料摘要：%s
+                补充要求：%s
+                """.formatted(
+                prompt.documentTypeCode(),
+                prompt.title(),
+                prompt.operationType(),
+                prompt.originalText(),
                 prompt.fieldSummaries(),
                 prompt.materialSummaries(),
                 prompt.instruction()
@@ -216,5 +256,9 @@ public class DeepSeekModelAdapter implements ModelAdapter {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DeepSeekParagraphPayload(String content) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekLocalOperationPayload(String suggestionText) {
     }
 }

@@ -348,7 +348,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P6 AI 逐段正文生成已完成基础实现，并已补充应用总览页、左侧侧边栏信息架构壳子和系统设置 AI 配置页。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表，以及总览入口、工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段正文生成能力、运行时 Mock / DeepSeek 切换和 DeepSeek 连接测试。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v5。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P7 局部段落 AI 操作已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表，以及总览入口、工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试，以及选中单个正文段落后的 AI 局部建议和采纳替换能力。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v6。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
@@ -363,6 +363,7 @@ Agent: 后端
 - `POST /api/drafts/{draftId}/materials`
 - `POST /api/drafts/{draftId}/ai/outline`
 - `POST /api/drafts/{draftId}/ai/paragraph`
+- `POST /api/drafts/{draftId}/ai/local-operation`
 - `GET /api/ai/settings`
 - `PUT /api/ai/settings`
 - `POST /api/ai/settings/test`
@@ -373,14 +374,15 @@ AI 模型配置当前约定：
 - 默认仍使用 `MockModelAdapter`，无需云模型密钥即可本地测试和演示；Mock 是保底能力，不代表正式模型已接通。
 - 系统设置页可切换 `mock` / `deepseek`，可配置 DeepSeek Base URL、模型、超时和 API Key。
 - “测试连接”会先保存当前表单，再调用后端测试接口；避免出现前端已选择 DeepSeek、后端仍按旧 Mock 配置测试的状态错位。
-- DeepSeek 配置为后端内存态运行时配置，启动时由环境变量初始化；重启后回到环境变量配置，不写入数据库。
-- API Key 只通过请求写入后端运行时状态，响应中只返回是否已配置和脱敏值，不记录到 repo、数据库或 trace。
+- AI 配置保存到 `ai_provider_settings`；后端启动时优先读取数据库，没有持久化记录时才使用环境变量。
+- DeepSeek API Key 以 AES-GCM 加密密文保存到数据库；本机密钥文件默认 `storage/ai-settings.key`，由 `GONGWEN_AI_SETTINGS_KEY_FILE` 配置，`backend/storage/` 不提交。
+- API Key 响应中只返回是否已配置和脱敏值，不记录到 repo、日志或 `ai_generation_trace`。
 - `RoutingModelAdapter` 是当前 `ModelAdapter` 的主入口，只在 provider 为 `deepseek`、已启用且 API Key 已配置时路由到 `DeepSeekModelAdapter`，否则继续使用 Mock。
 - `DeepSeekModelAdapter` 使用 OpenAI 兼容的 `/chat/completions`，请求 `response_format: {"type":"json_object"}`，要求模型只返回 JSON，再解析成提纲或段落结构。
 - DeepSeek 调用仍复用 `PromptBuilder`、`AiOutlineService`、`AiParagraphService` 和 `ai_generation_trace`，没有把 prompt 或模型调用散落到 controller 或前端。
 - DeepSeek 错误会归一化为模型不可用、HTTP 错误、返回为空、结构无效、请求配置无效或调用中断，前端以统一错误/Toast 展示。
 - 当前支持模型选项：`deepseek-v4-flash`、`deepseek-v4-pro`、`deepseek-chat`、`deepseek-reasoner`。默认值来自 `.env.example` 的 `GONGWEN_DEEPSEEK_MODEL`。
-- 新增环境变量：`GONGWEN_AI_PROVIDER`、`GONGWEN_DEEPSEEK_ENABLED`、`GONGWEN_DEEPSEEK_BASE_URL`、`GONGWEN_DEEPSEEK_MODEL`、`GONGWEN_DEEPSEEK_TIMEOUT_SECONDS`、`DEEPSEEK_API_KEY`。
+- 新增环境变量：`GONGWEN_AI_PROVIDER`、`GONGWEN_AI_SETTINGS_KEY_FILE`、`GONGWEN_DEEPSEEK_ENABLED`、`GONGWEN_DEEPSEEK_BASE_URL`、`GONGWEN_DEEPSEEK_MODEL`、`GONGWEN_DEEPSEEK_TIMEOUT_SECONDS`、`DEEPSEEK_API_KEY`。
 - 本轮本地运行曾验证：后端 `GET /api/ai/settings`、`PUT /api/ai/settings`、`POST /api/ai/settings/test` 均可用；前端系统设置页可展示、保存和触发测试。
 - 更完整说明见 `docs/AI_CONFIGURATION.md`。
 
@@ -396,10 +398,23 @@ AI 逐段正文生成当前约定：
 
 - `POST /api/drafts/{draftId}/ai/paragraph` 基于提纲章节标题、要点、补充要求和 READY 材料摘要生成单个正文段落。
 - 生成结果保存为 `BODY_PARAGRAPH` 草稿块；同一 `sortOrder` 重新生成会替换原段落，支持单段重试。
+- 段落生成会要求并兜底确保正文以提纲章节标题开头，避免同一篇正文中部分段落有标题、部分段落无标题。
 - `PromptBuilder` 集中构建 `paragraph-v1` 输入摘要，不在前端或 controller 散落 prompt。
 - `ai_generation_trace` 使用 `PARAGRAPH` task type 记录 provider、model、状态、prompt 版本、输入摘要、输出摘要、错误摘要和耗时。
 - trace 不保存完整正文、完整材料提取文本或完整 prompt。
-- 前端提纲章节已接入“生成正文 / 正在生成 / 重试正文”状态，成功后刷新 Word 风格预览。
+- 前端提纲章节已接入“生成正文 / 正在生成 / 重试正文”状态，并提供“生成全部正文”入口按提纲顺序串行生成所有段落；成功后刷新 Word 风格预览。
+
+P7 局部段落 AI 操作当前约定：
+
+- `POST /api/drafts/{draftId}/ai/local-operation` 针对单个 `BODY_PARAGRAPH` 草稿块生成建议文本，不直接保存或覆盖原文。
+- 支持 `FORMALIZE`、`COMPRESS`、`EXPAND`、`REWRITE`、`SUPPLEMENT` 五类操作。
+- 用户必须先在 Word 风格预览中选择一个正文段落；右栏生成建议后可采纳或放弃。
+- 左栏正文区域显示正文段落目录，段落标题从 `DraftBlock` 内容开头提取；点击目录项会定位并选中中间 Word 风格预览中的对应段落。
+- Word 风格预览中的正文段落支持选中后直接编辑；手工修改后仍通过现有保存草稿链路持久化。
+- 采纳建议时复用 `PUT /api/drafts/{id}/blocks` 保存替换后的草稿块。
+- `PromptBuilder` 集中构建 `local-operation-v1` 输入摘要；Mock 和 DeepSeek 均通过 `ModelAdapter.generateLocalOperation` 统一调用。
+- `ai_generation_trace` 使用 `LOCAL_OPERATION` task type 记录 provider、model、状态、prompt 版本、目标块、操作类型、字符数和耗时。
+- trace 不保存完整原文段落、完整建议文本、完整材料提取文本或完整 prompt。
 
 材料上传当前约定：
 
@@ -457,9 +472,8 @@ AI 逐段正文生成当前约定：
 
 下一步建议：
 
-1. 推进 P7：局部段落 AI 操作，先做段落块级选择，再以建议形式返回，用户确认后复用现有草稿保存链路替换原文。
-2. 推进 P8：基础质检，覆盖缺失字段、结构完整性和导出前检查结果。
-3. P7 前端不要基于合并后的正文 textarea 做局部操作；优先按 `DraftBlock` 渲染和选择单个 `BODY_PARAGRAPH`。
-4. P7 后端建议新增建议型 API，不直接覆盖原文；返回 traceId、目标块、操作类型和建议文本，采用后再调用现有块保存接口。
-5. P8 质检可以先不接真实模型，优先落地字段缺失、结构完整、导出前检查和结果展示，再逐步接 AI 表达建议。
-6. 后续开发默认先跑 focused tests，提交前再跑全量后端测试、前端测试和前端构建。
+1. 推进 P8：基础质检，覆盖缺失字段、结构完整性和导出前检查结果。
+2. P8 质检可以先不接真实模型，优先落地字段缺失、结构完整、导出前检查和结果展示，再逐步接 AI 表达建议。
+3. P9 登录与基础权限仍是 MVP 闭环的关键后续，尤其是草稿、材料、模板、导出文件访问控制。
+4. P7 后续可补充更细的局部操作历史、撤销和差异对比，但不要阻塞 P8。
+5. 后续开发默认先跑 focused tests，提交前再跑全量后端测试、前端测试和前端构建。

@@ -41,8 +41,8 @@
 
 当前推荐下一阶段：
 
-- P7 局部 AI 操作。
-- 可使用多 Agent 并行推进：后端建议 API、前端段落选择 UI、QA/文档三线并行，最后由集成 Agent 统一验收。
+- P8 基础质检。
+- 可使用多 Agent 并行推进：后端规则检查、前端质检面板、QA/文档三线并行，最后由集成 Agent 统一验收。
 
 ## 全局落地原则
 
@@ -320,6 +320,7 @@
 
 - 段落级生成 API。
 - 单段失败单段重试。
+- 基于提纲一键串行生成全部正文。
 - 生成进度状态。
 - 生成 trace 绑定到草稿块。
 - 前端逐段生成状态。
@@ -327,6 +328,8 @@
 验收标准：
 
 - 已能按提纲章节生成单个正文块。
+- 已能从提纲入口按章节顺序生成全部正文。
+- 生成正文会保留提纲章节标题，避免段落标题显示不一致。
 - 单段失败不影响已生成段落。
 - 用户可重试失败段落。
 - 生成结果已保存为 `DraftBlock`。
@@ -342,10 +345,12 @@
 - `ParagraphPrompt`
 - `AiParagraphModelResponse`
 - `MockModelAdapter.generateParagraph`
+- `DeepSeekModelAdapter.generateParagraph`
 
 已实现前端能力：
 
 - 提纲章节内“生成正文 / 正在生成 / 重试正文”按钮。
+- 提纲结果顶部“生成全部正文”按钮，按章节顺序复用单段接口生成并保存。
 - 成功后刷新草稿块和 Word 风格预览。
 - 失败时显示右栏错误和 Toast 反馈。
 
@@ -396,6 +401,7 @@
 
 - 系统设置中的 AI 配置页面。
 - DeepSeek Base URL、模型、超时和 API Key 运行时配置。
+- AI 配置数据库持久化，后端重启后保留供应商和 DeepSeek 配置。
 - 后端模型路由适配层。
 - OpenAI 兼容 `/chat/completions` 调用。
 - AI 配置读取、保存和连接测试 API。
@@ -407,7 +413,8 @@
 
 - 未配置云模型密钥时仍默认使用 Mock，便于本地开发和演示。
 - 启用 DeepSeek 时必须配置 API Key。
-- API Key 响应只返回脱敏状态，不保存到数据库或 trace。
+- API Key 响应只返回脱敏状态；数据库只保存加密密文，不保存明文，也不写入 trace。
+- 后端重启后优先读取 `ai_provider_settings`，避免系统设置回到 Mock。
 - DeepSeek 调用仍复用集中 PromptBuilder 和既有 trace 链路。
 - 系统设置页面覆盖加载、保存中、测试中、成功、失败和禁用状态。
 - 不改动侧边栏样式，仅将 AI 配置内容放入系统设置。
@@ -429,6 +436,9 @@
 - `AiSettingsController`
 - `AiSettingsException`
 - `AiProviderStatus`
+- `AiSettingsRepository` / `JdbcAiSettingsRepository`
+- `AiSettingsSecretCodec`
+- `AiSettingsSnapshot`
 
 已实现前端能力：
 
@@ -447,9 +457,10 @@
 - `DeepSeekModelAdapter` 调用 OpenAI 兼容 `/chat/completions`，要求 JSON 输出。
 - DeepSeek 提纲输出解析为 `AiOutlineResponse`。
 - DeepSeek 段落输出解析为 `AiParagraphModelResponse`。
-- 运行时配置存放在 `AiConfigurationState` 内存态中，重启后回到环境变量。
+- 配置保存到 `ai_provider_settings`，`AiConfigurationState` 启动时优先读取数据库；没有持久化记录时使用环境变量。
+- DeepSeek API Key 使用本机密钥文件加密后保存，默认密钥文件为 `storage/ai-settings.key`。
 - API Key 响应只暴露 `deepSeekApiKeyConfigured` 和 `maskedDeepSeekApiKey`。
-- `.env.example` 已新增 `GONGWEN_AI_PROVIDER`、`GONGWEN_DEEPSEEK_ENABLED`、`GONGWEN_DEEPSEEK_BASE_URL`、`GONGWEN_DEEPSEEK_MODEL`、`GONGWEN_DEEPSEEK_TIMEOUT_SECONDS`、`DEEPSEEK_API_KEY`。
+- `.env.example` 已新增 `GONGWEN_AI_PROVIDER`、`GONGWEN_AI_SETTINGS_KEY_FILE`、`GONGWEN_DEEPSEEK_ENABLED`、`GONGWEN_DEEPSEEK_BASE_URL`、`GONGWEN_DEEPSEEK_MODEL`、`GONGWEN_DEEPSEEK_TIMEOUT_SECONDS`、`DEEPSEEK_API_KEY`。
 
 相关文件：
 
@@ -487,7 +498,7 @@
 
 ### P7 局部 AI 操作
 
-状态：待开始。
+状态：已完成基础实现。
 
 目标：支持选中段落后的 AI 辅助改写。
 
@@ -505,6 +516,37 @@
 - 局部操作不直接覆盖原文。
 - 用户确认后才替换。
 - 保留操作 trace 和失败状态。
+
+已实现 API：
+
+- `POST /api/drafts/{draftId}/ai/local-operation`
+
+已实现后端能力：
+
+- `AiLocalOperationService`
+- `AiLocalOperationRequest` / `AiLocalOperationResponse`
+- `LocalOperationPrompt`
+- `AiLocalOperationModelResponse`
+- `AiLocalOperationType`
+- `ModelAdapter.generateLocalOperation`
+- `MockModelAdapter.generateLocalOperation`
+- `DeepSeekModelAdapter.generateLocalOperation`
+
+已实现前端能力：
+
+- Word 风格预览中按 `BODY_PARAGRAPH` 草稿块选择单个段落。
+- 左栏正文区域已从大 textarea 改为正文段落目录，点击目录项会定位并选中中间对应段落。
+- 选中正文段落后可直接在 Word 风格预览中编辑，并继续复用草稿保存链路。
+- 右栏局部操作面板，支持正式化、压缩、扩写、改写和补充。
+- 建议生成中、错误、建议展示、采纳和放弃状态。
+- 采纳后复用 `PUT /api/drafts/{id}/blocks` 保存替换后的草稿块。
+
+验证状态：
+
+- focused 后端测试 `AiLocalOperationServiceTest` 通过。
+- focused 后端 controller 测试 `AiOutlineControllerTest` 通过。
+- 前端 `npm test -- --run` 通过。
+- 前端 `npm run build` 通过。
 
 实施建议：
 
@@ -670,11 +712,11 @@
 
 ## 当前开发队列
 
-1. P7 局部 AI 操作。
-2. P8 基础质检。
-3. P9 登录与基础权限。
-4. P10 模板管理员后台。
-5. P11 导出体验增强。
+1. P8 基础质检。
+2. P9 登录与基础权限。
+3. P10 模板管理员后台。
+4. P11 导出体验增强。
+5. P12 部署与环境。
 
 ## AI 接力清单
 

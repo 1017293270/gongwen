@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 
 describe('App', () => {
+  const originalTextareaScrollHeight = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight');
+
   beforeEach(() => {
     vi.stubEnv('VITE_API_BASE_URL', 'http://api.test');
     Object.defineProperty(window, 'localStorage', {
@@ -18,6 +20,11 @@ describe('App', () => {
     window.localStorage.clear();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+    if (originalTextareaScrollHeight) {
+      Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', originalTextareaScrollHeight);
+    } else {
+      Reflect.deleteProperty(HTMLTextAreaElement.prototype, 'scrollHeight');
+    }
   });
 
   it('loads a real draft and saves edited blocks', async () => {
@@ -198,6 +205,230 @@ describe('App', () => {
     }));
     expect(await screen.findByText('正文已生成')).toBeInTheDocument();
     expect(within(screen.getByLabelText('公文预览')).getByText('一、主要事项：说明安排；明确分工。')).toBeInTheDocument();
+  });
+
+  it('generates all body paragraphs from the outline in order', async () => {
+    const outline = {
+      ...sampleOutline(),
+      sections: [
+        { heading: '一、主要事项', points: ['说明安排'] },
+        { heading: '二、工作要求', points: ['落实责任'] },
+      ],
+    };
+    const firstDraft = {
+      ...sampleDraft('全局生成草稿'),
+      blocks: [
+        { id: 1, blockType: 'TITLE', content: '全局生成草稿', sortOrder: 10 },
+        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+        { id: 3, blockType: 'BODY_PARAGRAPH', content: '一、主要事项：说明安排。', sortOrder: 30 },
+        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+      ],
+    };
+    const secondDraft = {
+      ...firstDraft,
+      blocks: [
+        ...firstDraft.blocks,
+        { id: 7, blockType: 'BODY_PARAGRAPH', content: '二、工作要求：落实责任。', sortOrder: 31 },
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('全局生成草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(outline))
+      .mockResolvedValueOnce(jsonResponse({
+        traceId: '22222222-2222-2222-2222-222222222222',
+        draft: firstDraft,
+        block: firstDraft.blocks[2],
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        traceId: '33333333-3333-3333-3333-333333333333',
+        draft: secondDraft,
+        block: secondDraft.blocks[6],
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await screen.findByDisplayValue('全局生成草稿');
+    await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成全部正文' }));
+
+    const paragraphCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'));
+    expect(paragraphCalls).toHaveLength(2);
+    expect(paragraphCalls[0][1]).toEqual(expect.objectContaining({
+      body: JSON.stringify({
+        heading: '一、主要事项',
+        points: ['说明安排'],
+        instruction: '',
+        sortOrder: 30,
+      }),
+    }));
+    expect(paragraphCalls[1][1]).toEqual(expect.objectContaining({
+      body: JSON.stringify({
+        heading: '二、工作要求',
+        points: ['落实责任'],
+        instruction: '',
+        sortOrder: 31,
+      }),
+    }));
+    expect(await screen.findByText('全部正文已生成')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('公文预览')).getByText('二、工作要求：落实责任。')).toBeInTheDocument();
+  });
+
+  it('selects a paragraph, generates a local suggestion, and accepts it through block save', async () => {
+    const originalDraft = {
+      ...sampleDraft('局部操作草稿'),
+      blocks: [
+        { id: 1, blockType: 'TITLE', content: '局部操作草稿', sortOrder: 10 },
+        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+        { id: 3, blockType: 'BODY_PARAGRAPH', content: '第一段原文', sortOrder: 30 },
+        { id: 7, blockType: 'BODY_PARAGRAPH', content: '第二段原文', sortOrder: 31 },
+        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+      ],
+    };
+    const savedDraft = {
+      ...originalDraft,
+      blocks: originalDraft.blocks.map((block) => block.id === 7
+        ? { ...block, content: '第二段建议文本' }
+        : block),
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(originalDraft))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({
+        traceId: '33333333-3333-3333-3333-333333333333',
+        targetBlockId: 7,
+        operationType: 'FORMALIZE',
+        suggestionText: '第二段建议文本',
+      }))
+      .mockResolvedValueOnce(jsonResponse(savedDraft));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    const paragraphIndex = screen.getByLabelText('正文段落目录');
+    const secondIndexItem = await within(paragraphIndex).findByText('第二段原文');
+    await userEvent.click(secondIndexItem.closest('button') as HTMLButtonElement);
+    const preview = screen.getByLabelText('公文预览');
+    expect(await within(preview).findByLabelText('编辑段落：第二段原文')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '生成段落建议' }));
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/local-operation', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        targetBlockId: 7,
+        operationType: 'FORMALIZE',
+        instruction: '',
+      }),
+    }));
+
+    expect(await screen.findByText('第二段建议文本')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '采纳建议' }));
+
+    expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        blocks: [
+          { blockType: 'TITLE', content: '局部操作草稿', sortOrder: 10 },
+          { blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+          { blockType: 'BODY_PARAGRAPH', content: '第一段原文', sortOrder: 30 },
+          { blockType: 'BODY_PARAGRAPH', content: '第二段建议文本', sortOrder: 31 },
+          { blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+          { blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+          { blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+        ],
+      }),
+    }));
+    expect(within(screen.getByLabelText('公文预览')).getByText('第二段建议文本')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('公文预览')).getByText('第一段原文')).toBeInTheDocument();
+  });
+
+  it('expands the selected paragraph editor to fit its content', async () => {
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 240,
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse({
+        ...sampleDraft('自适应高度草稿'),
+        blocks: [
+          { id: 1, blockType: 'TITLE', content: '自适应高度草稿', sortOrder: 10 },
+          { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+          { id: 7, blockType: 'BODY_PARAGRAPH', content: '这是一段较长的正文，需要编辑框按内容高度展开。', sortOrder: 30 },
+          { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+          { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+          { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+        ],
+      }))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    const preview = screen.getByLabelText('公文预览');
+    await userEvent.click((await within(preview).findByText('这是一段较长的正文，需要编辑框按内容高度展开。')).closest('button') as HTMLButtonElement);
+
+    const editor = await within(preview).findByLabelText('编辑段落：这是一段较长的正文，需要编辑框按内容') as HTMLTextAreaElement;
+    expect(editor.style.height).toBe('240px');
+  });
+
+  it('confirms before discarding a local paragraph suggestion', async () => {
+    const originalDraft = {
+      ...sampleDraft('放弃建议草稿'),
+      blocks: [
+        { id: 1, blockType: 'TITLE', content: '放弃建议草稿', sortOrder: 10 },
+        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+        { id: 7, blockType: 'BODY_PARAGRAPH', content: '第二段原文', sortOrder: 31 },
+        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(originalDraft))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({
+        traceId: '44444444-4444-4444-4444-444444444444',
+        targetBlockId: 7,
+        operationType: 'FORMALIZE',
+        suggestionText: '即将放弃的建议',
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    const preview = screen.getByLabelText('公文预览');
+    await userEvent.click((await within(preview).findByText('第二段原文')).closest('button') as HTMLButtonElement);
+    await userEvent.click(screen.getByRole('button', { name: '生成段落建议' }));
+    expect(await screen.findByText('即将放弃的建议')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '放弃' }));
+    expect(screen.getByRole('dialog', { name: '放弃这条段落建议？' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '继续编辑' }));
+    expect(screen.queryByRole('dialog', { name: '放弃这条段落建议？' })).not.toBeInTheDocument();
+    expect(screen.getByText('即将放弃的建议')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '放弃' }));
+    await userEvent.click(screen.getByRole('button', { name: '放弃建议' }));
+    expect(screen.queryByText('即将放弃的建议')).not.toBeInTheDocument();
   });
 
   it('shows retry state when outline generation fails', async () => {

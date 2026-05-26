@@ -63,6 +63,15 @@ export type AiParagraph = {
   block: DraftBlock;
 };
 
+export type AiLocalOperationType = 'FORMALIZE' | 'COMPRESS' | 'EXPAND' | 'REWRITE' | 'SUPPLEMENT';
+
+export type AiLocalOperation = {
+  traceId: string;
+  targetBlockId: number;
+  operationType: AiLocalOperationType;
+  suggestionText: string;
+};
+
 export type AiProviderSettings = {
   provider: 'mock' | 'deepseek';
   deepSeekEnabled: boolean;

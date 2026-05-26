@@ -40,6 +40,11 @@ public class RoutingModelAdapter implements ModelAdapter {
         return activeAdapter().generateParagraph(prompt);
     }
 
+    @Override
+    public AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
+        return activeAdapter().generateLocalOperation(prompt);
+    }
+
     private ModelAdapter activeAdapter() {
         return configurationState.useDeepSeek() ? deepSeekModelAdapter : mockModelAdapter;
     }

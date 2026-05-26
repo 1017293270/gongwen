@@ -10,6 +10,7 @@ import java.util.List;
 public class PromptBuilder {
     public static final String OUTLINE_PROMPT_VERSION = "outline-v1";
     public static final String PARAGRAPH_PROMPT_VERSION = "paragraph-v1";
+    public static final String LOCAL_OPERATION_PROMPT_VERSION = "local-operation-v1";
     private static final int BLOCK_TEXT_LIMIT = 160;
     private static final int MATERIAL_TEXT_LIMIT = 240;
 
@@ -75,6 +76,44 @@ public class PromptBuilder {
                         materialSummaries.stream().mapToInt(String::length).sum(),
                         heading.length(),
                         points.size(),
+                        instruction.length()
+                )
+        );
+    }
+
+    public LocalOperationPrompt buildLocalOperationPrompt(
+            DraftDetailDto draft,
+            List<MaterialPromptSummary> materials,
+            DraftBlockDto targetBlock,
+            AiLocalOperationRequest request
+    ) {
+        List<String> fieldSummaries = draft.blocks().stream()
+                .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
+                .toList();
+        List<String> materialSummaries = materials.stream()
+                .map(material -> material.originalFileName() + ": " + summarize(material.text(), MATERIAL_TEXT_LIMIT))
+                .toList();
+        String instruction = request == null || request.instruction() == null ? "" : request.instruction().strip();
+        String originalText = targetBlock.content() == null ? "" : targetBlock.content().strip();
+        return new LocalOperationPrompt(
+                LOCAL_OPERATION_PROMPT_VERSION,
+                draft.documentTypeCode(),
+                draft.title(),
+                targetBlock.id(),
+                targetBlock.sortOrder(),
+                request.operationType(),
+                originalText,
+                fieldSummaries,
+                materialSummaries,
+                instruction,
+                "documentType=%s;targetBlockId=%d;targetSortOrder=%d;operationType=%s;originalChars=%d;materials=%d;materialSummaryChars=%d;instructionChars=%d".formatted(
+                        draft.documentTypeCode(),
+                        targetBlock.id(),
+                        targetBlock.sortOrder(),
+                        request.operationType(),
+                        originalText.length(),
+                        materials.size(),
+                        materialSummaries.stream().mapToInt(String::length).sum(),
                         instruction.length()
                 )
         );

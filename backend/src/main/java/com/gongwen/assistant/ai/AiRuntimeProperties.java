@@ -5,11 +5,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "gongwen.ai")
 public record AiRuntimeProperties(
         String provider,
-        DeepSeek deepseek
+        DeepSeek deepseek,
+        String settingsKeyFile
 ) {
     public AiRuntimeProperties {
         provider = provider == null || provider.isBlank() ? "mock" : provider;
         deepseek = deepseek == null ? new DeepSeek(false, "https://api.deepseek.com", "deepseek-v4-flash", "", 60) : deepseek;
+        settingsKeyFile = settingsKeyFile == null || settingsKeyFile.isBlank()
+                ? "storage/ai-settings.key"
+                : settingsKeyFile;
     }
 
     public record DeepSeek(

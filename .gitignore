@@ -1,4 +1,5 @@
 .superpowers/
+.playwright-cli/
 .tools/
 .gradle-user-home/
 
@@ -20,6 +21,8 @@ build/
 .gradle/
 backend/.gradle/
 backend/build/
+backend/storage/
+storage/
 
 # Node / frontend
 node_modules/
@@ -28,6 +31,7 @@ dist/
 frontend/dist/
 coverage/
 frontend/coverage/
+output/
 .env
 .env.*
 !.env.example

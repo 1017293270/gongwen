@@ -35,6 +35,9 @@ class AiOutlineControllerTest {
     @MockBean
     private AiParagraphService aiParagraphService;
 
+    @MockBean
+    private AiLocalOperationService aiLocalOperationService;
+
     @Test
     void generatesOutline() throws Exception {
         UUID traceId = UUID.randomUUID();
@@ -100,5 +103,29 @@ class AiOutlineControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.traceId").value(traceId.toString()))
                 .andExpect(jsonPath("$.data.block.content").value("一、主要事项：说明安排。"));
+    }
+
+    @Test
+    void generatesLocalOperationSuggestion() throws Exception {
+        UUID traceId = UUID.randomUUID();
+        when(aiLocalOperationService.generateSuggestion(eq(1L), any())).thenReturn(new AiLocalOperationResponse(
+                traceId,
+                3L,
+                AiLocalOperationType.FORMALIZE,
+                "正式建议文本"
+        ));
+
+        mockMvc.perform(post("/api/drafts/1/ai/local-operation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AiLocalOperationRequest(
+                                3L,
+                                AiLocalOperationType.FORMALIZE,
+                                ""
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.traceId").value(traceId.toString()))
+                .andExpect(jsonPath("$.data.targetBlockId").value(3))
+                .andExpect(jsonPath("$.data.suggestionText").value("正式建议文本"));
     }
 }

@@ -12,12 +12,13 @@ import {
   Sparkles,
   Upload,
 } from 'lucide-react';
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDraft,
   getAiProviderSettings,
   generateDraftOutline,
   generateDraftParagraph,
+  generateLocalOperation,
   getDraft,
   listDocumentTypes,
   listDraftMaterials,
@@ -27,7 +28,17 @@ import {
   uploadDraftMaterial,
 } from './api';
 import { ToastProvider, useToast } from './components/feedback/ToastProvider';
+import {
+  Button,
+  ConfirmDialog,
+  SelectField,
+  StatusMessage,
+  TextareaField,
+  TextField,
+} from './components/ui';
 import type {
+  AiLocalOperation,
+  AiLocalOperationType,
   AiOutline,
   AiProviderSettings,
   AiProviderStatus,
@@ -54,8 +65,17 @@ type WorkbenchStatus = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
 type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
 type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
+type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
 type AppView = 'overview' | 'workbench' | 'drafts' | 'templates' | 'materials' | 'exports' | 'ai-tasks' | 'settings';
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
+
+const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
+  { value: 'FORMALIZE', label: '正式化' },
+  { value: 'COMPRESS', label: '压缩' },
+  { value: 'EXPAND', label: '扩写' },
+  { value: 'REWRITE', label: '改写' },
+  { value: 'SUPPLEMENT', label: '补充' },
+];
 
 const DEFAULT_AI_SETTINGS: AiProviderSettings = {
   provider: 'mock',
@@ -104,6 +124,16 @@ function Workbench() {
   const [outlineInstruction, setOutlineInstruction] = useState('');
   const [paragraphStatuses, setParagraphStatuses] = useState<Record<string, ParagraphStatus>>({});
   const [paragraphErrors, setParagraphErrors] = useState<Record<string, string>>({});
+  const [allParagraphStatus, setAllParagraphStatus] = useState<ParagraphStatus>('idle');
+  const [allParagraphError, setAllParagraphError] = useState('');
+  const [selectedBodyBlockId, setSelectedBodyBlockId] = useState<number | null>(null);
+  const [localOperationType, setLocalOperationType] = useState<AiLocalOperationType>('FORMALIZE');
+  const [localOperationInstruction, setLocalOperationInstruction] = useState('');
+  const [localOperationStatus, setLocalOperationStatus] = useState<LocalOperationStatus>('idle');
+  const [localOperationError, setLocalOperationError] = useState('');
+  const [localOperationSuggestion, setLocalOperationSuggestion] = useState<AiLocalOperation | null>(null);
+  const [discardSuggestionConfirmOpen, setDiscardSuggestionConfirmOpen] = useState(false);
+  const paragraphRefs = useRef<Record<number, HTMLElement | null>>({});
   const [aiSettings, setAiSettings] = useState<AiProviderSettings>(DEFAULT_AI_SETTINGS);
   const [aiSettingsApiKey, setAiSettingsApiKey] = useState('');
   const [aiSettingsStatus, setAiSettingsStatus] = useState<AiSettingsStatus>('loading');
@@ -209,19 +239,35 @@ function Workbench() {
   const currentDocumentType = documentTypes.find((type) => type.code === draft?.documentTypeCode);
   const title = blockValues.TITLE ?? draft?.title ?? DEFAULT_TITLE;
   const recipient = blockValues.RECIPIENT ?? '';
-  const body = blocks
+  const bodyBlocks = blocks
     .filter((block) => block.blockType === 'BODY_PARAGRAPH')
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((block) => block.content)
-    .filter(Boolean)
-    .join('\n\n');
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+  const bodyNavigationBlocks = bodyBlocks.filter((block) => block.content.trim() || bodyBlocks.length === 1);
   const attachment = blockValues.ATTACHMENT ?? '';
   const signature = blockValues.SIGNATURE ?? '';
   const date = blockValues.DATE ?? '';
+  const selectedBodyBlock = bodyBlocks.find((block) => block.id === selectedBodyBlockId) ?? null;
+
+  function selectBodyBlock(blockId: number, shouldScroll = true) {
+    setSelectedBodyBlockId(blockId);
+    setLocalOperationError('');
+    setLocalOperationSuggestion(null);
+    setLocalOperationStatus('idle');
+    if (shouldScroll) {
+      window.setTimeout(() => {
+        const target = paragraphRefs.current[blockId];
+        if (typeof target?.scrollIntoView === 'function') {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        target?.focus({ preventScroll: true });
+      }, 0);
+    }
+  }
 
   function updateBlock(blockType: string, content: string) {
     setStatus('idle');
     setStatusMessage('草稿有未保存修改');
+    setLocalOperationSuggestion(null);
     setBlocks((currentBlocks) => {
       const existing = currentBlocks.find((block) => block.blockType === blockType);
       if (existing) {
@@ -237,6 +283,15 @@ function Workbench() {
         },
       ].sort((a, b) => a.sortOrder - b.sortOrder);
     });
+  }
+
+  function updateBlockById(blockId: number, content: string) {
+    setStatus('idle');
+    setStatusMessage('草稿有未保存修改');
+    setLocalOperationSuggestion(null);
+    setBlocks((currentBlocks) => currentBlocks.map((block) => (
+      block.id === blockId ? { ...block, content } : block
+    )));
   }
 
   async function handleSave() {
@@ -311,6 +366,8 @@ function Workbench() {
       setOutline(generatedOutline);
       setParagraphStatuses({});
       setParagraphErrors({});
+      setAllParagraphStatus('idle');
+      setAllParagraphError('');
       setOutlineStatus('success');
       showToast({ title: '提纲已生成', description: generatedOutline.titleSuggestion, tone: 'success' });
     } catch (error) {
@@ -330,6 +387,8 @@ function Workbench() {
     const sortOrder = 30 + sectionIndex;
 
     try {
+      setAllParagraphStatus('idle');
+      setAllParagraphError('');
       setParagraphStatuses((current) => ({ ...current, [key]: 'generating' }));
       setParagraphErrors((current) => ({ ...current, [key]: '' }));
       const generated = await generateDraftParagraph(draft.id, section, outlineInstruction, sortOrder);
@@ -345,6 +404,110 @@ function Workbench() {
       setParagraphErrors((current) => ({ ...current, [key]: message }));
       showToast({ title: message, tone: 'error' });
     }
+  }
+
+  async function handleGenerateAllParagraphs() {
+    if (!draft || !outline || outline.sections.length === 0) {
+      return;
+    }
+
+    let activeSectionHeading = '';
+    try {
+      setAllParagraphStatus('generating');
+      setAllParagraphError('');
+      setParagraphErrors({});
+      let latestDraft = draft;
+      for (const [index, section] of outline.sections.entries()) {
+        activeSectionHeading = section.heading;
+        setParagraphStatuses((current) => ({ ...current, [section.heading]: 'generating' }));
+        const generated = await generateDraftParagraph(latestDraft.id, section, outlineInstruction, 30 + index);
+        latestDraft = generated.draft;
+        setDraft(generated.draft);
+        setBlocks(generated.draft.blocks);
+        setParagraphStatuses((current) => ({ ...current, [section.heading]: 'success' }));
+      }
+      setAllParagraphStatus('success');
+      setStatus('saved');
+      setStatusMessage('全部正文已生成并保存');
+      showToast({ title: '全部正文已生成', description: `${outline.sections.length} 个段落已保存`, tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '全部正文生成失败';
+      setAllParagraphStatus('error');
+      setAllParagraphError(activeSectionHeading ? `${activeSectionHeading}：${message}` : message);
+      if (activeSectionHeading) {
+        setParagraphStatuses((current) => ({ ...current, [activeSectionHeading]: 'error' }));
+        setParagraphErrors((current) => ({ ...current, [activeSectionHeading]: message }));
+      }
+      showToast({ title: '全部正文生成中断', description: activeSectionHeading || undefined, tone: 'error' });
+    }
+  }
+
+  async function handleGenerateLocalOperation() {
+    if (!draft || !selectedBodyBlock) {
+      setLocalOperationStatus('error');
+      setLocalOperationError('请先在预览中选择正文段落');
+      return;
+    }
+
+    try {
+      setLocalOperationStatus('generating');
+      setLocalOperationError('');
+      setLocalOperationSuggestion(null);
+      const suggestion = await generateLocalOperation(
+        draft.id,
+        selectedBodyBlock.id,
+        localOperationType,
+        localOperationInstruction,
+      );
+      setLocalOperationSuggestion(suggestion);
+      setLocalOperationStatus('suggested');
+      showToast({ title: '段落建议已生成', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '段落建议生成失败';
+      setLocalOperationStatus('error');
+      setLocalOperationError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleAcceptLocalOperation() {
+    if (!draft || !localOperationSuggestion) {
+      return;
+    }
+
+    try {
+      setLocalOperationStatus('saving');
+      const payload: DraftBlockUpdate[] = blocks
+        .map((block) => ({
+          blockType: block.blockType,
+          content: block.id === localOperationSuggestion.targetBlockId
+            ? localOperationSuggestion.suggestionText
+            : block.content,
+          sortOrder: block.sortOrder,
+        }))
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+      const updatedDraft = await saveDraftBlocks(draft.id, payload);
+      setDraft(updatedDraft);
+      setBlocks(updatedDraft.blocks);
+      setSelectedBodyBlockId(localOperationSuggestion.targetBlockId);
+      setLocalOperationSuggestion(null);
+      setLocalOperationStatus('saved');
+      setStatus('saved');
+      setStatusMessage('局部建议已采纳并保存');
+      showToast({ title: '建议已采纳', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '采纳建议失败';
+      setLocalOperationStatus('error');
+      setLocalOperationError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  function handleDiscardLocalOperation() {
+    setLocalOperationSuggestion(null);
+    setLocalOperationStatus('idle');
+    setLocalOperationError('');
+    setDiscardSuggestionConfirmOpen(false);
   }
 
   function updateAiSettingsDraft(patch: Partial<AiProviderSettings>) {
@@ -409,11 +572,6 @@ function Workbench() {
     }
   }
 
-  const bodyParagraphs = body
-    .split(/\n+/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
@@ -455,30 +613,34 @@ function Workbench() {
           </div>
           <div className="header-actions">
             {activeView === 'overview' && (
-              <button className="btn" onClick={() => setActiveView('workbench')} type="button">
-                <FileText aria-hidden="true" className="btn-icon" />
+              <Button icon={<FileText aria-hidden="true" />} onClick={() => setActiveView('workbench')}>
                 进入工作台
-              </button>
+              </Button>
             )}
             {activeView === 'workbench' && (
               <>
-                <button
-                  className="btn secondary"
+                <Button
                   disabled={!draft || outlineStatus === 'generating' || status === 'loading'}
+                  icon={<Sparkles aria-hidden="true" />}
+                  isLoading={outlineStatus === 'generating'}
+                  loadingLabel="正在生成提纲"
                   onClick={() => void handleGenerateOutline()}
-                  type="button"
+                  variant="secondary"
                 >
-                  <Sparkles aria-hidden="true" className="btn-icon" />
-                  {outlineStatus === 'generating' ? '正在生成提纲' : outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
-                </button>
-                <button className="btn" type="button">
-                  <FileDown aria-hidden="true" className="btn-icon" />
+                  {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
+                </Button>
+                <Button icon={<FileDown aria-hidden="true" />}>
                   导出 Word
-                </button>
-                <button className="btn" disabled={!draft || status === 'saving'} onClick={handleSave} type="button">
-                  <Save aria-hidden="true" className="btn-icon" />
+                </Button>
+                <Button
+                  disabled={!draft || status === 'saving'}
+                  icon={<Save aria-hidden="true" />}
+                  isLoading={status === 'saving'}
+                  loadingLabel="正在保存"
+                  onClick={handleSave}
+                >
                   保存草稿
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -503,44 +665,49 @@ function Workbench() {
             <p className="panel-kicker">当前草稿：{currentDocumentType?.name ?? '通知'}</p>
           </div>
           <div className="panel-body">
-            <label className="field-group">
-              <span className="field-label">文种</span>
-              <select className="field" aria-label="文种" disabled value={draft?.documentTypeCode ?? 'NOTICE'}>
-                {documentTypes.length === 0 ? <option value="NOTICE">通知</option> : documentTypes.map((type) => (
-                  <option key={type.code} value={type.code}>{type.name}</option>
-                ))}
-              </select>
-            </label>
+            <SelectField disabled label="文种" value={draft?.documentTypeCode ?? 'NOTICE'}>
+              {documentTypes.length === 0 ? <option value="NOTICE">通知</option> : documentTypes.map((type) => (
+                <option key={type.code} value={type.code}>{type.name}</option>
+              ))}
+            </SelectField>
 
-            <label className="field-group">
-              <span className="field-label">标题</span>
-              <input className="field" aria-label="标题" onChange={(event) => updateBlock('TITLE', event.target.value)} value={title} />
-            </label>
+            <TextField label="标题" onChange={(event) => updateBlock('TITLE', event.target.value)} value={title} />
 
-            <label className="field-group">
-              <span className="field-label">主送</span>
-              <input className="field" aria-label="主送" onChange={(event) => updateBlock('RECIPIENT', event.target.value)} value={recipient} />
-            </label>
+            <TextField label="主送" onChange={(event) => updateBlock('RECIPIENT', event.target.value)} value={recipient} />
 
-            <label className="field-group">
-              <span className="field-label">正文</span>
-              <textarea className="field" aria-label="正文" onChange={(event) => updateBlock('BODY_PARAGRAPH', event.target.value)} value={body} />
-            </label>
+            <section className="paragraph-index" aria-label="正文段落目录">
+              <div className="paragraph-index-header">
+                <span className="field-label">正文</span>
+                <span className="paragraph-count">{bodyNavigationBlocks.length} 段</span>
+              </div>
+              {bodyNavigationBlocks.length > 0 ? (
+                <div className="paragraph-index-list">
+                  {bodyNavigationBlocks.map((block, index) => (
+                    <button
+                      aria-current={selectedBodyBlockId === block.id ? 'true' : undefined}
+                      className={`paragraph-index-item ${selectedBodyBlockId === block.id ? 'selected' : ''}`}
+                      key={block.id}
+                      onClick={() => selectBodyBlock(block.id)}
+                      type="button"
+                    >
+                      <span className="paragraph-index-number">{index + 1}</span>
+                      <span className="paragraph-index-copy">
+                        <span className="paragraph-index-title">{paragraphDisplayTitle(block, index)}</span>
+                        <span className="paragraph-index-preview">{paragraphPreview(block.content)}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-note">暂无正文段落，先生成或填写正文。</p>
+              )}
+            </section>
 
-            <label className="field-group">
-              <span className="field-label">附件</span>
-              <input className="field" aria-label="附件" onChange={(event) => updateBlock('ATTACHMENT', event.target.value)} value={attachment} />
-            </label>
+            <TextField label="附件" onChange={(event) => updateBlock('ATTACHMENT', event.target.value)} value={attachment} />
 
-            <label className="field-group">
-              <span className="field-label">落款</span>
-              <input className="field" aria-label="落款" onChange={(event) => updateBlock('SIGNATURE', event.target.value)} value={signature} />
-            </label>
+            <TextField label="落款" onChange={(event) => updateBlock('SIGNATURE', event.target.value)} value={signature} />
 
-            <label className="field-group">
-              <span className="field-label">日期</span>
-              <input className="field" aria-label="日期" onChange={(event) => updateBlock('DATE', event.target.value)} value={date} />
-            </label>
+            <TextField label="日期" onChange={(event) => updateBlock('DATE', event.target.value)} value={date} />
 
             <div className="material-upload">
               <input
@@ -554,10 +721,10 @@ function Workbench() {
               />
               <label
                 aria-disabled={!draft || materialStatus === 'uploading'}
-                className="btn secondary upload-label"
+                className="ui-button ui-button-secondary upload-label"
                 htmlFor="material-upload"
               >
-                <Upload aria-hidden="true" className="btn-icon" />
+                <Upload aria-hidden="true" />
                 {materialStatus === 'uploading' ? '正在上传材料' : '上传 Word/PDF 材料'}
               </label>
             </div>
@@ -595,8 +762,40 @@ function Workbench() {
             <article className="document-paper">
               <h2 className="document-title">{title}</h2>
               <p>{recipient}：</p>
-              {bodyParagraphs.length > 0 ? bodyParagraphs.map((paragraph, index) => (
-                <p key={`${paragraph}-${index}`}>{paragraph}</p>
+              {bodyNavigationBlocks.length > 0 ? bodyNavigationBlocks
+                .map((block) => (
+                selectedBodyBlockId === block.id ? (
+                  <textarea
+                    aria-label={`编辑段落：${block.content.trim().slice(0, 18)}`}
+                    className="document-paragraph-editor"
+                    key={block.id}
+                    onChange={(event) => {
+                      syncParagraphEditorHeight(event.currentTarget);
+                      updateBlockById(block.id, event.target.value);
+                    }}
+                    ref={(node) => {
+                      paragraphRefs.current[block.id] = node;
+                      if (node) {
+                        syncParagraphEditorHeight(node);
+                      }
+                    }}
+                    value={block.content}
+                  />
+                ) : (
+                  <button
+                    aria-pressed={false}
+                    className="document-paragraph"
+                    key={block.id}
+                    onClick={() => selectBodyBlock(block.id, false)}
+                    ref={(node) => {
+                      paragraphRefs.current[block.id] = node;
+                    }}
+                    type="button"
+                  >
+                    <span className="visually-hidden">选择段落：</span>
+                    {block.content.trim() || '点击填写正文段落'}
+                  </button>
+                )
               )) : <p>请在左侧填写正文内容。</p>}
               {attachment && <p>附件：{attachment}</p>}
               <p className="signature">
@@ -614,57 +813,68 @@ function Workbench() {
             <p className="panel-kicker">{status === 'loading' ? '正在载入' : `草稿 #${draft?.id ?? '-'}`}</p>
           </div>
           <div className="panel-body">
-            <div className={`check-item ${status === 'error' ? 'warning' : 'success'}`}>{statusMessage}</div>
-            <div className="check-item success">结构化草稿块 {blocks.length} 项</div>
-            <div className={materials.length > 0 ? 'check-item success' : 'check-item warning'}>
-              参考材料 {materials.length} 项
-            </div>
-            <label className="field-group">
-              <span className="field-label">补充要求</span>
-              <textarea
-                aria-label="提纲补充要求"
-                className="field outline-instruction"
-                disabled={!draft || outlineStatus === 'generating'}
-                maxLength={1000}
-                onChange={(event) => setOutlineInstruction(event.target.value)}
-                placeholder="可补充会议重点、语气、必须覆盖的信息"
-                value={outlineInstruction}
-              />
-            </label>
-            <button
-              className="btn secondary"
-              disabled={!draft || outlineStatus === 'generating' || status === 'loading'}
+            <StatusMessage title={statusMessage} tone={status === 'error' ? 'warning' : 'success'} />
+            <StatusMessage title={`结构化草稿块 ${blocks.length} 项`} tone="success" />
+            <StatusMessage title={`参考材料 ${materials.length} 项`} tone={materials.length > 0 ? 'success' : 'warning'} />
+            <TextareaField
+              aria-label="提纲补充要求"
+              className="outline-instruction"
+              disabled={!draft || outlineStatus === 'generating'}
+              label="补充要求"
+              maxLength={1000}
+              onChange={(event) => setOutlineInstruction(event.target.value)}
+              placeholder="可补充会议重点、语气、必须覆盖的信息"
+              value={outlineInstruction}
+            />
+            <Button
+              disabled={!draft || outlineStatus === 'generating' || allParagraphStatus === 'generating' || status === 'loading'}
+              icon={<Sparkles aria-hidden="true" />}
+              isLoading={outlineStatus === 'generating'}
+              loadingLabel="正在生成提纲"
               onClick={handleGenerateOutline}
-              type="button"
+              variant="secondary"
             >
-              <Sparkles aria-hidden="true" className="btn-icon" />
-              {outlineStatus === 'generating' ? '正在生成提纲' : outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
-            </button>
-            {outlineStatus === 'error' && <div className="check-item warning">{outlineError}</div>}
+              {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
+            </Button>
+            {outlineStatus === 'error' && <StatusMessage title={outlineError} tone="warning" />}
             {outline && (
               <div className="outline-result" aria-label="AI 提纲结果">
-                <div className="outline-title">{outline.titleSuggestion}</div>
+                <div className="outline-result-header">
+                  <div className="outline-title">{outline.titleSuggestion}</div>
+                  <Button
+                    className="outline-generate-all"
+                    disabled={!draft || allParagraphStatus === 'generating' || outline.sections.length === 0}
+                    icon={<Sparkles aria-hidden="true" />}
+                    isLoading={allParagraphStatus === 'generating'}
+                    loadingLabel="正在生成全部正文"
+                    onClick={() => void handleGenerateAllParagraphs()}
+                    variant="secondary"
+                  >
+                    {allParagraphStatus === 'error' ? '重试生成全部正文' : '生成全部正文'}
+                  </Button>
+                </div>
+                {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
                 {outline.sections.map((section, index) => (
                   <div className="outline-section" key={section.heading}>
                     <div className="outline-heading">{section.heading}</div>
                     <ul>
                       {section.points.map((point) => <li key={point}>{point}</li>)}
                     </ul>
-                    <button
-                      className="btn secondary outline-action"
-                      disabled={!draft || paragraphStatuses[section.heading] === 'generating'}
+                    <Button
+                      className="outline-action"
+                      disabled={!draft || allParagraphStatus === 'generating' || paragraphStatuses[section.heading] === 'generating'}
+                      icon={<Sparkles aria-hidden="true" />}
+                      isLoading={paragraphStatuses[section.heading] === 'generating'}
+                      loadingLabel={`正在生成：${section.heading}`}
                       onClick={() => void handleGenerateParagraph(index)}
-                      type="button"
+                      variant="secondary"
                     >
-                      <Sparkles aria-hidden="true" className="btn-icon" />
-                      {paragraphStatuses[section.heading] === 'generating'
-                        ? `正在生成：${section.heading}`
-                        : paragraphStatuses[section.heading] === 'error'
-                          ? `重试正文：${section.heading}`
-                          : `生成正文：${section.heading}`}
-                    </button>
+                      {paragraphStatuses[section.heading] === 'error'
+                        ? `重试正文：${section.heading}`
+                        : `生成正文：${section.heading}`}
+                    </Button>
                     {paragraphStatuses[section.heading] === 'error' && (
-                      <div className="check-item warning">{paragraphErrors[section.heading]}</div>
+                      <StatusMessage title={paragraphErrors[section.heading]} tone="warning" />
                     )}
                   </div>
                 ))}
@@ -675,6 +885,73 @@ function Workbench() {
                 )}
               </div>
             )}
+            <div className="local-operation" aria-label="局部段落操作">
+              <div className="local-operation-header">
+                <div>
+                  <div className="outline-title">局部段落操作</div>
+                  <div className="panel-kicker">
+                    {selectedBodyBlock ? `已选择段落 #${selectedBodyBlock.sortOrder}` : '请先在预览中选择正文段落'}
+                  </div>
+                </div>
+              </div>
+              <div className="operation-grid" role="group" aria-label="局部操作类型">
+                {LOCAL_OPERATION_OPTIONS.map((option) => (
+                  <button
+                    aria-pressed={localOperationType === option.value}
+                    className={`operation-choice ${localOperationType === option.value ? 'selected' : ''}`}
+                    key={option.value}
+                    onClick={() => setLocalOperationType(option.value)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <TextareaField
+                aria-label="局部补充要求"
+                className="outline-instruction"
+                disabled={!draft || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                label="局部补充要求"
+                maxLength={1000}
+                onChange={(event) => setLocalOperationInstruction(event.target.value)}
+                placeholder="可补充语气、长度、必须保留或强化的信息"
+                value={localOperationInstruction}
+              />
+              <Button
+                disabled={!draft || !selectedBodyBlock || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                icon={<Sparkles aria-hidden="true" />}
+                isLoading={localOperationStatus === 'generating'}
+                loadingLabel="正在生成建议"
+                onClick={() => void handleGenerateLocalOperation()}
+                variant="secondary"
+              >
+                生成段落建议
+              </Button>
+              {localOperationError && <StatusMessage title={localOperationError} tone="warning" />}
+              {localOperationSuggestion && (
+                <div className="local-suggestion" aria-label="段落建议">
+                  <div className="local-suggestion-text">{localOperationSuggestion.suggestionText}</div>
+                  <div className="suggestion-actions">
+                    <Button
+                      disabled={localOperationStatus === 'saving'}
+                      isLoading={localOperationStatus === 'saving'}
+                      loadingLabel="正在采纳"
+                      onClick={() => void handleAcceptLocalOperation()}
+                      variant="secondary"
+                    >
+                      采纳建议
+                    </Button>
+                    <Button
+                      disabled={localOperationStatus === 'saving'}
+                      onClick={() => setDiscardSuggestionConfirmOpen(true)}
+                      variant="ghost"
+                    >
+                      放弃
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
             </section>
           </main>
@@ -697,6 +974,16 @@ function Workbench() {
             <PlaceholderPage view={activeView} />
           )
         )}
+
+        <ConfirmDialog
+          cancelLabel="继续编辑"
+          confirmLabel="放弃建议"
+          description="这只会移除右侧建议，不会修改当前草稿正文。"
+          onCancel={() => setDiscardSuggestionConfirmOpen(false)}
+          onConfirm={handleDiscardLocalOperation}
+          open={discardSuggestionConfirmOpen}
+          title="放弃这条段落建议？"
+        />
       </div>
     </div>
   );
@@ -730,10 +1017,9 @@ function OverviewPage({
           <h2>今日状态</h2>
           <p>从这里进入公文起草、模板管理、材料与导出记录。当前先聚焦起草工作台，其余入口按阶段逐步接入真实数据。</p>
         </div>
-        <button className="btn" onClick={onOpenWorkbench} type="button">
-          <FileText aria-hidden="true" className="btn-icon" />
+        <Button icon={<FileText aria-hidden="true" />} onClick={onOpenWorkbench}>
           继续起草
-        </button>
+        </Button>
       </section>
 
       <section className="metric-grid" aria-label="工作状态">
@@ -763,7 +1049,7 @@ function OverviewPage({
         <div className="overview-panel">
           <div className="overview-panel-header">
             <h3>最近草稿</h3>
-            <button className="text-button" onClick={onOpenWorkbench} type="button">打开</button>
+            <Button onClick={onOpenWorkbench} variant="ghost">打开</Button>
           </div>
           <div className={isLoading ? 'draft-row skeleton-row' : 'draft-row'}>
             <FileText aria-hidden="true" className="row-icon" />
@@ -778,9 +1064,10 @@ function OverviewPage({
           <div className="overview-panel-header">
             <h3>质检提醒</h3>
           </div>
-          <div className={blocks.length > 0 ? 'check-item success' : 'check-item warning'} aria-live="polite">
-            {isLoading ? '正在等待草稿结构。' : blocks.length > 0 ? '结构化草稿已载入，后续 P8 接入真实质检结果。' : '草稿载入后显示结构检查。'}
-          </div>
+          <StatusMessage
+            title={isLoading ? '正在等待草稿结构。' : blocks.length > 0 ? '结构化草稿已载入，后续 P8 接入真实质检结果。' : '草稿载入后显示结构检查。'}
+            tone={blocks.length > 0 ? 'success' : 'warning'}
+          />
         </div>
 
         <div className="overview-panel">
@@ -806,7 +1093,7 @@ function OverviewPage({
           <div className="overview-panel-header">
             <h3>AI 任务</h3>
           </div>
-          <div className="check-item success">提纲生成与逐段正文生成已接入。</div>
+          <StatusMessage title="提纲生成与逐段正文生成已接入。" tone="success" />
         </div>
       </section>
     </main>
@@ -864,24 +1151,18 @@ function AiSettingsPage({
           </span>
         </div>
 
-        <div className={status === 'error' ? 'check-item warning' : 'check-item success'} aria-live="polite">
-          {message}
-        </div>
+        <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />
 
         <div className="settings-grid">
-          <label className="field-group">
-            <span className="field-label">供应商</span>
-            <select
-              aria-label="AI 供应商"
-              className="field"
-              disabled={busy}
-              onChange={(event) => onSettingsChange({ provider: event.target.value as 'mock' | 'deepseek' })}
-              value={settings.provider}
-            >
-              <option value="mock">Mock 本地演示</option>
-              <option value="deepseek">DeepSeek</option>
-            </select>
-          </label>
+          <SelectField
+            disabled={busy}
+            label="AI 供应商"
+            onChange={(event) => onSettingsChange({ provider: event.target.value as 'mock' | 'deepseek' })}
+            value={settings.provider}
+          >
+            <option value="mock">Mock 本地演示</option>
+            <option value="deepseek">DeepSeek</option>
+          </SelectField>
 
           <label className="toggle-row">
             <input
@@ -897,77 +1178,72 @@ function AiSettingsPage({
             </span>
           </label>
 
-          <label className="field-group">
-            <span className="field-label">Base URL</span>
-            <input
-              aria-label="DeepSeek Base URL"
-              className="field"
-              disabled={busy}
-              onChange={(event) => onSettingsChange({ deepSeekBaseUrl: event.target.value })}
-              value={settings.deepSeekBaseUrl}
-            />
-          </label>
+          <TextField
+            disabled={busy}
+            label="DeepSeek Base URL"
+            onChange={(event) => onSettingsChange({ deepSeekBaseUrl: event.target.value })}
+            value={settings.deepSeekBaseUrl}
+          />
 
-          <label className="field-group">
-            <span className="field-label">模型</span>
-            <select
-              aria-label="DeepSeek 模型"
-              className="field"
-              disabled={busy}
-              onChange={(event) => onSettingsChange({ deepSeekModel: event.target.value })}
-              value={settings.deepSeekModel}
-            >
-              <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-              <option value="deepseek-v4-pro">deepseek-v4-pro</option>
-              <option value="deepseek-chat">deepseek-chat（兼容旧配置）</option>
-              <option value="deepseek-reasoner">deepseek-reasoner（兼容旧配置）</option>
-            </select>
-          </label>
+          <SelectField
+            disabled={busy}
+            label="DeepSeek 模型"
+            onChange={(event) => onSettingsChange({ deepSeekModel: event.target.value })}
+            value={settings.deepSeekModel}
+          >
+            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+            <option value="deepseek-chat">deepseek-chat（兼容旧配置）</option>
+            <option value="deepseek-reasoner">deepseek-reasoner（兼容旧配置）</option>
+          </SelectField>
 
-          <label className="field-group">
-            <span className="field-label">API Key</span>
-            <input
-              aria-label="DeepSeek API Key"
-              autoComplete="off"
-              className="field"
-              disabled={busy}
-              onChange={(event) => onApiKeyChange(event.target.value)}
-              placeholder={settings.deepSeekApiKeyConfigured ? settings.maskedDeepSeekApiKey : 'sk-...'}
-              type="password"
-              value={apiKey}
-            />
-          </label>
+          <TextField
+            autoComplete="off"
+            disabled={busy}
+            label="DeepSeek API Key"
+            onChange={(event) => onApiKeyChange(event.target.value)}
+            placeholder={settings.deepSeekApiKeyConfigured ? settings.maskedDeepSeekApiKey : 'sk-...'}
+            type="password"
+            value={apiKey}
+          />
 
-          <label className="field-group">
-            <span className="field-label">超时秒数</span>
-            <input
-              aria-label="DeepSeek 超时秒数"
-              className="field"
-              disabled={busy}
-              min={10}
-              onChange={(event) => onSettingsChange({ deepSeekTimeoutSeconds: Number(event.target.value) })}
-              type="number"
-              value={settings.deepSeekTimeoutSeconds}
-            />
-          </label>
+          <TextField
+            disabled={busy}
+            label="DeepSeek 超时秒数"
+            min={10}
+            onChange={(event) => onSettingsChange({ deepSeekTimeoutSeconds: Number(event.target.value) })}
+            type="number"
+            value={settings.deepSeekTimeoutSeconds}
+          />
         </div>
 
         <div className="settings-actions">
-          <button className="btn" disabled={busy} onClick={onSave} type="button">
-            <Save aria-hidden="true" className="btn-icon" />
-            {status === 'saving' ? '正在保存' : '保存配置'}
-          </button>
-          <button className="btn secondary" disabled={busy} onClick={onTest} type="button">
-            <Sparkles aria-hidden="true" className="btn-icon" />
-            {status === 'testing' ? '正在测试' : '测试连接'}
-          </button>
+          <Button
+            disabled={busy}
+            icon={<Save aria-hidden="true" />}
+            isLoading={status === 'saving'}
+            loadingLabel="正在保存"
+            onClick={onSave}
+          >
+            保存配置
+          </Button>
+          <Button
+            disabled={busy}
+            icon={<Sparkles aria-hidden="true" />}
+            isLoading={status === 'testing'}
+            loadingLabel="正在测试"
+            onClick={onTest}
+            variant="secondary"
+          >
+            测试连接
+          </Button>
         </div>
 
         {providerStatus && (
-          <div className={providerStatus.available ? 'check-item success' : 'check-item warning'}>
-            {providerStatus.provider} · {providerStatus.model} · {providerStatus.message}
-            {providerStatus.latencyMs > 0 ? ` · ${providerStatus.latencyMs}ms` : ''}
-          </div>
+          <StatusMessage
+            title={`${providerStatus.provider} · ${providerStatus.model} · ${providerStatus.message}${providerStatus.latencyMs > 0 ? ` · ${providerStatus.latencyMs}ms` : ''}`}
+            tone={providerStatus.available ? 'success' : 'warning'}
+          />
         )}
       </section>
     </main>
@@ -980,6 +1256,35 @@ function viewTitle(view: AppView) {
 
 function viewSubtitle(view: AppView) {
   return NAV_ITEMS.find((item) => item.view === view)?.description ?? '近期工作与状态';
+}
+
+function paragraphDisplayTitle(block: DraftBlock, index: number) {
+  const content = block.content.trim().replace(/\s+/g, ' ');
+  if (!content) {
+    return `第 ${index + 1} 段`;
+  }
+  const headingMatch = content.match(/^([一二三四五六七八九十]+[、.．]\s*[^：:。；;，,]{2,28})[：:。；;，,]?/);
+  if (headingMatch) {
+    return headingMatch[1].trim();
+  }
+  const colonIndex = content.search(/[：:]/);
+  if (colonIndex > 1 && colonIndex <= 24) {
+    return content.slice(0, colonIndex).trim();
+  }
+  return `第 ${index + 1} 段`;
+}
+
+function paragraphPreview(content: string) {
+  const normalized = content.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return '点击后在中间填写正文';
+  }
+  return normalized.length > 34 ? `${normalized.slice(0, 34)}...` : normalized;
+}
+
+function syncParagraphEditorHeight(textarea: HTMLTextAreaElement) {
+  textarea.style.height = 'auto';
+  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 function formatFileSize(size: number) {

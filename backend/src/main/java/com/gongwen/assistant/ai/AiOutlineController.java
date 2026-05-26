@@ -16,10 +16,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class AiOutlineController {
     private final AiOutlineService aiOutlineService;
     private final AiParagraphService aiParagraphService;
+    private final AiLocalOperationService aiLocalOperationService;
 
-    public AiOutlineController(AiOutlineService aiOutlineService, AiParagraphService aiParagraphService) {
+    public AiOutlineController(
+            AiOutlineService aiOutlineService,
+            AiParagraphService aiParagraphService,
+            AiLocalOperationService aiLocalOperationService
+    ) {
         this.aiOutlineService = aiOutlineService;
         this.aiParagraphService = aiParagraphService;
+        this.aiLocalOperationService = aiLocalOperationService;
     }
 
     @PostMapping("/outline")
@@ -38,6 +44,14 @@ public class AiOutlineController {
         return ApiResponse.ok(aiParagraphService.generateParagraph(draftId, request));
     }
 
+    @PostMapping("/local-operation")
+    public ApiResponse<AiLocalOperationResponse> generateLocalOperation(
+            @PathVariable long draftId,
+            @RequestBody AiLocalOperationRequest request
+    ) {
+        return ApiResponse.ok(aiLocalOperationService.generateSuggestion(draftId, request));
+    }
+
     @ExceptionHandler(DraftNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleDraftNotFound(DraftNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -47,7 +61,15 @@ public class AiOutlineController {
     @ExceptionHandler(AiOutlineException.class)
     public ResponseEntity<ApiResponse<Void>> handleAiOutlineException(AiOutlineException exception) {
         HttpStatus status = switch (exception.errorCode()) {
-            case "AI_OUTLINE_INSTRUCTION_TOO_LONG", "AI_PARAGRAPH_HEADING_REQUIRED", "AI_PARAGRAPH_INSTRUCTION_TOO_LONG" -> HttpStatus.BAD_REQUEST;
+            case "AI_OUTLINE_INSTRUCTION_TOO_LONG",
+                 "AI_PARAGRAPH_HEADING_REQUIRED",
+                 "AI_PARAGRAPH_INSTRUCTION_TOO_LONG",
+                 "AI_LOCAL_TARGET_REQUIRED",
+                 "AI_LOCAL_OPERATION_REQUIRED",
+                 "AI_LOCAL_INSTRUCTION_TOO_LONG",
+                 "AI_LOCAL_TARGET_NOT_FOUND",
+                 "AI_LOCAL_TARGET_NOT_BODY",
+                 "AI_LOCAL_TARGET_EMPTY" -> HttpStatus.BAD_REQUEST;
             case "AI_MODEL_UNAVAILABLE", "AI_RESPONSE_INVALID" -> HttpStatus.BAD_GATEWAY;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };

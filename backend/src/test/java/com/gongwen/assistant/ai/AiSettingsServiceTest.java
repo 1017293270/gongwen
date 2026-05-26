@@ -3,6 +3,8 @@ package com.gongwen.assistant.ai;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -41,6 +43,32 @@ class AiSettingsServiceTest {
     }
 
     @Test
+    void loadsPersistedSettingsAfterStateIsRecreated() {
+        InMemoryAiSettingsRepository repository = new InMemoryAiSettingsRepository();
+        AiSettingsService service = newService("", repository);
+
+        service.updateSettings(new AiProviderSettingsUpdateRequest(
+                "deepseek",
+                true,
+                "https://api.deepseek.com/",
+                "deepseek-chat",
+                "sk-persisted-123456",
+                false,
+                50
+        ));
+
+        AiSettingsService reloadedService = newService("", repository);
+        AiProviderSettings settings = reloadedService.getSettings();
+
+        assertThat(settings.provider()).isEqualTo("deepseek");
+        assertThat(settings.deepSeekEnabled()).isTrue();
+        assertThat(settings.deepSeekModel()).isEqualTo("deepseek-chat");
+        assertThat(settings.deepSeekApiKeyConfigured()).isTrue();
+        assertThat(settings.maskedDeepSeekApiKey()).isEqualTo("sk-p...3456");
+        assertThat(settings.deepSeekTimeoutSeconds()).isEqualTo(50);
+    }
+
+    @Test
     void rejectsEnabledDeepSeekWithoutApiKey() {
         AiSettingsService service = newService("");
 
@@ -57,11 +85,30 @@ class AiSettingsServiceTest {
     }
 
     private AiSettingsService newService(String apiKey) {
+        return newService(apiKey, new InMemoryAiSettingsRepository());
+    }
+
+    private AiSettingsService newService(String apiKey, AiSettingsRepository repository) {
         AiRuntimeProperties properties = new AiRuntimeProperties(
                 "mock",
-                new AiRuntimeProperties.DeepSeek(false, "https://api.deepseek.com", "deepseek-v4-flash", apiKey, 60)
+                new AiRuntimeProperties.DeepSeek(false, "https://api.deepseek.com", "deepseek-v4-flash", apiKey, 60),
+                "storage/ai-settings.key"
         );
-        AiConfigurationState state = new AiConfigurationState(properties);
+        AiConfigurationState state = new AiConfigurationState(properties, repository);
         return new AiSettingsService(state, new DeepSeekModelAdapter(state, new ObjectMapper()));
+    }
+
+    private static final class InMemoryAiSettingsRepository implements AiSettingsRepository {
+        private AiSettingsSnapshot saved;
+
+        @Override
+        public Optional<AiSettingsSnapshot> find() {
+            return Optional.ofNullable(saved);
+        }
+
+        @Override
+        public void save(AiSettingsSnapshot settings) {
+            saved = settings;
+        }
     }
 }

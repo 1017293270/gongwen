@@ -1,4 +1,6 @@
 import type {
+  AiLocalOperation,
+  AiLocalOperationType,
   AiOutline,
   AiParagraph,
   AiOutlineSection,
@@ -95,6 +97,22 @@ export function generateDraftParagraph(
       points: section.points,
       instruction,
       sortOrder,
+    }),
+  });
+}
+
+export function generateLocalOperation(
+  draftId: number,
+  targetBlockId: number,
+  operationType: AiLocalOperationType,
+  instruction: string,
+) {
+  return requestJson<AiLocalOperation>(`/api/drafts/${draftId}/ai/local-operation`, {
+    method: 'POST',
+    body: JSON.stringify({
+      targetBlockId,
+      operationType,
+      instruction,
     }),
   });
 }

@@ -74,12 +74,37 @@ class AiParagraphServiceTest {
                 .isEqualTo("一、主要事项：新的安排。");
     }
 
+    @Test
+    void prefixesOutlineHeadingWhenModelOmitsIt() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "", 30)
+        ));
+        AiParagraphService service = newService(new FixedParagraphModelAdapter("说明安排。"));
+
+        DraftDetailDto updated = service.generateParagraph(draft.id(), new AiParagraphRequest(
+                "二、工作安排",
+                List.of("说明安排"),
+                "",
+                30
+        )).draft();
+
+        assertThat(updated.blocks()).filteredOn(block -> "BODY_PARAGRAPH".equals(block.blockType()))
+                .first()
+                .extracting(DraftBlockDto::content)
+                .isEqualTo("二、工作安排：说明安排。");
+    }
+
     private AiParagraphService newService() {
+        return newService(new ParagraphModelAdapter());
+    }
+
+    private AiParagraphService newService(ModelAdapter modelAdapter) {
         return new AiParagraphService(
                 new DraftService(draftRepository),
                 materialRepository,
                 new PromptBuilder(),
-                new ParagraphModelAdapter(),
+                modelAdapter,
                 traceRepository
         );
     }
@@ -105,6 +130,34 @@ class AiParagraphServiceTest {
             String points = String.join("；", prompt.points());
             String suffix = prompt.instruction().isBlank() ? "" : prompt.instruction();
             return new AiParagraphModelResponse(prompt.heading() + "：" + points + "。" + suffix);
+        }
+    }
+
+    private static final class FixedParagraphModelAdapter implements ModelAdapter {
+        private final String content;
+
+        private FixedParagraphModelAdapter(String content) {
+            this.content = content;
+        }
+
+        @Override
+        public String provider() {
+            return "mock";
+        }
+
+        @Override
+        public String modelName() {
+            return "fixed-paragraph-model";
+        }
+
+        @Override
+        public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AiParagraphModelResponse generateParagraph(ParagraphPrompt prompt) {
+            return new AiParagraphModelResponse(content);
         }
     }
 

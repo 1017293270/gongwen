@@ -31,6 +31,7 @@ gongwen:
     max-file-size-bytes: ${GONGWEN_MATERIAL_MAX_FILE_SIZE_BYTES:20971520}
   ai:
     provider: ${GONGWEN_AI_PROVIDER:mock}
+    settings-key-file: ${GONGWEN_AI_SETTINGS_KEY_FILE:storage/ai-settings.key}
     deepseek:
       enabled: ${GONGWEN_DEEPSEEK_ENABLED:false}
       base-url: ${GONGWEN_DEEPSEEK_BASE_URL:https://api.deepseek.com}
