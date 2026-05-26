@@ -1,5 +1,8 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.template.profile.TemplatePlaceholderProfile;
+import com.gongwen.assistant.template.profile.TemplateProfile;
+import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -8,6 +11,10 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -87,5 +94,37 @@ class TemplateUploadServiceTest {
                 eq("TEMPLATE_PARSE_FAILED"),
                 eq("bad template"),
                 eq(9L));
+    }
+
+    @Test
+    void profileRepositoryStoresProfileForTemplateVersion() {
+        InMemoryTemplateProfileRepository repository = new InMemoryTemplateProfileRepository();
+        TemplateProfile profile = new TemplateProfile(
+                1,
+                List.of(),
+                List.of(new TemplatePlaceholderProfile("title", "PARAGRAPH", "paragraph-0", null, null, false)),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+
+        repository.save(9L, profile, "hash-1");
+
+        assertThat(repository.findByTemplateVersionId(9L)).contains(profile);
+    }
+
+    private static class InMemoryTemplateProfileRepository implements TemplateProfileRepository {
+        private final Map<Long, TemplateProfile> profiles = new HashMap<>();
+
+        @Override
+        public void save(long templateVersionId, TemplateProfile profile, String profileHash) {
+            profiles.put(templateVersionId, profile);
+        }
+
+        @Override
+        public Optional<TemplateProfile> findByTemplateVersionId(long templateVersionId) {
+            return Optional.ofNullable(profiles.get(templateVersionId));
+        }
     }
 }
