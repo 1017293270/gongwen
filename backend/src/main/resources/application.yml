@@ -26,6 +26,9 @@ management:
         include: health,info
 
 gongwen:
+  template:
+    storage-dir: ${GONGWEN_TEMPLATE_STORAGE_DIR:storage/templates}
+    max-upload-mb: ${GONGWEN_TEMPLATE_MAX_UPLOAD_MB:20}
   material:
     storage-dir: ${GONGWEN_MATERIAL_STORAGE_DIR:storage/materials}
     max-file-size-bytes: ${GONGWEN_MATERIAL_MAX_FILE_SIZE_BYTES:20971520}
