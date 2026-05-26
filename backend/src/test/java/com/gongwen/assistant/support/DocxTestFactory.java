@@ -4,6 +4,7 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.apache.poi.wp.usermodel.HeaderFooterType;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -37,6 +38,42 @@ public final class DocxTestFactory {
             return output.toByteArray();
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to create test docx table", exception);
+        }
+    }
+
+    public static byte[] docxWithSplitPlaceholder() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph paragraph = document.createParagraph();
+            paragraph.createRun().setText("{{标");
+            paragraph.createRun().setText("题}}");
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create split placeholder docx", exception);
+        }
+    }
+
+    public static byte[] docxWithOfficialStyles() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph title = document.createParagraph();
+            title.setStyle("official_title");
+            title.createRun().setText("{{标题}}");
+
+            XWPFParagraph body = document.createParagraph();
+            body.setStyle("body_text");
+            body.createRun().setText("{{正文}}");
+
+            document.createHeader(HeaderFooterType.DEFAULT)
+                    .createParagraph()
+                    .createRun()
+                    .setText("机关公文");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create styled docx", exception);
         }
     }
 
