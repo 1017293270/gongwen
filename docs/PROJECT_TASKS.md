@@ -38,10 +38,12 @@
 - 后端 CORS 允许本地 Vite 端口访问 `/api/**`。
 - 应用总览页和左侧侧边栏信息架构壳子，预留工作台、草稿列表、模板管理、材料库、导出记录、AI 任务和系统设置入口。
 - 系统设置 AI 配置页、运行时 Mock / DeepSeek 切换、DeepSeek 模型适配和连接测试 API。
+- P8A 模板引擎后端底座：模板版本、`TemplateProfile`、解析风险、上传解析 API 和 profile 查询 API。
 
 当前推荐下一阶段：
 
 - P8 基础质检。
+- P8 可先复用 P8A 的 `TemplateProfile` 做模板占位符和结构检查。
 - 可使用多 Agent 并行推进：后端规则检查、前端质检面板、QA/文档三线并行，最后由集成 Agent 统一验收。
 
 ## 全局落地原则
@@ -561,6 +563,31 @@
 - Agent B 前端：在 Word 风格预览中支持选择单个 `BODY_PARAGRAPH`，右栏出现局部操作面板；不改后端业务逻辑。
 - Agent C QA/文档：补测试场景和文档，包括未选段落、生成失败、建议未采纳不覆盖原文、采纳后保存。
 - 集成 Agent：统一对齐 API 字段、处理冲突、跑后端 focused/full tests、前端 tests/build 和浏览器验证。
+
+### P8A 模板引擎底座
+
+状态：已完成 T1 后端基础。
+
+目标：按 Word 样式体系优先建立模板版本、`TemplateProfile`、解析风险和上传解析 API，为后续模板管理、质检和导出升级提供稳定底座。
+
+已实现范围：
+
+- `document_template_version`、`template_profile`、`template_block_mapping`、`template_rule`、`template_validation_result` 数据表。
+- 本地模板文件存储和模板版本持久化。
+- `TemplateProfile` 解析，占位符、样式、section、表格、页眉页脚、媒体和校验项可结构化保存。
+- `.docx` 模板上传服务，包含类型、大小、空文件校验，解析失败会标记版本失败。
+- profile JSONB 持久化。
+
+已实现 API：
+
+- `POST /api/templates/{templateId}/versions`
+- `GET /api/templates/versions/{versionId}/profile`
+
+后续依赖：
+
+- P8 基础质检可复用 `TemplateProfile` 做占位符填充和结构检查。
+- P10 模板管理员后台可复用上传和 profile 查询能力展示解析结果。
+- P11 导出体验增强需要绑定具体模板版本，保证历史导出可追溯。
 
 ### P8 基础质检
 

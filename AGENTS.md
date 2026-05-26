@@ -348,12 +348,14 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P7 局部段落 AI 操作已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表，以及总览入口、工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试，以及选中单个正文段落后的 AI 局部建议和采纳替换能力。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v6。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P7 局部段落 AI 操作已完成基础实现，P8A 模板引擎底座已完成后端基础。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、模板版本/profile/映射/规则/校验结果表，以及总览入口、工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试，以及选中单个正文段落后的 AI 局部建议和采纳替换能力。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v7。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
 - `GET /api/health`
 - `POST /api/templates/parse`
+- `POST /api/templates/{templateId}/versions`
+- `GET /api/templates/versions/{versionId}/profile`
 - `POST /api/exports/word`
 - `GET /api/document-types`
 - `POST /api/drafts`
@@ -416,6 +418,14 @@ P7 局部段落 AI 操作当前约定：
 - `ai_generation_trace` 使用 `LOCAL_OPERATION` task type 记录 provider、model、状态、prompt 版本、目标块、操作类型、字符数和耗时。
 - trace 不保存完整原文段落、完整建议文本、完整材料提取文本或完整 prompt。
 
+模板引擎当前约定：
+
+- 模板模块按 Word 样式体系优先设计，底层保存 `TemplateProfile`，后续映射、质检和导出都应以具体模板版本为锚点。
+- 模板版本不可变；导出记录后续必须绑定具体模板版本，确保导出文件可追溯。
+- `TemplateProfile` 保存占位符、样式、section、表格、页眉页脚、媒体和解析风险摘要；profile JSON 使用 PostgreSQL JSONB 持久化。
+- 当前 T1 后端底座已提供 `POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。
+- 首版模板后台尚未完成；当前 API 先服务后续 P8A/P10/P11，不在工作台提前扩成完整模板管理 UI。
+
 材料上传当前约定：
 
 - 支持 `.docx` 和 `.pdf`。
@@ -473,7 +483,7 @@ P7 局部段落 AI 操作当前约定：
 下一步建议：
 
 1. 推进 P8：基础质检，覆盖缺失字段、结构完整性和导出前检查结果。
-2. P8 质检可以先不接真实模型，优先落地字段缺失、结构完整、导出前检查和结果展示，再逐步接 AI 表达建议。
+2. P8 可复用 P8A 的 `TemplateProfile` 做模板占位符和结构检查；先不接真实模型，优先落地规则检查和结果展示，再逐步接 AI 表达建议。
 3. P9 登录与基础权限仍是 MVP 闭环的关键后续，尤其是草稿、材料、模板、导出文件访问控制。
-4. P7 后续可补充更细的局部操作历史、撤销和差异对比，但不要阻塞 P8。
-5. 后续开发默认先跑 focused tests，提交前再跑全量后端测试、前端测试和前端构建。
+4. P10 模板管理员后台基于当前模板版本/profile API 继续扩展上传、解析结果展示、字段映射和启停。
+5. 后续开发默认先跑 focused tests；除非风险明显升高，可按任务轻量验证，避免每个小步都跑全量测试。
