@@ -29,3 +29,11 @@ gongwen:
   material:
     storage-dir: ${GONGWEN_MATERIAL_STORAGE_DIR:storage/materials}
     max-file-size-bytes: ${GONGWEN_MATERIAL_MAX_FILE_SIZE_BYTES:20971520}
+  ai:
+    provider: ${GONGWEN_AI_PROVIDER:mock}
+    deepseek:
+      enabled: ${GONGWEN_DEEPSEEK_ENABLED:false}
+      base-url: ${GONGWEN_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      model: ${GONGWEN_DEEPSEEK_MODEL:deepseek-v4-flash}
+      api-key: ${DEEPSEEK_API_KEY:}
+      timeout-seconds: ${GONGWEN_DEEPSEEK_TIMEOUT_SECONDS:60}

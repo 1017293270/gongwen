@@ -56,3 +56,37 @@ export type AiOutline = {
   sections: AiOutlineSection[];
   missingInformation: string[];
 };
+
+export type AiParagraph = {
+  traceId: string;
+  draft: DraftDetail;
+  block: DraftBlock;
+};
+
+export type AiProviderSettings = {
+  provider: 'mock' | 'deepseek';
+  deepSeekEnabled: boolean;
+  deepSeekBaseUrl: string;
+  deepSeekModel: string;
+  deepSeekApiKeyConfigured: boolean;
+  maskedDeepSeekApiKey: string;
+  deepSeekTimeoutSeconds: number;
+};
+
+export type AiProviderSettingsUpdate = {
+  provider: 'mock' | 'deepseek';
+  deepSeekEnabled: boolean;
+  deepSeekBaseUrl: string;
+  deepSeekModel: string;
+  deepSeekApiKey?: string;
+  clearDeepSeekApiKey?: boolean;
+  deepSeekTimeoutSeconds: number;
+};
+
+export type AiProviderStatus = {
+  provider: string;
+  model: string;
+  available: boolean;
+  message: string;
+  latencyMs: number;
+};

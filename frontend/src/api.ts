@@ -1,4 +1,16 @@
-import type { AiOutline, ApiResponse, DocumentType, DraftBlockUpdate, DraftDetail, Material } from './draftTypes';
+import type {
+  AiOutline,
+  AiParagraph,
+  AiOutlineSection,
+  AiProviderSettings,
+  AiProviderSettingsUpdate,
+  AiProviderStatus,
+  ApiResponse,
+  DocumentType,
+  DraftBlockUpdate,
+  DraftDetail,
+  Material,
+} from './draftTypes';
 
 function apiBaseUrl() {
   return import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -67,5 +79,40 @@ export function generateDraftOutline(draftId: number, instruction: string) {
   return requestJson<AiOutline>(`/api/drafts/${draftId}/ai/outline`, {
     method: 'POST',
     body: JSON.stringify({ instruction }),
+  });
+}
+
+export function generateDraftParagraph(
+  draftId: number,
+  section: AiOutlineSection,
+  instruction: string,
+  sortOrder: number,
+) {
+  return requestJson<AiParagraph>(`/api/drafts/${draftId}/ai/paragraph`, {
+    method: 'POST',
+    body: JSON.stringify({
+      heading: section.heading,
+      points: section.points,
+      instruction,
+      sortOrder,
+    }),
+  });
+}
+
+export function getAiProviderSettings() {
+  return requestJson<AiProviderSettings>('/api/ai/settings');
+}
+
+export function updateAiProviderSettings(settings: AiProviderSettingsUpdate) {
+  return requestJson<AiProviderSettings>('/api/ai/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+}
+
+export function testAiProviderConnection() {
+  return requestJson<AiProviderStatus>('/api/ai/settings/test', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }

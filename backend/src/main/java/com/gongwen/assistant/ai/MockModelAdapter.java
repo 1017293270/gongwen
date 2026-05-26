@@ -44,6 +44,15 @@ public class MockModelAdapter implements ModelAdapter {
         );
     }
 
+    @Override
+    public AiParagraphModelResponse generateParagraph(ParagraphPrompt prompt) {
+        String points = prompt.points().isEmpty()
+                ? "围绕" + prompt.heading() + "展开具体说明"
+                : String.join("；", prompt.points());
+        String instruction = prompt.instruction().isBlank() ? "" : prompt.instruction();
+        return new AiParagraphModelResponse(prompt.heading() + "：" + points + "。" + instruction);
+    }
+
     private boolean isBlankField(OutlinePrompt prompt, String blockType) {
         return prompt.fieldSummaries().stream()
                 .filter(summary -> summary.startsWith(blockType + ":"))

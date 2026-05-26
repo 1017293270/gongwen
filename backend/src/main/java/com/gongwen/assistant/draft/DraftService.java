@@ -1,6 +1,7 @@
 package com.gongwen.assistant.draft;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Clock;
 import java.time.LocalDate;
@@ -12,6 +13,7 @@ public class DraftService {
     private final DraftRepository draftRepository;
     private final Clock clock;
 
+    @Autowired
     public DraftService(DraftRepository draftRepository) {
         this(draftRepository, Clock.systemDefaultZone());
     }

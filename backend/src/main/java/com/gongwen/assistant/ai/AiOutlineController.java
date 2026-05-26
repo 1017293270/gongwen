@@ -15,9 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/drafts/{draftId}/ai")
 public class AiOutlineController {
     private final AiOutlineService aiOutlineService;
+    private final AiParagraphService aiParagraphService;
 
-    public AiOutlineController(AiOutlineService aiOutlineService) {
+    public AiOutlineController(AiOutlineService aiOutlineService, AiParagraphService aiParagraphService) {
         this.aiOutlineService = aiOutlineService;
+        this.aiParagraphService = aiParagraphService;
     }
 
     @PostMapping("/outline")
@@ -26,6 +28,14 @@ public class AiOutlineController {
             @RequestBody(required = false) AiOutlineRequest request
     ) {
         return ApiResponse.ok(aiOutlineService.generateOutline(draftId, request));
+    }
+
+    @PostMapping("/paragraph")
+    public ApiResponse<AiParagraphResponse> generateParagraph(
+            @PathVariable long draftId,
+            @RequestBody AiParagraphRequest request
+    ) {
+        return ApiResponse.ok(aiParagraphService.generateParagraph(draftId, request));
     }
 
     @ExceptionHandler(DraftNotFoundException.class)
@@ -37,7 +47,7 @@ public class AiOutlineController {
     @ExceptionHandler(AiOutlineException.class)
     public ResponseEntity<ApiResponse<Void>> handleAiOutlineException(AiOutlineException exception) {
         HttpStatus status = switch (exception.errorCode()) {
-            case "AI_OUTLINE_INSTRUCTION_TOO_LONG" -> HttpStatus.BAD_REQUEST;
+            case "AI_OUTLINE_INSTRUCTION_TOO_LONG", "AI_PARAGRAPH_HEADING_REQUIRED", "AI_PARAGRAPH_INSTRUCTION_TOO_LONG" -> HttpStatus.BAD_REQUEST;
             case "AI_MODEL_UNAVAILABLE", "AI_RESPONSE_INVALID" -> HttpStatus.BAD_GATEWAY;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };

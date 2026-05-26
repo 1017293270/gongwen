@@ -1,0 +1,46 @@
+package com.gongwen.assistant.ai;
+
+import org.springframework.context.annotation.Primary;
+import org.springframework.stereotype.Component;
+
+@Primary
+@Component
+public class RoutingModelAdapter implements ModelAdapter {
+    private final AiConfigurationState configurationState;
+    private final MockModelAdapter mockModelAdapter;
+    private final DeepSeekModelAdapter deepSeekModelAdapter;
+
+    public RoutingModelAdapter(
+            AiConfigurationState configurationState,
+            MockModelAdapter mockModelAdapter,
+            DeepSeekModelAdapter deepSeekModelAdapter
+    ) {
+        this.configurationState = configurationState;
+        this.mockModelAdapter = mockModelAdapter;
+        this.deepSeekModelAdapter = deepSeekModelAdapter;
+    }
+
+    @Override
+    public String provider() {
+        return activeAdapter().provider();
+    }
+
+    @Override
+    public String modelName() {
+        return activeAdapter().modelName();
+    }
+
+    @Override
+    public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
+        return activeAdapter().generateOutline(prompt);
+    }
+
+    @Override
+    public AiParagraphModelResponse generateParagraph(ParagraphPrompt prompt) {
+        return activeAdapter().generateParagraph(prompt);
+    }
+
+    private ModelAdapter activeAdapter() {
+        return configurationState.useDeepSeek() ? deepSeekModelAdapter : mockModelAdapter;
+    }
+}

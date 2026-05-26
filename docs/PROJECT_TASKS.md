@@ -36,10 +36,13 @@
 - 前端统一轻反馈组件，基于 `@radix-ui/react-toast` 并使用 `DESIGN.md` token。
 - 前端通过 `VITE_API_BASE_URL` 联调映射到 18080 的后端容器。
 - 后端 CORS 允许本地 Vite 端口访问 `/api/**`。
+- 应用总览页和左侧侧边栏信息架构壳子，预留工作台、草稿列表、模板管理、材料库、导出记录、AI 任务和系统设置入口。
+- 系统设置 AI 配置页、运行时 Mock / DeepSeek 切换、DeepSeek 模型适配和连接测试 API。
 
 当前推荐下一阶段：
 
-- P6 AI 逐段正文生成。
+- P7 局部 AI 操作。
+- 可使用多 Agent 并行推进：后端建议 API、前端段落选择 UI、QA/文档三线并行，最后由集成 Agent 统一验收。
 
 ## 全局落地原则
 
@@ -251,6 +254,7 @@
 - 工作台左栏材料上传。
 - 材料列表、状态、提取字数、失败原因展示。
 - 基于 `@radix-ui/react-toast` 的统一轻反馈组件。
+- 基于提纲章节的单段正文生成按钮、生成中状态、失败重试状态和成功后预览刷新。
 
 验证状态：
 
@@ -308,7 +312,7 @@
 
 ### P6 AI 逐段正文生成
 
-状态：待开始。
+状态：已完成。
 
 目标：基于确认后的提纲逐段生成正文块。
 
@@ -322,10 +326,164 @@
 
 验收标准：
 
-- 能按提纲生成正文块。
+- 已能按提纲章节生成单个正文块。
 - 单段失败不影响已生成段落。
 - 用户可重试失败段落。
-- 生成结果能保存为 `DraftBlock`。
+- 生成结果已保存为 `DraftBlock`。
+
+已实现 API：
+
+- `POST /api/drafts/{draftId}/ai/paragraph`
+
+已实现后端模块：
+
+- `AiParagraphService`
+- `AiParagraphRequest` / `AiParagraphResponse`
+- `ParagraphPrompt`
+- `AiParagraphModelResponse`
+- `MockModelAdapter.generateParagraph`
+
+已实现前端能力：
+
+- 提纲章节内“生成正文 / 正在生成 / 重试正文”按钮。
+- 成功后刷新草稿块和 Word 风格预览。
+- 失败时显示右栏错误和 Toast 反馈。
+
+验证状态：
+
+- 后端全量测试通过。
+- 前端 `npm test -- --run` 通过。
+- 前端 `npm run build` 通过。
+- 本地浏览器打开 `http://127.0.0.1:5175` 验证工作台渲染，无控制台错误。
+
+### P6.5 应用总览与侧边栏壳子
+
+状态：已完成。
+
+目标：在继续 P7/P8 前补齐全局信息架构入口，让工作台、模板管理、材料、导出记录和 AI 任务有清晰入口。
+
+范围：
+
+- 默认总览页。
+- 左侧侧边栏主导航。
+- 工作台入口。
+- 草稿列表、模板管理、材料库、导出记录、AI 任务、系统设置预留页面。
+- 总览展示当前草稿、正文段落、READY 材料和阶段提醒。
+- 总览加载、空、错误和可操作状态。
+
+验收标准：
+
+- 默认进入总览页。
+- 侧边栏可进入工作台。
+- 工作台仍保持三栏主结构。
+- 预留页面不抢占 MVP 范围，不提前实现完整管理后台。
+- 桌面和窄屏布局可用，交互控件保持可访问名称和 focus-visible 状态。
+
+验证状态：
+
+- 前端 `npm test -- --run` 通过。
+- 前端 `npm run build` 通过。
+- 终端 Playwright 打开 `http://127.0.0.1:5175` 验证总览、主导航、最近草稿、工作台切换和右栏 AI 面板，控制台错误为 0。
+- Codex Browser 插件因底层 `node_repl` 内核报 `failed to write kernel assets` 未能使用，已用 bundled Playwright 完成等价浏览器验证。
+
+### P6.6 系统设置 AI 配置与 DeepSeek 适配
+
+状态：已完成。
+
+目标：把 AI 供应商配置放入系统设置，让本地 Mock 演示和 DeepSeek 云模型接入可以在运行时切换。
+
+范围：
+
+- 系统设置中的 AI 配置页面。
+- DeepSeek Base URL、模型、超时和 API Key 运行时配置。
+- 后端模型路由适配层。
+- OpenAI 兼容 `/chat/completions` 调用。
+- AI 配置读取、保存和连接测试 API。
+- `.env.example` 新增 DeepSeek 相关环境变量。
+- 测试连接前自动保存当前表单，避免表单状态和后端运行时状态不一致。
+- 新增专题说明文档 `docs/AI_CONFIGURATION.md`。
+
+验收标准：
+
+- 未配置云模型密钥时仍默认使用 Mock，便于本地开发和演示。
+- 启用 DeepSeek 时必须配置 API Key。
+- API Key 响应只返回脱敏状态，不保存到数据库或 trace。
+- DeepSeek 调用仍复用集中 PromptBuilder 和既有 trace 链路。
+- 系统设置页面覆盖加载、保存中、测试中、成功、失败和禁用状态。
+- 不改动侧边栏样式，仅将 AI 配置内容放入系统设置。
+- 用户在表单中选择 DeepSeek 后，可以直接点测试连接；前端会先保存配置再测试，不会拿旧 Mock 状态测试。
+
+已实现 API：
+
+- `GET /api/ai/settings`
+- `PUT /api/ai/settings`
+- `POST /api/ai/settings/test`
+
+已实现后端模块：
+
+- `AiRuntimeProperties`
+- `AiConfigurationState`
+- `RoutingModelAdapter`
+- `DeepSeekModelAdapter`
+- `AiSettingsService`
+- `AiSettingsController`
+- `AiSettingsException`
+- `AiProviderStatus`
+
+已实现前端能力：
+
+- 系统设置页 AI 配置表单。
+- Mock / DeepSeek 切换。
+- DeepSeek Base URL、模型、API Key 和超时配置。
+- 保存配置和连接测试。
+- 成功、失败和加载状态反馈。
+- 测试连接时自动保存当前配置。
+
+实现细节：
+
+- `RoutingModelAdapter` 是 `ModelAdapter` 主入口。
+- provider 为 `deepseek`、启用 DeepSeek 且已有 API Key 时，提纲生成和段落生成走 `DeepSeekModelAdapter`。
+- provider 为 `mock`、未启用 DeepSeek 或未配置 API Key 时，继续走 Mock。
+- `DeepSeekModelAdapter` 调用 OpenAI 兼容 `/chat/completions`，要求 JSON 输出。
+- DeepSeek 提纲输出解析为 `AiOutlineResponse`。
+- DeepSeek 段落输出解析为 `AiParagraphModelResponse`。
+- 运行时配置存放在 `AiConfigurationState` 内存态中，重启后回到环境变量。
+- API Key 响应只暴露 `deepSeekApiKeyConfigured` 和 `maskedDeepSeekApiKey`。
+- `.env.example` 已新增 `GONGWEN_AI_PROVIDER`、`GONGWEN_DEEPSEEK_ENABLED`、`GONGWEN_DEEPSEEK_BASE_URL`、`GONGWEN_DEEPSEEK_MODEL`、`GONGWEN_DEEPSEEK_TIMEOUT_SECONDS`、`DEEPSEEK_API_KEY`。
+
+相关文件：
+
+- `docs/AI_CONFIGURATION.md`
+- `.env.example`
+- `backend/src/main/resources/application.yml`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiRuntimeProperties.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiConfigurationState.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/RoutingModelAdapter.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/DeepSeekModelAdapter.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsController.java`
+- `backend/src/main/java/com/gongwen/assistant/ai/AiSettingsService.java`
+- `backend/src/test/java/com/gongwen/assistant/ai/AiSettingsServiceTest.java`
+- `frontend/src/App.tsx`
+- `frontend/src/api.ts`
+- `frontend/src/draftTypes.ts`
+- `frontend/src/App.test.tsx`
+- `frontend/src/styles/app.css`
+
+已知注意点：
+
+- 系统设置写入的是后端运行时内存态配置，不是持久配置；后端重启后以环境变量为准。
+- 生产化前需要补权限控制、密钥清除、审计、密钥存储和持久化策略。
+- Codex Browser 插件在本机曾不可用，原因是底层 `node_repl` 内核报 `failed to write kernel assets`；浏览器验证可使用终端 Playwright 或人工刷新。
+- 如果系统设置页显示 `Failed to fetch`，优先检查后端 8080 是否运行，以及 `VITE_API_BASE_URL` 是否指向当前后端。
+
+验证状态：
+
+- focused 后端测试 `AiSettingsServiceTest` 通过。
+- 后端完整测试通过。
+- 前端 `npm test -- --run` 通过。
+- 前端 `npm run build` 通过。
+- 本地接口烟测 `GET /api/ai/settings`、`PUT /api/ai/settings`、`POST /api/ai/settings/test` 通过。
+- 本地 Vite `http://127.0.0.1:5175` 可打开系统设置页。
 
 ### P7 局部 AI 操作
 
@@ -347,6 +505,20 @@
 - 局部操作不直接覆盖原文。
 - 用户确认后才替换。
 - 保留操作 trace 和失败状态。
+
+实施建议：
+
+- 先修正前端段落目标模型，按 `DraftBlock` 选择单个 `BODY_PARAGRAPH`，不要基于合并后的正文 textarea 做局部操作。
+- 新增建议型 API，返回 `traceId`、目标段落标识、操作类型和建议文本，不直接保存草稿。
+- 用户点采用后复用 `PUT /api/drafts/{id}/blocks` 保存替换后的草稿块。
+- 后端 prompt 使用 `local-operation-v1`，trace 只记录段落标识、操作类型、字符数和摘要，不保存完整原文或完整建议。
+
+建议多 Agent 拆分：
+
+- Agent A 后端：新增局部 AI 建议 request/response、service、controller、prompt builder 和 trace；不改前端。
+- Agent B 前端：在 Word 风格预览中支持选择单个 `BODY_PARAGRAPH`，右栏出现局部操作面板；不改后端业务逻辑。
+- Agent C QA/文档：补测试场景和文档，包括未选段落、生成失败、建议未采纳不覆盖原文、采纳后保存。
+- 集成 Agent：统一对齐 API 字段、处理冲突、跑后端 focused/full tests、前端 tests/build 和浏览器验证。
 
 ### P8 基础质检
 
@@ -498,12 +670,11 @@
 
 ## 当前开发队列
 
-1. P5 AI 生成提纲。
-2. P6 AI 逐段正文生成。
-3. P8 基础质检。
-4. P9 登录与基础权限。
-5. P10 模板管理员后台。
-6. P11 导出体验增强。
+1. P7 局部 AI 操作。
+2. P8 基础质检。
+3. P9 登录与基础权限。
+4. P10 模板管理员后台。
+5. P11 导出体验增强。
 
 ## AI 接力清单
 

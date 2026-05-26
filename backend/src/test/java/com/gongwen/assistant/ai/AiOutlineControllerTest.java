@@ -1,6 +1,8 @@
 package com.gongwen.assistant.ai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gongwen.assistant.draft.DraftBlockDto;
+import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +31,9 @@ class AiOutlineControllerTest {
 
     @MockBean
     private AiOutlineService aiOutlineService;
+
+    @MockBean
+    private AiParagraphService aiParagraphService;
 
     @Test
     void generatesOutline() throws Exception {
@@ -71,5 +76,29 @@ class AiOutlineControllerTest {
                         .content(objectMapper.writeValueAsString(new AiOutlineRequest("长".repeat(1001)))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("AI_OUTLINE_INSTRUCTION_TOO_LONG"));
+    }
+
+    @Test
+    void generatesParagraph() throws Exception {
+        UUID traceId = UUID.randomUUID();
+        DraftBlockDto block = new DraftBlockDto(3L, "BODY_PARAGRAPH", "一、主要事项：说明安排。", 30);
+        when(aiParagraphService.generateParagraph(eq(1L), any())).thenReturn(new AiParagraphResponse(
+                traceId,
+                new DraftDetailDto(1L, "NOTICE", "测试通知", "DRAFT", List.of(block)),
+                block
+        ));
+
+        mockMvc.perform(post("/api/drafts/1/ai/paragraph")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new AiParagraphRequest(
+                                "一、主要事项",
+                                List.of("说明安排"),
+                                "",
+                                30
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.traceId").value(traceId.toString()))
+                .andExpect(jsonPath("$.data.block.content").value("一、主要事项：说明安排。"));
     }
 }

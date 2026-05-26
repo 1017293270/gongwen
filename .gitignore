@@ -10,6 +10,7 @@ Thumbs.db
 
 # Logs and temp files
 *.log
+*.err
 *.tmp
 *.tsbuildinfo
 
