@@ -13,6 +13,7 @@ import type {
   DraftDetail,
   Material,
   QualityCheckResult,
+  TemplateVersionSummary,
 } from './draftTypes';
 
 function apiBaseUrl() {
@@ -68,6 +69,18 @@ export function saveDraftBlocks(draftId: number, blocks: DraftBlockUpdate[]) {
   });
 }
 
+export function updateDraftTemplateVersion(draftId: number, templateVersionId: number | null) {
+  return requestJson<DraftDetail>(`/api/drafts/${draftId}/template-version`, {
+    method: 'PUT',
+    body: JSON.stringify({ templateVersionId }),
+  });
+}
+
+export function listTemplateVersions(documentTypeCode?: string) {
+  const query = documentTypeCode ? `?documentTypeCode=${encodeURIComponent(documentTypeCode)}` : '';
+  return requestJson<TemplateVersionSummary[]>(`/api/templates/versions${query}`);
+}
+
 export function listDraftMaterials(draftId: number) {
   return requestJson<Material[]>(`/api/drafts/${draftId}/materials`);
 }
@@ -78,9 +91,10 @@ export function uploadDraftMaterial(draftId: number, file: File) {
   return requestFormData<Material>(`/api/drafts/${draftId}/materials`, formData);
 }
 
-export function generateDraftOutline(draftId: number, instruction: string) {
+export function generateDraftOutline(draftId: number, instruction: string, signal?: AbortSignal) {
   return requestJson<AiOutline>(`/api/drafts/${draftId}/ai/outline`, {
     method: 'POST',
+    signal,
     body: JSON.stringify({ instruction }),
   });
 }
@@ -90,9 +104,11 @@ export function generateDraftParagraph(
   section: AiOutlineSection,
   instruction: string,
   sortOrder: number,
+  signal?: AbortSignal,
 ) {
   return requestJson<AiParagraph>(`/api/drafts/${draftId}/ai/paragraph`, {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       heading: section.heading,
       points: section.points,
@@ -107,9 +123,11 @@ export function generateLocalOperation(
   targetBlockId: number,
   operationType: AiLocalOperationType,
   instruction: string,
+  signal?: AbortSignal,
 ) {
   return requestJson<AiLocalOperation>(`/api/drafts/${draftId}/ai/local-operation`, {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       targetBlockId,
       operationType,
@@ -118,9 +136,10 @@ export function generateLocalOperation(
   });
 }
 
-export function runQualityCheck(draftId: number) {
+export function runQualityCheck(draftId: number, signal?: AbortSignal) {
   return requestJson<QualityCheckResult>(`/api/drafts/${draftId}/quality-check`, {
     method: 'POST',
+    signal,
     body: JSON.stringify({}),
   });
 }

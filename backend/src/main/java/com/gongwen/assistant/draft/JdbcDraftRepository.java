@@ -39,7 +39,7 @@ public class JdbcDraftRepository implements DraftRepository {
     @Override
     public DraftDetailDto findById(long id) {
         List<Map<String, Object>> drafts = jdbcTemplate.queryForList("""
-                select id, document_type_code, title, status
+                select id, document_type_code, title, status, template_version_id
                 from draft
                 where id = ?
                 """, id);
@@ -52,6 +52,7 @@ public class JdbcDraftRepository implements DraftRepository {
                 (String) draft.get("document_type_code"),
                 (String) draft.get("title"),
                 (String) draft.get("status"),
+                draft.get("template_version_id") == null ? null : ((Number) draft.get("template_version_id")).longValue(),
                 findBlocks(id));
     }
 
@@ -67,6 +68,13 @@ public class JdbcDraftRepository implements DraftRepository {
         jdbcTemplate.update("update draft set title = ?, updated_at = now() where id = ?", title, id);
         jdbcTemplate.update("delete from draft_block where draft_id = ?", id);
         insertBlocks(id, blocks);
+        return findById(id);
+    }
+
+    @Override
+    public DraftDetailDto updateTemplateVersion(long id, Long templateVersionId) {
+        findById(id);
+        jdbcTemplate.update("update draft set template_version_id = ?, updated_at = now() where id = ?", templateVersionId, id);
         return findById(id);
     }
 

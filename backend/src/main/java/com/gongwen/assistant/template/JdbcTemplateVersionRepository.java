@@ -10,6 +10,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -58,6 +59,34 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
         return jdbcTemplate.query("select * from document_template_version where id = ?", this::mapRow, id)
                 .stream()
                 .findFirst();
+    }
+
+    @Override
+    public List<TemplateVersionSummary> findReadyVersions(String documentTypeCode) {
+        String safeDocumentTypeCode = documentTypeCode == null ? "" : documentTypeCode.strip();
+        return jdbcTemplate.query("""
+                        select v.id as template_version_id,
+                               t.id as template_id,
+                               t.template_name,
+                               v.version_no,
+                               t.document_type_code,
+                               v.original_file_name
+                        from document_template_version v
+                        join document_template t on t.id = v.template_id
+                        where v.parse_status = 'READY'
+                          and (? = '' or t.document_type_code is null or t.document_type_code = ?)
+                        order by t.template_name asc, v.version_no desc
+                        """,
+                (rs, rowNum) -> new TemplateVersionSummary(
+                        rs.getLong("template_version_id"),
+                        rs.getLong("template_id"),
+                        rs.getString("template_name"),
+                        rs.getInt("version_no"),
+                        rs.getString("document_type_code"),
+                        rs.getString("original_file_name")
+                ),
+                safeDocumentTypeCode,
+                safeDocumentTypeCode);
     }
 
     @Override

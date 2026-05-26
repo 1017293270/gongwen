@@ -36,6 +36,11 @@ public class DraftController {
         return ApiResponse.ok(draftService.updateBlocks(id, request));
     }
 
+    @PutMapping("/{id}/template-version")
+    public ApiResponse<DraftDetailDto> updateTemplateVersion(@PathVariable long id, @RequestBody(required = false) UpdateDraftTemplateRequest request) {
+        return ApiResponse.ok(draftService.updateTemplateVersion(id, request));
+    }
+
     @ExceptionHandler(DraftNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleDraftNotFound(DraftNotFoundException exception) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)

@@ -1,6 +1,7 @@
 package com.gongwen.assistant.template;
 
 import java.util.Optional;
+import java.util.List;
 
 public interface TemplateVersionRepository {
     TemplateVersion create(long templateId, String originalFileName, String contentType, long fileSizeBytes, String filePath);
@@ -8,6 +9,10 @@ public interface TemplateVersionRepository {
     int nextVersionNo(long templateId);
 
     Optional<TemplateVersion> findById(long id);
+
+    default List<TemplateVersionSummary> findReadyVersions(String documentTypeCode) {
+        return List.of();
+    }
 
     void markParsed(long id, String profileHash);
 

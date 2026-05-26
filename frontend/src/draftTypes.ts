@@ -24,7 +24,17 @@ export type DraftDetail = {
   documentTypeCode: string;
   title: string;
   status: string;
+  templateVersionId: number | null;
   blocks: DraftBlock[];
+};
+
+export type TemplateVersionSummary = {
+  templateVersionId: number;
+  templateId: number;
+  templateName: string;
+  versionNo: number;
+  documentTypeCode: string | null;
+  originalFileName: string;
 };
 
 export type DraftBlockUpdate = {

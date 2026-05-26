@@ -41,6 +41,10 @@ public class DraftService {
         return draftRepository.replaceBlocks(id, request.blocks());
     }
 
+    public DraftDetailDto updateTemplateVersion(long id, UpdateDraftTemplateRequest request) {
+        return draftRepository.updateTemplateVersion(id, request == null ? null : request.templateVersionId());
+    }
+
     private List<DraftBlockUpdateRequest> defaultBlocks(String title) {
         return List.of(
                 new DraftBlockUpdateRequest("TITLE", title, 10),

@@ -37,7 +37,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(sampleDraft('后端草稿标题')))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(sampleDraft('更新后的标题')));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -69,7 +69,7 @@ describe('App', () => {
       ]))
       .mockResolvedValueOnce(jsonResponse({ ...sampleDraft('刷新后的草稿标题'), id: 42 }))
       .mockResolvedValueOnce(jsonResponse([]));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -92,7 +92,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(sampleMaterial('meeting.docx', 'READY')))
       .mockResolvedValueOnce(jsonResponse([sampleMaterial('meeting.docx', 'READY')]));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -119,7 +119,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(sampleDraft('失败测试草稿')))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(errorResponse('MATERIAL_TYPE_NOT_ALLOWED', '仅支持上传 Word 或 PDF 材料'));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -133,15 +133,19 @@ describe('App', () => {
     expect(await screen.findByText('仅支持上传 Word 或 PDF 材料')).toBeInTheDocument();
   });
 
-  it('generates an outline from the AI panel', async () => {
+  it('opens outline generation in a modal with progress feedback', async () => {
+    let resolveOutline: (response: Response) => void = () => undefined;
+    const outlinePromise = new Promise<Response>((resolve) => {
+      resolveOutline = resolve;
+    });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([
         { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
       ]))
       .mockResolvedValueOnce(jsonResponse(sampleDraft('提纲测试草稿')))
       .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(jsonResponse(sampleOutline()));
-    vi.stubGlobal('fetch', fetchMock);
+      .mockReturnValueOnce(outlinePromise);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -150,10 +154,13 @@ describe('App', () => {
     await userEvent.type(screen.getByLabelText('提纲补充要求'), '突出执行要求');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
 
+    const dialog = await screen.findByRole('dialog', { name: '生成提纲' });
+    expect(within(dialog).getByRole('progressbar', { name: '生成提纲进度' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/ai/outline', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ instruction: '突出执行要求' }),
     }));
+    resolveOutline(jsonResponse(sampleOutline()));
     const outlineResult = await screen.findByLabelText('AI 提纲结果');
     expect(within(outlineResult).getByText('AI 提纲标题')).toBeInTheDocument();
     expect(within(outlineResult).getByText('一、主要事项')).toBeInTheDocument();
@@ -184,7 +191,7 @@ describe('App', () => {
         draft: generatedDraft,
         block: generatedDraft.blocks[2],
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -192,6 +199,7 @@ describe('App', () => {
     await screen.findByDisplayValue('正文生成草稿');
     await userEvent.type(screen.getByLabelText('提纲补充要求'), '突出执行要求');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+    await screen.findByRole('dialog', { name: '生成提纲' });
     await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成正文：一、主要事项' }));
 
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/ai/paragraph', expect.objectContaining({
@@ -248,13 +256,14 @@ describe('App', () => {
         draft: secondDraft,
         block: secondDraft.blocks[6],
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
     await openWorkbench();
     await screen.findByDisplayValue('全局生成草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+    await screen.findByRole('dialog', { name: '生成提纲' });
     await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成全部正文' }));
 
     const paragraphCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'));
@@ -311,7 +320,7 @@ describe('App', () => {
         suggestionText: '第二段建议文本',
       }))
       .mockResolvedValueOnce(jsonResponse(savedDraft));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -322,6 +331,7 @@ describe('App', () => {
     const preview = screen.getByLabelText('公文预览');
     expect(await within(preview).findByLabelText('编辑段落：第二段原文')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '生成段落建议' }));
+    expect(await screen.findByRole('dialog', { name: '生成段落建议' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/local-operation', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
@@ -373,7 +383,7 @@ describe('App', () => {
         ],
       }))
       .mockResolvedValueOnce(jsonResponse([]));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -409,7 +419,7 @@ describe('App', () => {
         operationType: 'FORMALIZE',
         suggestionText: '即将放弃的建议',
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -417,6 +427,7 @@ describe('App', () => {
     const preview = screen.getByLabelText('公文预览');
     await userEvent.click((await within(preview).findByText('第二段原文')).closest('button') as HTMLButtonElement);
     await userEvent.click(screen.getByRole('button', { name: '生成段落建议' }));
+    await screen.findByRole('dialog', { name: '生成段落建议' });
     expect(await screen.findByText('即将放弃的建议')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '放弃' }));
@@ -466,7 +477,7 @@ describe('App', () => {
           },
         ],
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -477,9 +488,10 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
       method: 'POST',
     }));
-    expect(await within(screen.getByLabelText('基础质检')).findByText('主送对象不能为空。')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('基础质检')).getByText('责任要求还可以更明确。')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('基础质检')).getByText('存在 ERROR 项，后续导出前需要先处理。')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: '运行质检' });
+    expect(await within(dialog).findByText('主送对象不能为空。')).toBeInTheDocument();
+    expect(within(dialog).getByText('责任要求还可以更明确。')).toBeInTheDocument();
+    expect(within(dialog).getByText('存在 ERROR 项，后续导出前需要先处理。')).toBeInTheDocument();
   });
 
   it('shows retry state when outline generation fails', async () => {
@@ -490,7 +502,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(sampleDraft('提纲失败草稿')))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(errorResponse('AI_MODEL_UNAVAILABLE', 'AI 服务暂不可用，请稍后重试'));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -509,7 +521,7 @@ describe('App', () => {
       ]))
       .mockResolvedValueOnce(jsonResponse(sampleDraft('总览草稿')))
       .mockResolvedValueOnce(jsonResponse([sampleMaterial('brief.pdf', 'READY')]));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -553,7 +565,7 @@ describe('App', () => {
         message: 'DeepSeek 连接正常',
         latencyMs: 88,
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -592,14 +604,23 @@ function jsonResponse<T>(data: T) {
   return {
     ok: true,
     json: async () => ({ success: true, data, errorCode: null, message: null }),
-  };
+  } as Response;
 }
 
 function errorResponse(errorCode: string, message: string) {
   return {
     ok: false,
     json: async () => ({ success: false, data: null, errorCode, message }),
-  };
+  } as Response;
+}
+
+function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/api/templates/versions')) {
+      return Promise.resolve(jsonResponse([]));
+    }
+    return fetchMock(input, init);
+  });
 }
 
 function createStorageMock() {

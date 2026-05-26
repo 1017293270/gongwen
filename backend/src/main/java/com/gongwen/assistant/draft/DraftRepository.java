@@ -8,4 +8,8 @@ public interface DraftRepository {
     DraftDetailDto findById(long id);
 
     DraftDetailDto replaceBlocks(long id, List<DraftBlockUpdateRequest> blocks);
+
+    default DraftDetailDto updateTemplateVersion(long id, Long templateVersionId) {
+        throw new UnsupportedOperationException("Template version binding is not supported");
+    }
 }

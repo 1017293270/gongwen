@@ -13,6 +13,11 @@ import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.material.MaterialRepository;
+import com.gongwen.assistant.template.profile.TemplatePlaceholderProfile;
+import com.gongwen.assistant.template.profile.TemplateProfile;
+import com.gongwen.assistant.template.profile.TemplateProfileRepository;
+import com.gongwen.assistant.template.profile.TemplateValidationItem;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -33,6 +38,26 @@ public class QualityCheckService {
     private final ModelAdapter modelAdapter;
     private final AiGenerationTraceRepository traceRepository;
     private final QualityCheckRepository qualityCheckRepository;
+    private final TemplateProfileRepository templateProfileRepository;
+
+    @Autowired
+    public QualityCheckService(
+            DraftService draftService,
+            MaterialRepository materialRepository,
+            PromptBuilder promptBuilder,
+            ModelAdapter modelAdapter,
+            AiGenerationTraceRepository traceRepository,
+            QualityCheckRepository qualityCheckRepository,
+            TemplateProfileRepository templateProfileRepository
+    ) {
+        this.draftService = draftService;
+        this.materialRepository = materialRepository;
+        this.promptBuilder = promptBuilder;
+        this.modelAdapter = modelAdapter;
+        this.traceRepository = traceRepository;
+        this.qualityCheckRepository = qualityCheckRepository;
+        this.templateProfileRepository = templateProfileRepository;
+    }
 
     public QualityCheckService(
             DraftService draftService,
@@ -42,18 +67,23 @@ public class QualityCheckService {
             AiGenerationTraceRepository traceRepository,
             QualityCheckRepository qualityCheckRepository
     ) {
-        this.draftService = draftService;
-        this.materialRepository = materialRepository;
-        this.promptBuilder = promptBuilder;
-        this.modelAdapter = modelAdapter;
-        this.traceRepository = traceRepository;
-        this.qualityCheckRepository = qualityCheckRepository;
+        this(draftService, materialRepository, promptBuilder, modelAdapter, traceRepository, qualityCheckRepository, new TemplateProfileRepository() {
+            @Override
+            public void save(long templateVersionId, TemplateProfile profile, String profileHash) {
+            }
+
+            @Override
+            public Optional<TemplateProfile> findByTemplateVersionId(long templateVersionId) {
+                return Optional.empty();
+            }
+        });
     }
 
     public QualityCheckResponse runCheck(long draftId) {
         DraftDetailDto draft = draftService.getDraft(draftId);
         List<MaterialPromptSummary> materials = materialRepository.findReadyTextSummariesByDraftId(draftId);
         List<QualityCheckItem> items = new ArrayList<>(ruleItems(draft, materials));
+        items.addAll(templateItems(draft));
         QualityCheckPrompt prompt = promptBuilder.buildQualityCheckPrompt(draft, materials, ruleSummaries(items));
         UUID aiTraceId = UUID.randomUUID();
         Instant startedAt = Instant.now();
@@ -152,6 +182,101 @@ public class QualityCheckService {
             ));
         }
         return items;
+    }
+
+    private List<QualityCheckItem> templateItems(DraftDetailDto draft) {
+        if (draft.templateVersionId() == null) {
+            return List.of(new QualityCheckItem(
+                    "WARNING",
+                    "TEMPLATE",
+                    "TEMPLATE_VERSION_NOT_SELECTED",
+                    "当前草稿尚未选择套版模板。",
+                    null,
+                    null,
+                    "请在左侧选择一个模板版本后重新质检，才能确认正文是否能完整套版。"
+            ));
+        }
+        TemplateProfile profile = templateProfileRepository.findByTemplateVersionId(draft.templateVersionId())
+                .orElse(null);
+        if (profile == null) {
+            return List.of(new QualityCheckItem(
+                    "ERROR",
+                    "TEMPLATE",
+                    "TEMPLATE_PROFILE_NOT_FOUND",
+                    "当前模板版本缺少解析 Profile。",
+                    null,
+                    null,
+                    "请重新上传或解析该模板后再导出。"
+            ));
+        }
+        List<QualityCheckItem> items = new ArrayList<>();
+        for (TemplatePlaceholderProfile placeholder : profile.placeholders()) {
+            String blockType = blockTypeForPlaceholder(placeholder.key());
+            if (blockType == null) {
+                items.add(new QualityCheckItem(
+                        "WARNING",
+                        "TEMPLATE",
+                        "TEMPLATE_PLACEHOLDER_UNMAPPED",
+                        "模板占位符「" + placeholder.key() + "」尚未映射到草稿字段。",
+                        null,
+                        null,
+                        "后续可在模板管理中配置字段映射；当前导出可能无法填充该占位符。"
+                ));
+                continue;
+            }
+            Optional<DraftBlockDto> block = "BODY_PARAGRAPH".equals(blockType)
+                    ? draft.blocks().stream().filter(candidate -> "BODY_PARAGRAPH".equals(candidate.blockType()) && !isBlank(candidate.content())).findFirst()
+                    : findBlock(draft, blockType).filter(candidate -> !isBlank(candidate.content()));
+            if (block.isEmpty()) {
+                items.add(new QualityCheckItem(
+                        "ERROR",
+                        "TEMPLATE",
+                        "TEMPLATE_PLACEHOLDER_VALUE_MISSING",
+                        "模板占位符「" + placeholder.key() + "」缺少可填充值。",
+                        blockType,
+                        findBlock(draft, blockType).map(DraftBlockDto::id).orElse(null),
+                        "请补齐对应草稿内容后再导出。"
+                ));
+            }
+            if (placeholder.splitAcrossRuns()) {
+                items.add(new QualityCheckItem(
+                        "WARNING",
+                        "TEMPLATE",
+                        "TEMPLATE_PLACEHOLDER_SPLIT_RUNS",
+                        "模板占位符「" + placeholder.key() + "」跨 Word run，导出时需要结构化替换。",
+                        blockType,
+                        block.map(DraftBlockDto::id).orElse(null),
+                        "建议后续在模板管理中确认该占位符替换效果。"
+                ));
+            }
+        }
+        for (TemplateValidationItem validationItem : profile.validationItems()) {
+            items.add(new QualityCheckItem(
+                    validationItem.severity(),
+                    "TEMPLATE",
+                    validationItem.code(),
+                    validationItem.message(),
+                    null,
+                    null,
+                    "请在模板管理中检查该模板风险。"
+            ));
+        }
+        return items;
+    }
+
+    private String blockTypeForPlaceholder(String key) {
+        if (key == null) {
+            return null;
+        }
+        return switch (key.strip().toLowerCase()) {
+            case "标题", "title" -> "TITLE";
+            case "主送", "主送单位", "recipient" -> "RECIPIENT";
+            case "正文", "正文内容", "body", "content" -> "BODY_PARAGRAPH";
+            case "附件", "attachment" -> "ATTACHMENT";
+            case "落款", "署名", "signature" -> "SIGNATURE";
+            case "日期", "成文日期", "date" -> "DATE";
+            default -> null;
+        };
     }
 
     private QualityCheckItem toQualityItem(AiQualitySuggestion suggestion) {

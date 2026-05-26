@@ -12,7 +12,7 @@ import {
   Sparkles,
   Upload,
 } from 'lucide-react';
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDraft,
   getAiProviderSettings,
@@ -22,16 +22,19 @@ import {
   getDraft,
   listDocumentTypes,
   listDraftMaterials,
+  listTemplateVersions,
   runQualityCheck,
   saveDraftBlocks,
   testAiProviderConnection,
   updateAiProviderSettings,
+  updateDraftTemplateVersion,
   uploadDraftMaterial,
 } from './api';
 import { ToastProvider, useToast } from './components/feedback/ToastProvider';
 import {
   Button,
   ConfirmDialog,
+  Dialog,
   SelectField,
   StatusMessage,
   TextareaField,
@@ -50,6 +53,7 @@ import type {
   Material,
   QualityCheckItem,
   QualityCheckResult,
+  TemplateVersionSummary,
 } from './draftTypes';
 
 const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
@@ -72,6 +76,7 @@ type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'sa
 type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
 type AppView = 'overview' | 'workbench' | 'drafts' | 'templates' | 'materials' | 'exports' | 'ai-tasks' | 'settings';
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
+type AiDialog = 'outline' | 'quality' | 'local' | null;
 
 const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
   { value: 'FORMALIZE', label: '正式化' },
@@ -122,10 +127,12 @@ function Workbench() {
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [templateVersions, setTemplateVersions] = useState<TemplateVersionSummary[]>([]);
   const [outline, setOutline] = useState<AiOutline | null>(null);
   const [outlineStatus, setOutlineStatus] = useState<OutlineStatus>('idle');
   const [outlineError, setOutlineError] = useState('');
   const [outlineInstruction, setOutlineInstruction] = useState('');
+  const [activeAiDialog, setActiveAiDialog] = useState<AiDialog>(null);
   const [paragraphStatuses, setParagraphStatuses] = useState<Record<string, ParagraphStatus>>({});
   const [paragraphErrors, setParagraphErrors] = useState<Record<string, string>>({});
   const [allParagraphStatus, setAllParagraphStatus] = useState<ParagraphStatus>('idle');
@@ -141,6 +148,9 @@ function Workbench() {
   const [qualityCheckError, setQualityCheckError] = useState('');
   const [discardSuggestionConfirmOpen, setDiscardSuggestionConfirmOpen] = useState(false);
   const paragraphRefs = useRef<Record<number, HTMLElement | null>>({});
+  const outlineRequestRef = useRef<AbortController | null>(null);
+  const qualityRequestRef = useRef<AbortController | null>(null);
+  const localOperationRequestRef = useRef<AbortController | null>(null);
   const [aiSettings, setAiSettings] = useState<AiProviderSettings>(DEFAULT_AI_SETTINGS);
   const [aiSettingsApiKey, setAiSettingsApiKey] = useState('');
   const [aiSettingsStatus, setAiSettingsStatus] = useState<AiSettingsStatus>('loading');
@@ -149,6 +159,12 @@ function Workbench() {
   const [status, setStatus] = useState<WorkbenchStatus>('loading');
   const [materialStatus, setMaterialStatus] = useState<MaterialStatus>('loading');
   const [statusMessage, setStatusMessage] = useState('正在加载草稿');
+
+  useEffect(() => () => {
+    outlineRequestRef.current?.abort();
+    qualityRequestRef.current?.abort();
+    localOperationRequestRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -161,6 +177,7 @@ function Workbench() {
         const types = await listDocumentTypes();
         const loadedDraft = await loadCurrentDraft();
         const loadedMaterials = await listDraftMaterials(loadedDraft.id);
+        const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode);
         if (!mounted) {
           return;
         }
@@ -168,6 +185,7 @@ function Workbench() {
         setDraft(loadedDraft);
         setBlocks(loadedDraft.blocks);
         setMaterials(loadedMaterials);
+        setTemplateVersions(loadedTemplateVersions);
         setStatus('idle');
         setMaterialStatus('idle');
         setStatusMessage('草稿已载入');
@@ -361,15 +379,80 @@ function Workbench() {
     }
   }
 
+  function startAiRequest(requestRef: MutableRefObject<AbortController | null>) {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    return controller;
+  }
+
+  function clearAiRequest(requestRef: MutableRefObject<AbortController | null>, controller: AbortController) {
+    if (requestRef.current === controller) {
+      requestRef.current = null;
+    }
+  }
+
+  function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === 'AbortError';
+  }
+
+  function openOutlineDialog() {
+    setActiveAiDialog('outline');
+    void handleGenerateOutline();
+  }
+
+  function openQualityDialog() {
+    setActiveAiDialog('quality');
+    void handleRunQualityCheck();
+  }
+
+  function openLocalOperationDialog() {
+    setActiveAiDialog('local');
+    void handleGenerateLocalOperation();
+  }
+
+  function closeAiDialog() {
+    if (activeAiDialog === 'outline' && outlineStatus === 'generating') {
+      outlineRequestRef.current?.abort();
+    }
+    if (activeAiDialog === 'quality' && qualityCheckStatus === 'checking') {
+      qualityRequestRef.current?.abort();
+    }
+    if (activeAiDialog === 'local' && localOperationStatus === 'generating') {
+      localOperationRequestRef.current?.abort();
+    }
+    setActiveAiDialog(null);
+  }
+
+  async function handleTemplateVersionChange(templateVersionId: number | null) {
+    if (!draft) {
+      return;
+    }
+    try {
+      const updatedDraft = await updateDraftTemplateVersion(draft.id, templateVersionId);
+      setDraft(updatedDraft);
+      setBlocks(updatedDraft.blocks);
+      setQualityCheck(null);
+      showToast({
+        title: templateVersionId ? '模板已绑定到草稿' : '已取消模板绑定',
+        tone: 'success',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '模板绑定失败';
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
   async function handleGenerateOutline() {
     if (!draft) {
       return;
     }
 
+    const controller = startAiRequest(outlineRequestRef);
     try {
       setOutlineStatus('generating');
       setOutlineError('');
-      const generatedOutline = await generateDraftOutline(draft.id, outlineInstruction);
+      const generatedOutline = await generateDraftOutline(draft.id, outlineInstruction, controller.signal);
       setOutline(generatedOutline);
       setParagraphStatuses({});
       setParagraphErrors({});
@@ -378,10 +461,18 @@ function Workbench() {
       setOutlineStatus('success');
       showToast({ title: '提纲已生成', description: generatedOutline.titleSuggestion, tone: 'success' });
     } catch (error) {
+      if (isAbortError(error)) {
+        setOutlineStatus('idle');
+        setOutlineError('');
+        showToast({ title: '提纲生成已取消', tone: 'info' });
+        return;
+      }
       const message = error instanceof Error ? error.message : '提纲生成失败';
       setOutlineStatus('error');
       setOutlineError(message);
       showToast({ title: message, tone: 'error' });
+    } finally {
+      clearAiRequest(outlineRequestRef, controller);
     }
   }
 
@@ -451,11 +542,13 @@ function Workbench() {
 
   async function handleGenerateLocalOperation() {
     if (!draft || !selectedBodyBlock) {
+      setActiveAiDialog('local');
       setLocalOperationStatus('error');
       setLocalOperationError('请先在预览中选择正文段落');
       return;
     }
 
+    const controller = startAiRequest(localOperationRequestRef);
     try {
       setLocalOperationStatus('generating');
       setLocalOperationError('');
@@ -465,15 +558,24 @@ function Workbench() {
         selectedBodyBlock.id,
         localOperationType,
         localOperationInstruction,
+        controller.signal,
       );
       setLocalOperationSuggestion(suggestion);
       setLocalOperationStatus('suggested');
       showToast({ title: '段落建议已生成', tone: 'success' });
     } catch (error) {
+      if (isAbortError(error)) {
+        setLocalOperationStatus('idle');
+        setLocalOperationError('');
+        showToast({ title: '段落建议生成已取消', tone: 'info' });
+        return;
+      }
       const message = error instanceof Error ? error.message : '段落建议生成失败';
       setLocalOperationStatus('error');
       setLocalOperationError(message);
       showToast({ title: message, tone: 'error' });
+    } finally {
+      clearAiRequest(localOperationRequestRef, controller);
     }
   }
 
@@ -482,10 +584,11 @@ function Workbench() {
       return;
     }
 
+    const controller = startAiRequest(qualityRequestRef);
     try {
       setQualityCheckStatus('checking');
       setQualityCheckError('');
-      const result = await runQualityCheck(draft.id);
+      const result = await runQualityCheck(draft.id, controller.signal);
       setQualityCheck(result);
       setQualityCheckStatus('success');
       showToast({
@@ -494,10 +597,18 @@ function Workbench() {
         tone: result.exportBlocked ? 'error' : 'success',
       });
     } catch (error) {
+      if (isAbortError(error)) {
+        setQualityCheckStatus('idle');
+        setQualityCheckError('');
+        showToast({ title: '质检已取消', tone: 'info' });
+        return;
+      }
       const message = error instanceof Error ? error.message : '质检失败';
       setQualityCheckStatus('error');
       setQualityCheckError(message);
       showToast({ title: message, tone: 'error' });
+    } finally {
+      clearAiRequest(qualityRequestRef, controller);
     }
   }
 
@@ -655,7 +766,7 @@ function Workbench() {
                   icon={<Sparkles aria-hidden="true" />}
                   isLoading={outlineStatus === 'generating'}
                   loadingLabel="正在生成提纲"
-                  onClick={() => void handleGenerateOutline()}
+                  onClick={openOutlineDialog}
                   variant="secondary"
                 >
                   {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
@@ -699,6 +810,21 @@ function Workbench() {
             <SelectField disabled label="文种" value={draft?.documentTypeCode ?? 'NOTICE'}>
               {documentTypes.length === 0 ? <option value="NOTICE">通知</option> : documentTypes.map((type) => (
                 <option key={type.code} value={type.code}>{type.name}</option>
+              ))}
+            </SelectField>
+
+            <SelectField
+              disabled={!draft || templateVersions.length === 0}
+              hint={templateVersions.length === 0 ? '暂无已解析模板，先通过模板 API 上传版本。' : '质检会按所选模板检查占位符适配。'}
+              label="套版模板"
+              onChange={(event) => void handleTemplateVersionChange(event.target.value ? Number(event.target.value) : null)}
+              value={draft?.templateVersionId ? String(draft.templateVersionId) : ''}
+            >
+              <option value="">未选择模板</option>
+              {templateVersions.map((template) => (
+                <option key={template.templateVersionId} value={template.templateVersionId}>
+                  {template.templateName} v{template.versionNo}
+                </option>
               ))}
             </SelectField>
 
@@ -862,58 +988,18 @@ function Workbench() {
               icon={<Sparkles aria-hidden="true" />}
               isLoading={outlineStatus === 'generating'}
               loadingLabel="正在生成提纲"
-              onClick={handleGenerateOutline}
+              onClick={openOutlineDialog}
               variant="secondary"
             >
               {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
             </Button>
             {outlineStatus === 'error' && <StatusMessage title={outlineError} tone="warning" />}
             {outline && (
-              <div className="outline-result" aria-label="AI 提纲结果">
-                <div className="outline-result-header">
-                  <div className="outline-title">{outline.titleSuggestion}</div>
-                  <Button
-                    className="outline-generate-all"
-                    disabled={!draft || allParagraphStatus === 'generating' || outline.sections.length === 0}
-                    icon={<Sparkles aria-hidden="true" />}
-                    isLoading={allParagraphStatus === 'generating'}
-                    loadingLabel="正在生成全部正文"
-                    onClick={() => void handleGenerateAllParagraphs()}
-                    variant="secondary"
-                  >
-                    {allParagraphStatus === 'error' ? '重试生成全部正文' : '生成全部正文'}
-                  </Button>
-                </div>
-                {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
-                {outline.sections.map((section, index) => (
-                  <div className="outline-section" key={section.heading}>
-                    <div className="outline-heading">{section.heading}</div>
-                    <ul>
-                      {section.points.map((point) => <li key={point}>{point}</li>)}
-                    </ul>
-                    <Button
-                      className="outline-action"
-                      disabled={!draft || allParagraphStatus === 'generating' || paragraphStatuses[section.heading] === 'generating'}
-                      icon={<Sparkles aria-hidden="true" />}
-                      isLoading={paragraphStatuses[section.heading] === 'generating'}
-                      loadingLabel={`正在生成：${section.heading}`}
-                      onClick={() => void handleGenerateParagraph(index)}
-                      variant="secondary"
-                    >
-                      {paragraphStatuses[section.heading] === 'error'
-                        ? `重试正文：${section.heading}`
-                        : `生成正文：${section.heading}`}
-                    </Button>
-                    {paragraphStatuses[section.heading] === 'error' && (
-                      <StatusMessage title={paragraphErrors[section.heading]} tone="warning" />
-                    )}
-                  </div>
-                ))}
-                {outline.missingInformation.length > 0 && (
-                  <div className="outline-missing">
-                    缺失信息：{outline.missingInformation.join('、')}
-                  </div>
-                )}
+              <div className="ai-task-summary" aria-label="提纲摘要">
+                <span>{outline.titleSuggestion}</span>
+                <button className="summary-link" onClick={() => setActiveAiDialog('outline')} type="button">
+                  查看提纲
+                </button>
               </div>
             )}
             <div className="quality-check" aria-label="基础质检">
@@ -935,23 +1021,18 @@ function Workbench() {
                 icon={<CheckCircle2 aria-hidden="true" />}
                 isLoading={qualityCheckStatus === 'checking'}
                 loadingLabel="正在质检"
-                onClick={() => void handleRunQualityCheck()}
+                onClick={openQualityDialog}
                 variant="secondary"
               >
                 {qualityCheckStatus === 'error' ? '重试质检' : '运行质检'}
               </Button>
               {qualityCheckStatus === 'error' && <StatusMessage title={qualityCheckError} tone="warning" />}
-              {qualityCheck?.exportBlocked && (
-                <StatusMessage title="存在 ERROR 项，后续导出前需要先处理。" tone="warning" />
-              )}
-              {qualityCheck && qualityCheck.items.length === 0 && (
-                <StatusMessage title="未发现阻断问题，AI 暂无额外建议。" tone="success" />
-              )}
-              {qualityCheck && qualityCheck.items.length > 0 && (
-                <div className="quality-list">
-                  {qualityCheck.items.map((item) => (
-                    <QualityCheckItemView item={item} key={`${item.code}-${item.targetBlockId ?? 'draft'}`} />
-                  ))}
+              {qualityCheck && (
+                <div className="ai-task-summary" aria-label="质检摘要">
+                  <span>{qualitySummary(qualityCheck)}</span>
+                  <button className="summary-link" onClick={() => setActiveAiDialog('quality')} type="button">
+                    查看结果
+                  </button>
                 </div>
               )}
             </div>
@@ -992,33 +1073,18 @@ function Workbench() {
                 icon={<Sparkles aria-hidden="true" />}
                 isLoading={localOperationStatus === 'generating'}
                 loadingLabel="正在生成建议"
-                onClick={() => void handleGenerateLocalOperation()}
+                onClick={openLocalOperationDialog}
                 variant="secondary"
               >
                 生成段落建议
               </Button>
               {localOperationError && <StatusMessage title={localOperationError} tone="warning" />}
               {localOperationSuggestion && (
-                <div className="local-suggestion" aria-label="段落建议">
-                  <div className="local-suggestion-text">{localOperationSuggestion.suggestionText}</div>
-                  <div className="suggestion-actions">
-                    <Button
-                      disabled={localOperationStatus === 'saving'}
-                      isLoading={localOperationStatus === 'saving'}
-                      loadingLabel="正在采纳"
-                      onClick={() => void handleAcceptLocalOperation()}
-                      variant="secondary"
-                    >
-                      采纳建议
-                    </Button>
-                    <Button
-                      disabled={localOperationStatus === 'saving'}
-                      onClick={() => setDiscardSuggestionConfirmOpen(true)}
-                      variant="ghost"
-                    >
-                      放弃
-                    </Button>
-                  </div>
+                <div className="ai-task-summary" aria-label="段落建议摘要">
+                  <span>已生成 {localOperationLabel(localOperationSuggestion.operationType)} 建议</span>
+                  <button className="summary-link" onClick={() => setActiveAiDialog('local')} type="button">
+                    查看建议
+                  </button>
                 </div>
               )}
             </div>
@@ -1044,6 +1110,182 @@ function Workbench() {
             <PlaceholderPage view={activeView} />
           )
         )}
+
+        <Dialog
+          actions={(
+            <Button onClick={closeAiDialog} variant="secondary">
+              {outlineStatus === 'generating' ? '取消生成' : '关闭'}
+            </Button>
+          )}
+          className="ai-task-dialog"
+          description="提纲结果、缺失信息和正文生成入口集中在这里，不再撑高右侧面板。"
+          onClose={closeAiDialog}
+          open={activeAiDialog === 'outline'}
+          title="生成提纲"
+        >
+          <div className="ai-dialog-stack">
+            {outlineStatus === 'generating' && (
+              <AiProgress detail="正在分析文种字段、草稿块和参考材料" label="生成提纲进度" />
+            )}
+            {outlineStatus === 'error' && (
+              <StatusMessage title={outlineError} tone="warning">
+                <Button icon={<Sparkles aria-hidden="true" />} onClick={() => void handleGenerateOutline()} variant="secondary">
+                  重试生成提纲
+                </Button>
+              </StatusMessage>
+            )}
+            {outline && (
+              <div className="outline-result" aria-label="AI 提纲结果">
+                <div className="outline-result-header">
+                  <div className="outline-title">{outline.titleSuggestion}</div>
+                  <Button
+                    className="outline-generate-all"
+                    disabled={!draft || allParagraphStatus === 'generating' || outline.sections.length === 0}
+                    icon={<Sparkles aria-hidden="true" />}
+                    isLoading={allParagraphStatus === 'generating'}
+                    loadingLabel="正在生成全部正文"
+                    onClick={() => void handleGenerateAllParagraphs()}
+                    variant="secondary"
+                  >
+                    {allParagraphStatus === 'error' ? '重试生成全部正文' : '生成全部正文'}
+                  </Button>
+                </div>
+                {allParagraphStatus === 'generating' && (
+                  <AiProgress detail="按提纲顺序逐段保存到 Word 预览" label="正文生成进度" />
+                )}
+                {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
+                {outline.sections.map((section, index) => (
+                  <div className="outline-section" key={section.heading}>
+                    <div className="outline-heading">{section.heading}</div>
+                    <ul>
+                      {section.points.map((point) => <li key={point}>{point}</li>)}
+                    </ul>
+                    <Button
+                      className="outline-action"
+                      disabled={!draft || allParagraphStatus === 'generating' || paragraphStatuses[section.heading] === 'generating'}
+                      icon={<Sparkles aria-hidden="true" />}
+                      isLoading={paragraphStatuses[section.heading] === 'generating'}
+                      loadingLabel={`正在生成：${section.heading}`}
+                      onClick={() => void handleGenerateParagraph(index)}
+                      variant="secondary"
+                    >
+                      {paragraphStatuses[section.heading] === 'error'
+                        ? `重试正文：${section.heading}`
+                        : `生成正文：${section.heading}`}
+                    </Button>
+                    {paragraphStatuses[section.heading] === 'error' && (
+                      <StatusMessage title={paragraphErrors[section.heading]} tone="warning" />
+                    )}
+                  </div>
+                ))}
+                {outline.missingInformation.length > 0 && (
+                  <div className="outline-missing">
+                    缺失信息：{outline.missingInformation.join('、')}
+                  </div>
+                )}
+              </div>
+            )}
+            {!outline && outlineStatus !== 'generating' && outlineStatus !== 'error' && (
+              <StatusMessage title="点击右栏生成提纲后，结果会显示在这里。" />
+            )}
+          </div>
+        </Dialog>
+
+        <Dialog
+          actions={(
+            <Button onClick={closeAiDialog} variant="secondary">
+              {qualityCheckStatus === 'checking' ? '取消质检' : '关闭'}
+            </Button>
+          )}
+          className="ai-task-dialog"
+          description="规则检查和 AI 表达建议集中展示，避免右侧面板被长列表拉高。"
+          onClose={closeAiDialog}
+          open={activeAiDialog === 'quality'}
+          title="运行质检"
+        >
+          <div className="ai-dialog-stack">
+            {qualityCheckStatus === 'checking' && (
+              <AiProgress detail="正在检查必填字段、正文结构、材料依据和表达风险" label="运行质检进度" />
+            )}
+            {qualityCheckStatus === 'error' && (
+              <StatusMessage title={qualityCheckError} tone="warning">
+                <Button icon={<CheckCircle2 aria-hidden="true" />} onClick={() => void handleRunQualityCheck()} variant="secondary">
+                  重试质检
+                </Button>
+              </StatusMessage>
+            )}
+            {qualityCheck?.exportBlocked && (
+              <StatusMessage title="存在 ERROR 项，后续导出前需要先处理。" tone="warning" />
+            )}
+            {qualityCheck && qualityCheck.items.length === 0 && (
+              <StatusMessage title="未发现阻断问题，AI 暂无额外建议。" tone="success" />
+            )}
+            {qualityCheck && qualityCheck.items.length > 0 && (
+              <div className="quality-list">
+                {qualityCheck.items.map((item) => (
+                  <QualityCheckItemView item={item} key={`${item.code}-${item.targetBlockId ?? 'draft'}`} />
+                ))}
+              </div>
+            )}
+            {!qualityCheck && qualityCheckStatus !== 'checking' && qualityCheckStatus !== 'error' && (
+              <StatusMessage title="点击右栏运行质检后，检查项会显示在这里。" />
+            )}
+          </div>
+        </Dialog>
+
+        <Dialog
+          actions={(
+            <Button onClick={closeAiDialog} variant="secondary">
+              {localOperationStatus === 'generating' ? '取消生成' : '关闭'}
+            </Button>
+          )}
+          className="ai-task-dialog"
+          description={selectedBodyBlock ? `目标段落 #${selectedBodyBlock.sortOrder}` : '请先在预览中选择正文段落。'}
+          onClose={closeAiDialog}
+          open={activeAiDialog === 'local'}
+          title="生成段落建议"
+        >
+          <div className="ai-dialog-stack">
+            {localOperationStatus === 'generating' && (
+              <AiProgress detail={`正在生成${localOperationLabel(localOperationType)}建议，不会直接覆盖原文`} label="生成段落建议进度" />
+            )}
+            {localOperationError && (
+              <StatusMessage title={localOperationError} tone="warning">
+                {selectedBodyBlock ? (
+                  <Button icon={<Sparkles aria-hidden="true" />} onClick={() => void handleGenerateLocalOperation()} variant="secondary">
+                    重试生成建议
+                  </Button>
+                ) : null}
+              </StatusMessage>
+            )}
+            {localOperationSuggestion && (
+              <div className="local-suggestion" aria-label="段落建议">
+                <div className="local-suggestion-text">{localOperationSuggestion.suggestionText}</div>
+                <div className="suggestion-actions">
+                  <Button
+                    disabled={localOperationStatus === 'saving'}
+                    isLoading={localOperationStatus === 'saving'}
+                    loadingLabel="正在采纳"
+                    onClick={() => void handleAcceptLocalOperation()}
+                    variant="secondary"
+                  >
+                    采纳建议
+                  </Button>
+                  <Button
+                    disabled={localOperationStatus === 'saving'}
+                    onClick={() => setDiscardSuggestionConfirmOpen(true)}
+                    variant="ghost"
+                  >
+                    放弃
+                  </Button>
+                </div>
+              </div>
+            )}
+            {!localOperationSuggestion && localOperationStatus !== 'generating' && !localOperationError && (
+              <StatusMessage title="点击右栏生成段落建议后，建议文本会显示在这里。" />
+            )}
+          </div>
+        </Dialog>
 
         <ConfirmDialog
           cancelLabel="继续编辑"
@@ -1344,6 +1586,20 @@ function QualityCheckItemView({ item }: { item: QualityCheckItem }) {
   );
 }
 
+function AiProgress({ detail, label }: { detail: string; label: string }) {
+  return (
+    <div className="ai-progress" role="progressbar" aria-label={label} aria-valuetext={detail}>
+      <div className="ai-progress-header">
+        <span>{detail}</span>
+        <span>进行中</span>
+      </div>
+      <div className="ai-progress-track" aria-hidden="true">
+        <span className="ai-progress-bar" />
+      </div>
+    </div>
+  );
+}
+
 function qualitySummary(result: QualityCheckResult) {
   const errorCount = result.items.filter((item) => item.severity === 'ERROR').length;
   const warningCount = result.items.filter((item) => item.severity === 'WARNING').length;
@@ -1364,6 +1620,7 @@ function qualityCategoryLabel(category: string) {
     REQUIRED_FIELD: '必填字段',
     STRUCTURE: '结构完整性',
     MATERIAL: '材料依据',
+    TEMPLATE: '模板适配',
     AI_EXPRESSION: 'AI 表达建议',
     AI_STRUCTURE: 'AI 结构建议',
     AI_RISK: 'AI 风险建议',
@@ -1371,6 +1628,10 @@ function qualityCategoryLabel(category: string) {
     AI_SERVICE: 'AI 服务',
   };
   return labels[category] ?? category;
+}
+
+function localOperationLabel(operationType: AiLocalOperationType) {
+  return LOCAL_OPERATION_OPTIONS.find((option) => option.value === operationType)?.label ?? '段落';
 }
 
 function paragraphDisplayTitle(block: DraftBlock, index: number) {

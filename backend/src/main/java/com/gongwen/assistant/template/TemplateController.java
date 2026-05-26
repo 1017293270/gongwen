@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,15 +26,18 @@ public class TemplateController {
     private final DocxPlaceholderParser parser;
     private final TemplateUploadService uploadService;
     private final TemplateProfileRepository profileRepository;
+    private final TemplateVersionRepository versionRepository;
 
     public TemplateController(
             DocxPlaceholderParser parser,
             TemplateUploadService uploadService,
-            TemplateProfileRepository profileRepository
+            TemplateProfileRepository profileRepository,
+            TemplateVersionRepository versionRepository
     ) {
         this.parser = parser;
         this.uploadService = uploadService;
         this.profileRepository = profileRepository;
+        this.versionRepository = versionRepository;
     }
 
     @PostMapping("/parse")
@@ -58,6 +62,13 @@ public class TemplateController {
     public ApiResponse<TemplateProfile> getProfile(@PathVariable long versionId) {
         return ApiResponse.ok(profileRepository.findByTemplateVersionId(versionId)
                 .orElseThrow(() -> new TemplateException("TEMPLATE_PROFILE_NOT_FOUND", "Template profile not found")));
+    }
+
+    @GetMapping("/versions")
+    public ApiResponse<List<TemplateVersionSummary>> listReadyVersions(
+            @RequestParam(required = false) String documentTypeCode
+    ) {
+        return ApiResponse.ok(versionRepository.findReadyVersions(documentTypeCode));
     }
 
     @ExceptionHandler(TemplateException.class)

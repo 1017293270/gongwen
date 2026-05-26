@@ -1,4 +1,4 @@
-# 公文助手项目 AGENTS.md
+﻿# 公文助手项目 AGENTS.md
 
 本文件是公文助手项目的 AI 协同入口。任何 AI Agent、Codex 会话或开发者进入本项目时，必须先阅读本文件，再阅读设计规格和当前任务文件。
 
@@ -348,7 +348,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8A 模板引擎底座已完成后端基础。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表、模板版本/profile/映射/规则/校验结果表，以及总览入口、工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力，以及右栏基础质检面板。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v8。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表、模板版本/profile/映射/规则/校验结果表，以及总览入口、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力，以及右栏基础质检面板。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v9。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
@@ -422,13 +422,13 @@ P7 局部段落 AI 操作当前约定：
 
 P8 基础质检当前约定：
 
-- 质检采用“规则检查 + AI 建议”组合：规则检查负责硬性错误和导出阻断，AI 建议负责表达、结构衔接、事实风险和材料依据提示。
+- 质检采用“规则检查 + 模板适配 + AI 建议”组合：规则检查负责硬性错误和导出阻断，模板适配检查当前草稿能否填充所选模板版本，AI 建议负责表达、结构衔接、事实风险和材料依据提示。
 - `POST /api/drafts/{draftId}/quality-check` 会读取结构化草稿块和 READY 材料摘要，先执行必填字段、正文结构和材料存在性检查，再通过 `ModelAdapter.generateQualityReview` 调用 Mock/DeepSeek。
 - `PromptBuilder` 集中构建 `quality-check-v1` 输入摘要；DeepSeek 质检仍通过 OpenAI 兼容 `/chat/completions` JSON 输出，前端和 controller 不散落 prompt。
 - 质检结果保存到 `quality_check_result.result_json`，并提供 `GET /api/drafts/{draftId}/quality-check/latest` 获取最近一次结果。
 - `ai_generation_trace` 使用 `QUALITY_CHECK` task type 记录 provider、model、状态、prompt 版本、输入摘要、建议数量、错误摘要和耗时；trace 不保存完整正文或完整材料文本。
-- AI 质检失败不会阻断规则质检，结果中追加 `AI_QUALITY_UNAVAILABLE` 或 `AI_QUALITY_RESPONSE_INVALID` 警告；只有规则或 AI 返回的 `ERROR` 会让 `exportBlocked=true`。
-- 前端右栏“基础质检”面板已接入未检查、检查中、成功、警告、错误和重试状态；AI 建议首版只展示，不自动改正文。
+- AI 质检失败不会阻断规则质检，结果中追加 `AI_QUALITY_UNAVAILABLE` 或 `AI_QUALITY_RESPONSE_INVALID` 警告；规则、模板适配或 AI 返回的 `ERROR` 会让 `exportBlocked=true`。
+- 工作台左栏已提供“套版模板”选择，调用 `PUT /api/drafts/{id}/template-version` 绑定具体模板版本；质检会读取该版本的 `TemplateProfile` 检查占位符缺值、未映射占位符和跨 run 风险。`n- 前端右栏“基础质检”面板已接入未检查、检查中、成功、警告、错误和重试状态；AI 建议首版只展示，不自动改正文。
 
 模板引擎当前约定：
 
