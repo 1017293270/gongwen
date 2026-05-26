@@ -276,7 +276,7 @@ UI 改动必须验证：
 
 ## 14. 当前状态
 
-当前状态：P5 AI 生成提纲已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表，以及工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表和 AI 提纲生成能力。PostgreSQL 已通过 Docker Compose 启动并健康，后端已通过 `gradle:8.10.2-jdk21` 容器完成测试和 `bootRun` 验证，Flyway 已应用到 v5。本机命令行仍只有 Java 8、缺少 Gradle，直接本机运行后端前需补齐 Java 21 和 Gradle 或使用容器方式。
+当前状态：P5 AI 生成提纲已完成基础实现。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表，以及工作台真实草稿加载、编辑、预览、保存、材料上传、材料列表和 AI 提纲生成能力。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v5。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
@@ -317,6 +317,15 @@ AI 提纲生成当前约定：
 
 本地 Vite 联调时，如果后端容器因本机 8080 被占用而映射到 18080，需要用 `VITE_API_BASE_URL=http://127.0.0.1:18080` 启动前端。后端已允许本地 Vite 端口跨域访问 `/api/**`。
 
+本地后端测试约定：
+
+- JDK 21 路径：`C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot`。
+- 本地 Gradle 工具目录：`D:\gongwen\.tools\gradle-8.10.2`，该目录不提交。
+- 本地 Gradle 缓存目录：`D:\gongwen\.gradle-user-home`，该目录不提交。
+- focused 后端测试：`powershell -ExecutionPolicy Bypass -File .\scripts\backend-test-focused.ps1 "com.gongwen.assistant.ai.PromptBuilderTest"`。
+- 全量后端测试：`powershell -ExecutionPolicy Bypass -File .\scripts\backend-test.ps1`。
+- 前端测试：在 `frontend/` 下运行 `npm test -- --run`，构建运行 `npm run build`。
+
 长期任务总表已建立：`docs/PROJECT_TASKS.md`。后续 AI Agent 接手时必须用该文件判断当前阶段、依赖、验收标准和下一步任务。
 
 已确认决策：
@@ -338,6 +347,6 @@ AI 提纲生成当前约定：
 
 下一步建议：
 
-1. 开始 P5：AI 生成提纲，建立 `ModelAdapter`、`PromptBuilder`、`AiGenerationTrace` 和结构化提纲 API。
-2. 补齐本机 Java 21、Gradle 或 Gradle Wrapper，减少对后端 Docker 构建容器的依赖。
-3. P5 完成后推进 P6 AI 逐段正文生成。
+1. 推进 P6：AI 逐段正文生成，基于已生成提纲生成并保存 `DraftBlock`。
+2. 在进入更大功能前补首页/侧边栏信息架构壳子，让工作台、模板管理、材料、导出记录和 AI 任务有清晰入口。
+3. 后续开发默认先跑 focused tests，提交前再跑全量后端测试、前端测试和前端构建。
