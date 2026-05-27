@@ -66,6 +66,7 @@ import type {
   TemplateUploadResult,
   TemplateVersionSummary,
 } from './draftTypes';
+import { estimateAiProgress } from './progress';
 
 const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
 const CURRENT_DRAFT_ID_KEY = 'gongwen.currentDraftId';
@@ -1996,24 +1997,25 @@ function QualityCheckItemView({ item }: { item: QualityCheckItem }) {
 }
 
 function AiProgress({ detail, label, value }: { detail: string; label: string; value: number }) {
-  const normalizedValue = Math.min(100, Math.max(0, Math.round(value)));
+  const normalizedValue = Math.min(100, Math.max(0, value));
+  const roundedValue = Math.round(normalizedValue);
 
   return (
     <div
       aria-label={label}
       aria-valuemax={100}
       aria-valuemin={0}
-      aria-valuenow={normalizedValue}
-      aria-valuetext={`${detail}，${normalizedValue}%`}
+      aria-valuenow={roundedValue}
+      aria-valuetext={`${detail}, ${roundedValue}%`}
       className="ai-progress"
       role="progressbar"
     >
       <div className="ai-progress-header">
         <span>{detail}</span>
-        <span>{normalizedValue}%</span>
+        <span>{roundedValue}%</span>
       </div>
       <div className="ai-progress-track" aria-hidden="true">
-        <span className="ai-progress-bar" style={{ width: `${normalizedValue}%` }} />
+        <span className="ai-progress-bar" style={{ transform: `scaleX(${normalizedValue / 100})` }} />
       </div>
     </div>
   );
@@ -2028,18 +2030,17 @@ function useEstimatedProgress(isActive: boolean) {
       return undefined;
     }
 
+    const startedAt = Date.now();
     setProgress(0);
-    const intervalId = window.setInterval(() => {
-      setProgress((current) => {
-        if (current >= 92) {
-          return current;
-        }
-        const increment = Math.max(4, Math.round((92 - current) * 0.18));
-        return Math.min(92, current + increment);
-      });
-    }, 400);
+    let frameId = 0;
+    const updateProgress = () => {
+      setProgress(estimateAiProgress(Date.now() - startedAt));
+      frameId = window.requestAnimationFrame(updateProgress);
+    };
 
-    return () => window.clearInterval(intervalId);
+    frameId = window.requestAnimationFrame(updateProgress);
+
+    return () => window.cancelAnimationFrame(frameId);
   }, [isActive]);
 
   return progress;

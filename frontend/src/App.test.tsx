@@ -158,9 +158,8 @@ describe('App', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '生成提纲' });
     const progress = within(dialog).getByRole('progressbar', { name: '生成提纲进度' });
-    expect(progress).toHaveAttribute('aria-valuenow', '0');
-    expect(within(dialog).getByText('0%')).toBeInTheDocument();
-    await vi.advanceTimersByTimeAsync(1600);
+    expect(Number(progress.getAttribute('aria-valuenow'))).toBeLessThanOrEqual(5);
+    await vi.advanceTimersByTimeAsync(240);
     expect(Number(progress.getAttribute('aria-valuenow'))).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/ai/outline', expect.objectContaining({
       method: 'POST',

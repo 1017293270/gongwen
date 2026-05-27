@@ -1023,9 +1023,38 @@ textarea.field {
 .ai-progress-bar {
   position: absolute;
   inset: 0 auto 0 0;
+  width: 100%;
+  overflow: hidden;
   border-radius: inherit;
   background: var(--color-accent);
-  transition: width var(--duration-slow) var(--ease-standard);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 360ms var(--ease-standard);
+  will-change: transform;
+}
+
+.ai-progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-surface) 42%, transparent),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: ai-progress-glide 1.8s var(--ease-standard) infinite;
+}
+
+@keyframes ai-progress-glide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
 }
 
 .outline-result {
@@ -1710,5 +1739,9 @@ textarea.field {
 @media (prefers-reduced-motion: reduce) {
   .ai-progress-bar {
     transition: none;
+  }
+
+  .ai-progress-bar::after {
+    animation: none;
   }
 }
