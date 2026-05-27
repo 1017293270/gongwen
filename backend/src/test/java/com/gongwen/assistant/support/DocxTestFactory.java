@@ -4,6 +4,7 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.wp.usermodel.HeaderFooterType;
 
 import java.io.ByteArrayInputStream;
@@ -74,6 +75,37 @@ public final class DocxTestFactory {
             return output.toByteArray();
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to create styled docx", exception);
+        }
+    }
+
+    public static byte[] docxWithOfficialStyleFormatting() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph title = document.createParagraph();
+            title.setStyle("official_title");
+            title.setAlignment(ParagraphAlignment.CENTER);
+            title.setSpacingBefore(240);
+            title.setSpacingAfter(120);
+            XWPFRun titleRun = title.createRun();
+            titleRun.setFontFamily("SimHei");
+            titleRun.setFontSize(22);
+            titleRun.setBold(true);
+            titleRun.setText("{{标题}}");
+
+            XWPFParagraph body = document.createParagraph();
+            body.setStyle("body_text");
+            body.setAlignment(ParagraphAlignment.BOTH);
+            body.setIndentationFirstLine(420);
+            body.setSpacingBetween(1.5);
+            XWPFRun bodyRun = body.createRun();
+            bodyRun.setFontFamily("FangSong");
+            bodyRun.setFontSize(16);
+            bodyRun.setText("{{正文}}");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create formatted style docx", exception);
         }
     }
 

@@ -105,6 +105,29 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 .toList());
     }
 
+    @Override
+    public TemplateAnalysisResponse generateTemplateAnalysis(TemplateAnalysisPrompt prompt) {
+        DeepSeekTemplateAnalysisPayload payload = postJson(
+                List.of(
+                        Map.of("role", "system", "content", systemPrompt("你负责识别 Word 公文模板是否可用于自动套版。")),
+                        Map.of("role", "user", "content", templateAnalysisUserPrompt(prompt))
+                ),
+                DeepSeekTemplateAnalysisPayload.class
+        );
+        return new TemplateAnalysisResponse(
+                payload.templateKind(),
+                payload.confidence(),
+                payload.documentTypeCode(),
+                payload.inferredFields(),
+                payload.suggestedPlaceholders().stream()
+                        .map(suggestion -> new TemplatePlaceholderSuggestion(suggestion.field(), suggestion.reason()))
+                        .toList(),
+                payload.message(),
+                "DEEPSEEK"
+        );
+    }
+
+
     public AiProviderStatus testConnection() {
         long startedAt = System.currentTimeMillis();
         DeepSeekRuntimeConfig config = configurationState.deepSeekRuntimeConfig();
@@ -272,6 +295,40 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         );
     }
 
+    private String templateAnalysisUserPrompt(TemplateAnalysisPrompt prompt) {
+        return """
+                请判断一个没有显式占位符的 Word 文件是否适合作为公文套版模板，返回 JSON：
+                {
+                  "templateKind": "STANDARD_PLACEHOLDER_TEMPLATE|STYLE_TEMPLATE|REFERENCE_DOCUMENT|ORDINARY_DOCUMENT|UNKNOWN_DOCUMENT",
+                  "confidence": 0.0,
+                  "documentTypeCode": "NOTICE|REQUEST|REPORT|UNKNOWN",
+                  "inferredFields": ["标题","主送","正文","落款","日期"],
+                  "suggestedPlaceholders": [{"field":"标题","reason":"判断依据"}],
+                  "message": "面向模板管理员的简短说明"
+                }
+                要求：
+                1. 当前文件已经确认没有 {{字段名}} 占位符，不要声称它有占位符。
+                2. 如果像完整公文范文，templateKind 用 REFERENCE_DOCUMENT。
+                3. 如果像空白格式或样式模板，templateKind 用 STYLE_TEMPLATE。
+                4. 不要编造正文之外的信息，最多建议 8 个占位符。
+                目标文种：%s
+                文件名：%s
+                样式：%s
+                表格数量：%s
+                有页眉：%s
+                有页脚：%s
+                文本摘要：%s
+                """.formatted(
+                prompt.documentTypeCode(),
+                prompt.originalFileName(),
+                prompt.styleNames(),
+                prompt.tableCount(),
+                prompt.hasHeader(),
+                prompt.hasFooter(),
+                prompt.textSample()
+        );
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DeepSeekChatResponse(List<DeepSeekChoice> choices) {
         private String firstContent() {
@@ -332,5 +389,24 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             String message,
             String suggestion
     ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekTemplateAnalysisPayload(
+            String templateKind,
+            double confidence,
+            String documentTypeCode,
+            List<String> inferredFields,
+            List<DeepSeekPlaceholderSuggestionPayload> suggestedPlaceholders,
+            String message
+    ) {
+        private DeepSeekTemplateAnalysisPayload {
+            inferredFields = inferredFields == null ? List.of() : inferredFields;
+            suggestedPlaceholders = suggestedPlaceholders == null ? List.of() : suggestedPlaceholders;
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekPlaceholderSuggestionPayload(String field, String reason) {
     }
 }

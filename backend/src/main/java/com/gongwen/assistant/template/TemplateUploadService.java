@@ -3,6 +3,8 @@ package com.gongwen.assistant.template;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
+import com.gongwen.assistant.ai.MockModelAdapter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -22,6 +24,27 @@ public class TemplateUploadService {
     private final TemplateProfileRepository profileRepository;
     private final TemplateProfileParser profileParser;
     private final TemplateProperties properties;
+    private final TemplateIntelligenceService intelligenceService;
+    private final TemplateRepository templateRepository;
+
+    @Autowired
+    public TemplateUploadService(
+            TemplateStorage storage,
+            TemplateVersionRepository versionRepository,
+            TemplateProfileRepository profileRepository,
+            TemplateProfileParser profileParser,
+            TemplateProperties properties,
+            TemplateIntelligenceService intelligenceService,
+            TemplateRepository templateRepository
+    ) {
+        this.storage = storage;
+        this.versionRepository = versionRepository;
+        this.profileRepository = profileRepository;
+        this.profileParser = profileParser;
+        this.properties = properties;
+        this.intelligenceService = intelligenceService;
+        this.templateRepository = templateRepository;
+    }
 
     public TemplateUploadService(
             TemplateStorage storage,
@@ -30,22 +53,32 @@ public class TemplateUploadService {
             TemplateProfileParser profileParser,
             TemplateProperties properties
     ) {
-        this.storage = storage;
-        this.versionRepository = versionRepository;
-        this.profileRepository = profileRepository;
-        this.profileParser = profileParser;
-        this.properties = properties;
+        this(storage, versionRepository, profileRepository, profileParser, properties,
+                new TemplateIntelligenceService(new MockModelAdapter()), new InMemoryTemplateRepository());
     }
 
     public TemplateUploadResponse upload(long templateId, String originalFileName, String contentType, byte[] content) {
         validate(originalFileName, contentType, content);
 
-        TemplateVersion version = null;
+        String filePath;
         try {
-            String filePath = storage.save(originalFileName, "docx", content);
-            version = versionRepository.create(templateId, originalFileName, contentType, content.length, filePath);
+            filePath = storage.save(originalFileName, "docx", content);
+        } catch (IOException exception) {
+            throw new TemplateException("TEMPLATE_STORAGE_FAILED", "Template file storage failed", exception);
+        }
 
-            TemplateProfile profile = profileParser.parse(content);
+        TemplateVersion version;
+        try {
+            version = versionRepository.create(templateId, originalFileName, contentType, content.length, filePath);
+        } catch (RuntimeException exception) {
+            throw new TemplateException("TEMPLATE_VERSION_CREATE_FAILED", "Template version creation failed", exception);
+        }
+
+        try {
+            String documentTypeCode = templateRepository.findById(templateId)
+                    .map(TemplateSummary::documentTypeCode)
+                    .orElse("UNKNOWN");
+            TemplateProfile profile = intelligenceService.enrich(documentTypeCode, originalFileName, content, profileParser.parse(content));
             String profileHash = sha256(content);
             profileRepository.save(version.id(), profile, profileHash);
             versionRepository.markParsed(version.id(), profileHash);
@@ -59,8 +92,6 @@ public class TemplateUploadService {
                     profile.validationItems().size(),
                     profile.validationItems().stream().map(item -> item.code()).toList()
             );
-        } catch (IOException exception) {
-            throw new TemplateException("TEMPLATE_STORAGE_FAILED", "Template file storage failed", exception);
         } catch (TemplateException exception) {
             markVersionFailed(version, exception);
             throw exception;
@@ -98,6 +129,23 @@ public class TemplateUploadService {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 unavailable", exception);
+        }
+    }
+
+    private static class InMemoryTemplateRepository implements TemplateRepository {
+        @Override
+        public TemplateSummary create(String templateName, String documentTypeCode) {
+            return new TemplateSummary(1L, templateName, documentTypeCode, "ACTIVE");
+        }
+
+        @Override
+        public java.util.List<TemplateSummary> findAll(String documentTypeCode) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public java.util.Optional<TemplateSummary> findById(long id) {
+            return java.util.Optional.of(new TemplateSummary(id, "测试模板", "NOTICE", "ACTIVE"));
         }
     }
 }

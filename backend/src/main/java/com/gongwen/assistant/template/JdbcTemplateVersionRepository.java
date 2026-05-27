@@ -10,6 +10,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -126,7 +127,7 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
                 rs.getString("parse_status"),
                 rs.getString("parse_error_code"),
                 rs.getString("parse_error_message"),
-                rs.getObject("created_at", Instant.class)
+                rs.getObject("created_at", OffsetDateTime.class).toInstant()
         );
     }
 }

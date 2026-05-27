@@ -56,6 +56,65 @@ export type TemplateUploadResult = {
 
 export type TemplateProfile = {
   schemaVersion: number;
+  structures: Array<{
+    structureKey: string;
+    structureType: string;
+    label: string;
+    textPreview: string;
+    locationType: string;
+    styleId: string | null;
+    styleName: string | null;
+    source: string;
+    formatting: TemplateStructureFormatting;
+  }>;
+  styles: Array<{
+    styleId: string;
+    styleName: string;
+    type: string;
+    basedOn: string | null;
+    fontFamily: string | null;
+    fontSizeHalfPoints: number | null;
+    bold: boolean | null;
+    alignment: string | null;
+    indentationFirstLine: number | null;
+    spacingBetween: number | null;
+    spacingBefore: number | null;
+    spacingAfter: number | null;
+  }>;
+  sections: Array<{
+    sectionIndex: number;
+    hasHeader: boolean;
+    hasFooter: boolean;
+    pageWidthTwips: number | null;
+    pageHeightTwips: number | null;
+    marginTopTwips: number | null;
+    marginRightTwips: number | null;
+    marginBottomTwips: number | null;
+    marginLeftTwips: number | null;
+  }>;
+  tables: Array<{
+    tableIndex: number;
+    rowCount: number;
+    columnCount: number;
+    placeholderCount: number;
+  }>;
+  media: Array<{
+    mediaType: string | null;
+    relationshipId: string | null;
+    fileName: string | null;
+  }>;
+  templateAnalysis: {
+    templateKind: string;
+    confidence: number;
+    documentTypeCode: string;
+    inferredFields: string[];
+    suggestedPlaceholders: Array<{
+      field: string;
+      reason: string;
+    }>;
+    message: string;
+    source: string;
+  } | null;
   placeholders: Array<{
     key: string;
     locationType: string;
@@ -67,6 +126,17 @@ export type TemplateProfile = {
     code: string;
     message: string;
   }>;
+};
+
+export type TemplateStructureFormatting = {
+  fontFamily: string | null;
+  fontSizeHalfPoints: number | null;
+  bold: boolean | null;
+  alignment: string | null;
+  indentationFirstLine: number | null;
+  spacingBetween: number | null;
+  spacingBefore: number | null;
+  spacingAfter: number | null;
 };
 
 export type DraftBlockUpdate = {

@@ -40,11 +40,15 @@
 - 系统设置 AI 配置页、运行时 Mock / DeepSeek 切换、DeepSeek 模型适配和连接测试 API。
 - P8A 模板引擎后端底座：模板版本、`TemplateProfile`、解析风险、上传解析 API 和 profile 查询 API。
 - P8 基础质检首版闭环：规则质检、模板适配质检、DeepSeek/Mock 质检建议、结果落库和右栏质检面板。
+- P10 模板管理员后台首版：文种文件夹、模板卡片、新增模板、上传新版本、模板列表 API 和 profile 解析结果展示。
+- P10 模板智能识别首版：Word 没有 `{{字段名}}` 占位符时不再直接按解析失败处理，而是用 AI/Mock 识别文件类型、文种倾向和建议占位符。
+- P10B 结构维度闭环首个切片：profile 输出可识别结构、原文片段、位置、来源和字体、字号、加粗、对齐、首行缩进、行距、段前段后，模板解析弹窗改为“结构与维度”，工作台类 Word 预览按所选模板结构维度渲染。
 
 当前推荐下一阶段：
 
 - P11 导出体验增强，把 `exportBlocked` 接入导出前阻断。
-- P10 模板管理员后台，复用模板版本/profile API 展示解析结果。
+- P10B 结构维度配置持久化，把模板维度编辑落库，并复用到质检和 `.docx` 导出复现。
+- P10 模板管理员后台后续增强，继续做字段映射、启停、版本详情和权限预留。
 
 ## 全局落地原则
 
@@ -54,6 +58,7 @@
 - 模型调用、Prompt、材料解析、模板填充、导出、质检必须保持服务边界清晰。
 - 所有文件上传、下载、导出、删除、权限变更都必须考虑鉴权、校验和审计预留。
 - 前端必须遵循 `DESIGN.md` token 和三栏工作台结构。
+- 常规 UI 必须优先复用全局组件和全局样式；页面局部 CSS 只能用于特殊业务布局，不能覆盖按钮、表单、状态提示、空状态等全局组件的颜色、字号、图标尺寸、padding、对齐和交互状态。
 - 每个阶段完成前必须运行相关测试，不能验证时必须记录具体原因。
 
 ## 阶段路线图
@@ -484,8 +489,8 @@
 
 已知注意点：
 
-- 系统设置写入的是后端运行时内存态配置，不是持久配置；后端重启后以环境变量为准。
-- 生产化前需要补权限控制、密钥清除、审计、密钥存储和持久化策略。
+- 系统设置已写入 `ai_provider_settings` 持久表，后端重启后优先读取数据库；没有数据库记录时才使用环境变量。
+- 生产化前需要补权限控制、密钥清除、审计和更完整的密钥轮换策略。
 - Codex Browser 插件在本机曾不可用，原因是底层 `node_repl` 内核报 `failed to write kernel assets`；浏览器验证可使用终端 Playwright 或人工刷新。
 - 如果系统设置页显示 `Failed to fetch`，优先检查后端 8080 是否运行，以及 `VITE_API_BASE_URL` 是否指向当前后端。
 
@@ -566,7 +571,7 @@
 
 ### P8A 模板引擎底座
 
-状态：已完成 T1 后端基础。
+状态：已完成 T1 后端基础，并已被 P8B 质检和 P10 模板后台首版复用。
 
 目标：按 Word 样式体系优先建立模板版本、`TemplateProfile`、解析风险和上传解析 API，为后续模板管理、质检和导出升级提供稳定底座。
 
@@ -578,15 +583,24 @@
 - `.docx` 模板上传服务，包含类型、大小、空文件校验，解析失败会标记版本失败。
 - profile JSONB 持久化。
 
+覆盖等级约定：
+
+- 模板能力必须按 L0-L5 标记覆盖程度：L0 解析保存，L1 后台展示，L2 风险识别，L3 映射或规则配置，L4 质检，L5 导出复现。
+- 占位符和关键样式映射最终要达到 L5；页眉页脚、编号、复杂表格、图片或印章锚点首版至少达到 L1-L2，不能静默忽略。
+- 当前 P8A 已完成基础 L0-L2 的一部分，但字体、字号、对齐、行距、缩进、段前段后等样式细节解析仍需 P10B 继续补齐。
+
 已实现 API：
 
+- `GET /api/templates`
+- `POST /api/templates`
+- `GET /api/templates/versions`
 - `POST /api/templates/{templateId}/versions`
 - `GET /api/templates/versions/{versionId}/profile`
 
 后续依赖：
 
 - P8 基础质检可复用 `TemplateProfile` 做占位符填充和结构检查。
-- P10 模板管理员后台可复用上传和 profile 查询能力展示解析结果。
+- P10 模板管理员后台已复用上传和 profile 查询能力展示解析结果；后续继续扩展字段映射、启停和版本详情。
 - P11 导出体验增强需要绑定具体模板版本，保证历史导出可追溯。
 
 ### P8 基础质检
@@ -643,25 +657,90 @@
 
 ### P10 模板管理员后台
 
-状态：待开始。
+状态：首版已完成，后续增强待继续。
 
 目标：让模板管理员通过 UI 上传和配置 Word 模板。
 
-范围：
+已完成范围：
 
-- 模板上传页面。
-- 占位符解析结果展示。
+- 模板管理入口从预留页升级为真实页面。
+- 首屏按文种展示“文件夹式”卡片，文种包括通知、请示、报告。
+- 进入文种后展示该文种下的模板卡片，右上角显示模板数和版本数。
+- 新增模板进入独立页面，标题显示“新增模板 - 文种名”。
+- 已有模板可上传新版本，标题显示“上传新版本 - 文种名”。
+- 新增/上传版本时先选择 Word 文件，再点击“确认创建并解析”，避免选择文件即自动上传。
+- 模板卡片可查看最新版本 `TemplateProfile` 的占位符和解析风险。
+- 解析结果使用全局 `Dialog` 弹窗展示；模板列表页只保留文种、卡片和操作入口，避免长结果区撑开页面。
+- 无显式占位符的 Word 文件会展示“智能识别”结果，说明当前不是解析失败，并建议 `{{标题}}`、`{{正文}}`、`{{日期}}` 等可用于自动套版的占位符。
+- 后端已提供模板列表和创建 API，配合版本上传与 profile 查询形成首版闭环。
+- UI 必须复用全局 `Button`、表单、状态和 token；模板页不得再用局部 class 覆盖按钮颜色、字号、图标尺寸和对齐。
+
+已实现 API：
+
+- `GET /api/templates?documentTypeCode=NOTICE`
+- `POST /api/templates`
+- `GET /api/templates/versions?documentTypeCode=NOTICE`
+- `POST /api/templates/{templateId}/versions`
+- `GET /api/templates/versions/{versionId}/profile`
+
+后续范围：
+
 - 字段名称、类型、必填、默认值、排序配置。
-- 绑定文种。
+- 占位符到草稿块/字段的映射配置。
+- Word 样式到草稿块的映射配置，例如标题、主送、正文段落、正文一级标题、附件说明、落款和日期。
+- 关键版式规则配置和展示，例如标题居中、正文行距、正文首行缩进、段前段后、落款右对齐、字体和字号。
+- 模板能力矩阵展示，标明占位符、样式、段落、字符、分节、页眉页脚、编号、表格、媒体和未支持结构分别达到 L0-L5 哪个等级。
+- 复杂结构风险展示，例如多级编号、复杂表格、图片锚点、页眉页脚和 unsupported 结构；首版只读提示，不做完整编辑。
 - 模板启用、停用。
-- 模板版本管理。
+- 模板版本详情页和历史版本列表。
+- 模板管理员权限接入。
+- 模板删除或批量操作如需实现，必须先补确认、审计和权限。
 
 验收标准：
 
-- 管理员能上传 `.docx` 模板。
-- 管理员能看到解析出的占位符。
-- 管理员能配置字段并保存。
-- 起草工作台能选择启用模板。
+- 管理员能按文种进入模板列表。
+- 管理员能新增 `.docx` 模板并明确确认上传解析。
+- 管理员能看到解析出的占位符和风险。
+- 起草工作台能选择已上传的模板版本。
+- 后续增强完成后，管理员能配置字段和启停模板。
+- 无占位符 Word 文件能被明确区分为样式模板、范文/示例公文、普通 Word 或待人工确认，不误提示为解析失败。
+- 管理员能看到模板能力矩阵，知道每个 Word 维度是已解析、可展示、可质检、可配置、可导出复现，还是仅风险提示。
+- 管理员能把标题、正文、落款、日期等公文语义块映射到 Word 样式，并能查看关键版式规则。
+
+验证状态：
+
+- focused 后端测试 `TemplateUploadControllerTest` 通过。
+- 前端 `npm run build` 通过。
+- `git diff --check` 通过。
+- 当前模板管理 UI 已经多轮按项目全局按钮和布局规范修正；后续修改必须先复用全局样式。
+
+### P10B 模板结构维度配置闭环
+
+状态：首个切片已完成，后续增强待继续。
+
+目标：模板解析后形成“结构 + 原文 + 可编辑维度”，并让工作台类 Word 纸张按所选模板维度渲染。能力矩阵只作为内部覆盖口径，不再作为管理员主展示。
+
+已完成范围：
+
+- `TemplateProfileParser` 输出 `structures`，每条结构包含结构类型、结构名称、Word 原文片段、位置、来源和默认格式维度。
+- 模板解析结果弹窗主展示改为“结构与维度”，按结构展示原文片段，并提供字体、字号、对齐、首行缩进、行距、段后和加粗编辑控件。
+- 工作台绑定模板版本后会拉取 `TemplateProfile`，并将标题、主送、正文、附件、落款、日期的生效维度应用到中间类 Word 预览。
+- 前端类型 `TemplateProfile` 已补齐 `structures`、styles、sections、tables 和 media 字段。
+
+后续范围：
+
+- 从 Word style 定义本身补充更多继承属性，而不仅依赖代表段落和 run。
+- 将当前前端会话内的维度编辑升级为可保存配置，优先复用 `template_rule` 或补最小结构配置表。
+- 将标题居中、正文行距、正文首行缩进、落款右对齐等生效维度接入 P8/P11 质检和 `.docx` 导出复现。
+- 补 unsupported OOXML 结构列表，例如域、脚注尾注、复杂 DrawingML、宏等。
+
+验证状态：
+
+- focused 后端测试 `TemplateProfileParserTest` 通过。
+- focused 后端测试 `TemplateUploadServiceTest` 通过。
+- 前端 `App.test.tsx` 通过。
+- 前端 `npm run build` 通过。
+- 浏览器自动化未完成：当前可用工具没有 Browser 导航工具，bundled Playwright 缺 `playwright-core`，已用组件测试和构建覆盖首轮 UI 验证。
 
 ### P11 导出体验增强
 
@@ -749,9 +828,31 @@
 ## 当前开发队列
 
 1. P11 导出体验增强。
-2. P10 模板管理员后台。
-3. P9 登录与基础权限。
-4. P12 部署与环境。
+2. P10B 结构维度配置持久化。
+3. P10 模板管理员后台后续增强：字段映射、启停、版本详情。
+4. P9 登录与基础权限。
+5. P12 部署与环境。
+
+## 当前推荐多 Agent 分工
+
+目标阶段：P11 导出体验增强 + P10 后续增强 + P9 权限前置。
+
+建议先由集成 Agent 冻结接口契约，再并行：
+
+- Agent A 后端 P11：读取或触发最新质检结果，`exportBlocked=true` 时阻断导出；补导出记录模板版本追溯和稳定错误 shape。
+- Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检、导出中、导出失败和成功下载状态。
+- Agent C P10B：把结构维度编辑落库，并让质检和导出复用同一套生效维度；不要再回到能力矩阵主展示。
+- Agent F P10：继续字段映射、模板启停和版本详情；必须复用 P10B 的结构维度来源。
+- Agent D P9：先设计认证/RBAC 契约和拦截点，覆盖草稿、材料、模板、导出文件；不要直接大改所有接口。
+- Agent E QA/文档：补 P10/P11/P9 验收清单、focused tests、错误/空/权限状态和文档同步。
+
+文件边界建议：
+
+- P11 后端优先改 `backend/src/main/java/com/gongwen/assistant/exporting/**`、`backend/src/main/java/com/gongwen/assistant/quality/**`、相关 controller/test。
+- P11 前端优先改 `frontend/src/App.tsx`、`frontend/src/api.ts`、`frontend/src/draftTypes.ts`、`frontend/src/styles/app.css`，但按钮/表单必须复用全局组件。
+- P10B 后续优先改 `backend/src/main/java/com/gongwen/assistant/template/profile/**`、`backend/src/main/java/com/gongwen/assistant/template/**`、`frontend/src/App.tsx` 中 `TemplateManagementPage`、`frontend/src/api.ts`、`frontend/src/draftTypes.ts`；重点是结构维度配置持久化和导出复现。
+- P9 权限优先先产出契约和最小后端模型，避免同时大范围改所有 controller。
+- 文档 Agent 只改 `AGENTS.md`、`DESIGN.md`、`docs/**`、必要的 `.env.example`。
 
 ## AI 接力清单
 
@@ -759,33 +860,48 @@
 
 - 当前分支和 `git status --short --branch`。
 - `AGENTS.md` 与本文件是否反映当前代码。
+- 最近提交：`9744a31 feat: add template management library flow`。如果工作区还有未提交 UI 微调，必须先阅读 diff，不要覆盖。
 - 当前阶段是否已有 `docs/superpowers/plans/*` 实施计划。
 - 是否存在未提交用户改动，不能随意覆盖。
-- 如果改后端，优先用 Docker Gradle 镜像验证 Java 21 构建，除非本机已安装 Java 21 和 Gradle。
-- 如果改前端，必须运行 `npm test` 和 `npm run build`。
-- 如果改 UI，必须用浏览器检查桌面布局，必要时检查移动视口。
+- 当前本机已有 JDK 21、本地 Gradle 8.10.2 和脚本，后端优先用 `scripts/backend-test-focused.ps1` 或 `scripts/backend-test.ps1`，不必默认启 Docker Gradle 冷环境。
+- 如果改前端，至少运行 `npm run build`；风险较高或改测试相关时再运行 `npm test -- --run`。
+- 如果改 UI，必须用浏览器检查桌面布局，必要时检查移动视口；常规 UI 必须先复用全局组件和全局样式。
 
 ## 验证命令备忘
 
 前端：
 
 ```powershell
-cd E:\gongwen\frontend
-npm test
+cd D:\gongwen\frontend
+npm test -- --run
 npm run build
 ```
 
-后端测试（本机无 Java 21/Gradle 时）：
+后端 focused 测试（优先）：
 
 ```powershell
-cd E:\gongwen
-docker run --rm -v "E:\gongwen\backend:/workspace" -w /workspace -e GRADLE_USER_HOME=/tmp/gradle-home gradle:8.10.2-jdk21 gradle --project-cache-dir /tmp/gradle-project-cache test
+cd D:\gongwen
+powershell -ExecutionPolicy Bypass -File .\scripts\backend-test-focused.ps1 "com.gongwen.assistant.template.TemplateUploadControllerTest"
+```
+
+后端全量测试：
+
+```powershell
+cd D:\gongwen
+powershell -ExecutionPolicy Bypass -File .\scripts\backend-test.ps1
+```
+
+后端测试（本机脚本不可用时再用 Docker Gradle）：
+
+```powershell
+cd D:\gongwen
+docker run --rm -v "D:\gongwen\backend:/workspace" -w /workspace -e GRADLE_USER_HOME=/tmp/gradle-home gradle:8.10.2-jdk21 gradle --project-cache-dir /tmp/gradle-project-cache test
 ```
 
 数据库：
 
 ```powershell
-cd E:\gongwen
+cd D:\gongwen
 docker compose up -d postgres
 docker compose ps
 docker exec gongwen-postgres pg_isready -U gongwen -d gongwen
@@ -794,8 +910,8 @@ docker exec gongwen-postgres pg_isready -U gongwen -d gongwen
 后端运行验证（8080 被占用时映射到 18080）：
 
 ```powershell
-cd E:\gongwen
+cd D:\gongwen
 docker rm -f gongwen-backend-dev 2>$null
-docker run -d --name gongwen-backend-dev --network gongwen_default -p 18080:8080 -v "E:\gongwen\backend:/workspace" -w /workspace -e SPRING_DATASOURCE_URL="jdbc:postgresql://postgres:5432/gongwen" -e SPRING_DATASOURCE_USERNAME="gongwen" -e SPRING_DATASOURCE_PASSWORD="gongwen_dev_password" gradle:8.10.2-jdk21 gradle bootRun
+docker run -d --name gongwen-backend-dev --network gongwen_default -p 18080:8080 -v "D:\gongwen\backend:/workspace" -w /workspace -e SPRING_DATASOURCE_URL="jdbc:postgresql://postgres:5432/gongwen" -e SPRING_DATASOURCE_USERNAME="gongwen" -e SPRING_DATASOURCE_PASSWORD="gongwen_dev_password" gradle:8.10.2-jdk21 gradle bootRun
 Invoke-RestMethod http://127.0.0.1:18080/api/health
 ```

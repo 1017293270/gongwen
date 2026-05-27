@@ -935,7 +935,19 @@ textarea.field {
   max-height: min(760px, calc(100vh - 48px));
 }
 
+.template-profile-dialog {
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+}
+
 .ai-task-dialog .ui-dialog-body {
+  overflow: auto;
+  padding-right: var(--space-1);
+}
+
+.template-profile-dialog .ui-dialog-body {
+  display: grid;
+  gap: var(--space-3);
   overflow: auto;
   padding-right: var(--space-1);
 }
@@ -1290,8 +1302,15 @@ textarea.field {
 .template-folder-grid,
 .template-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--space-3);
+}
+
+.template-folder-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.template-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 320px));
 }
 
 .template-folder-card,
@@ -1335,8 +1354,8 @@ textarea.field {
 }
 
 .template-folder-card small,
-.template-card span,
-.template-card p {
+.template-card-meta,
+.template-card-file {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
 }
@@ -1385,12 +1404,12 @@ textarea.field {
 .template-card {
   display: grid;
   gap: var(--space-3);
-  min-height: 168px;
+  min-height: 176px;
   padding: var(--space-4);
 }
 
 .template-card.skeleton-row {
-  min-height: 168px;
+  min-height: 176px;
 }
 
 .template-card-title {
@@ -1416,14 +1435,20 @@ textarea.field {
 }
 
 .template-card p {
-  min-height: 34px;
   margin: 0;
   line-height: var(--leading-normal);
 }
 
+.template-card-file {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .template-card-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
 }
 
@@ -1504,6 +1529,93 @@ textarea.field {
   font-size: var(--text-sm);
 }
 
+.template-profile-wide {
+  grid-column: 1 / -1;
+}
+
+.template-structure-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.template-structure-item {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(280px, 1.1fr);
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-3);
+}
+
+.template-structure-main {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.template-structure-main strong {
+  display: block;
+  color: var(--color-text);
+  font-size: var(--text-base);
+  line-height: var(--leading-title);
+}
+
+.template-structure-main span,
+.template-structure-main p,
+.template-dimension-grid span {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.template-structure-main p {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.template-dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.template-dimension-grid label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.template-dimension-grid input,
+.template-dimension-grid select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 7px 9px;
+  font: inherit;
+}
+
+.template-dimension-grid input:focus-visible,
+.template-dimension-grid select:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.template-dimension-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: end;
+  align-items: center;
+}
+
+.template-dimension-check input {
+  width: 16px;
+  height: 16px;
+}
+
 .template-profile-item,
 .template-profile-risk {
   display: grid;
@@ -1519,6 +1631,23 @@ textarea.field {
 .template-profile-risk {
   grid-template-columns: minmax(0, 120px) minmax(0, 1fr);
   align-items: start;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.template-analysis-summary {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-2);
+}
+
+.template-analysis-summary strong {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.template-analysis-summary span {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
 }
@@ -1690,7 +1819,9 @@ textarea.field {
   .template-folder-grid,
   .template-card-grid,
   .template-profile-summary,
-  .template-profile-grid {
+  .template-profile-grid,
+  .template-structure-item,
+  .template-dimension-grid {
     grid-template-columns: 1fr;
   }
 

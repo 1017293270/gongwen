@@ -18,4 +18,8 @@ public interface ModelAdapter {
     default AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
         throw new ModelAdapterException("MODEL_UNSUPPORTED_TASK", "模型暂不支持质检");
     }
+
+    default TemplateAnalysisResponse generateTemplateAnalysis(TemplateAnalysisPrompt prompt) {
+        throw new ModelAdapterException("MODEL_UNSUPPORTED_TASK", "模型暂不支持模板识别");
+    }
 }

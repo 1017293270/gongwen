@@ -7,6 +7,7 @@ import {
   useEffect,
   useId,
 } from 'react';
+import { ChevronsUpDown } from 'lucide-react';
 import './ui.css';
 
 type Tone = 'info' | 'success' | 'warning' | 'error';
@@ -161,23 +162,34 @@ export function SelectField({
   hint,
   id,
   label,
+  multiple,
   required,
+  size,
   className,
   ...props
 }: SelectFieldProps) {
+  const hasDropdownIndicator = !multiple && (size === undefined || Number(size) <= 1);
+
   return (
     <FieldChrome error={error} hint={hint} id={id} label={label} required={required}>
       {({ describedBy, fieldId, invalid }) => (
-        <select
-          {...props}
-          aria-describedby={describedBy}
-          aria-invalid={invalid ? 'true' : undefined}
-          className={cx('ui-field-control', className)}
-          id={fieldId}
-          required={required}
-        >
-          {children}
-        </select>
+        <span className={cx('ui-select-shell', hasDropdownIndicator && 'ui-select-shell-indicated')}>
+          <select
+            {...props}
+            aria-describedby={describedBy}
+            aria-invalid={invalid ? 'true' : undefined}
+            className={cx('ui-field-control', 'ui-select-control', className)}
+            id={fieldId}
+            multiple={multiple}
+            required={required}
+            size={size}
+          >
+            {children}
+          </select>
+          {hasDropdownIndicator ? (
+            <ChevronsUpDown aria-hidden="true" className="ui-select-icon" strokeWidth={1.8} />
+          ) : null}
+        </span>
       )}
     </FieldChrome>
   );

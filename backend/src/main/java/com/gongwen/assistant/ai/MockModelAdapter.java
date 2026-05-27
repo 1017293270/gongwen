@@ -92,9 +92,60 @@ public class MockModelAdapter implements ModelAdapter {
         return new AiQualityReviewResponse(suggestions);
     }
 
+    @Override
+    public TemplateAnalysisResponse generateTemplateAnalysis(TemplateAnalysisPrompt prompt) {
+        String text = prompt.textSample();
+        String documentType = inferDocumentType(prompt.documentTypeCode(), text);
+        List<String> fields = inferFields(text);
+        String kind = text.length() > 500 ? "REFERENCE_DOCUMENT" : "STYLE_TEMPLATE";
+        double confidence = text.isBlank() ? 0.42 : 0.78;
+        String message = switch (kind) {
+            case "REFERENCE_DOCUMENT" -> "未发现占位符。该文件更像完整范文，可参考内容与格式，但不建议直接作为套版模板。";
+            case "STYLE_TEMPLATE" -> "未发现占位符。该文件更像样式模板，可按建议字段补充占位符后用于自动套版。";
+            default -> "未发现占位符，需要人工确认该文件是否适合作为模板。";
+        };
+        return new TemplateAnalysisResponse(
+                kind,
+                confidence,
+                documentType,
+                fields,
+                fields.stream()
+                        .map(field -> new TemplatePlaceholderSuggestion(field, "根据文档结构和公文常见字段推断"))
+                        .toList(),
+                message,
+                "MOCK"
+        );
+    }
+
     private boolean isBlankField(OutlinePrompt prompt, String blockType) {
         return prompt.fieldSummaries().stream()
                 .filter(summary -> summary.startsWith(blockType + ":"))
                 .allMatch(summary -> summary.equals(blockType + ": "));
+    }
+
+    private String inferDocumentType(String requestedType, String text) {
+        if (text.contains("请示")) {
+            return "REQUEST";
+        }
+        if (text.contains("报告")) {
+            return "REPORT";
+        }
+        return requestedType == null || requestedType.isBlank() ? "NOTICE" : requestedType;
+    }
+
+    private List<String> inferFields(String text) {
+        List<String> fields = new ArrayList<>();
+        fields.add("标题");
+        if (text.contains("各") || text.contains("：")) {
+            fields.add("主送");
+        }
+        fields.add("正文");
+        if (text.matches("(?s).*(20\\d{2}年\\d{1,2}月\\d{1,2}日|20\\d{2}-\\d{1,2}-\\d{1,2}).*")) {
+            fields.add("日期");
+        }
+        if (text.contains("附件")) {
+            fields.add("附件");
+        }
+        return fields;
     }
 }

@@ -16,7 +16,7 @@ import {
   Sparkles,
   Upload,
 } from 'lucide-react';
-import { ChangeEvent, MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, CSSProperties, MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDraft,
   createTemplate,
@@ -62,6 +62,7 @@ import type {
   QualityCheckItem,
   QualityCheckResult,
   TemplateProfile,
+  TemplateStructureFormatting,
   TemplateSummary,
   TemplateUploadResult,
   TemplateVersionSummary,
@@ -89,6 +90,9 @@ type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
 type AppView = 'overview' | 'workbench' | 'drafts' | 'templates' | 'materials' | 'exports' | 'ai-tasks' | 'settings';
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
 type AiDialog = 'outline' | 'quality' | 'local' | null;
+type TemplateStructureOverride = Partial<TemplateStructureFormatting>;
+type TemplateStructureOverrideMap = Record<string, TemplateStructureOverride>;
+type TemplateStructureOverridesByVersion = Record<number, TemplateStructureOverrideMap>;
 
 const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
   { value: 'FORMALIZE', label: '正式化' },
@@ -140,6 +144,8 @@ function Workbench() {
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [templateVersions, setTemplateVersions] = useState<TemplateVersionSummary[]>([]);
+  const [selectedTemplateProfile, setSelectedTemplateProfile] = useState<TemplateProfile | null>(null);
+  const [templateStructureOverrides, setTemplateStructureOverrides] = useState<TemplateStructureOverridesByVersion>({});
   const [outline, setOutline] = useState<AiOutline | null>(null);
   const [outlineStatus, setOutlineStatus] = useState<OutlineStatus>('idle');
   const [outlineError, setOutlineError] = useState('');
@@ -202,6 +208,9 @@ function Workbench() {
         const loadedDraft = await loadCurrentDraft();
         const loadedMaterials = await listDraftMaterials(loadedDraft.id);
         const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode);
+        const loadedTemplateProfile = loadedDraft.templateVersionId
+          ? await getTemplateProfile(loadedDraft.templateVersionId).catch(() => null)
+          : null;
         if (!mounted) {
           return;
         }
@@ -210,6 +219,7 @@ function Workbench() {
         setBlocks(loadedDraft.blocks);
         setMaterials(loadedMaterials);
         setTemplateVersions(loadedTemplateVersions);
+        setSelectedTemplateProfile(loadedTemplateProfile);
         setStatus('idle');
         setMaterialStatus('idle');
         setStatusMessage('草稿已载入');
@@ -296,6 +306,15 @@ function Workbench() {
   const signature = blockValues.SIGNATURE ?? '';
   const date = blockValues.DATE ?? '';
   const selectedBodyBlock = bodyBlocks.find((block) => block.id === selectedBodyBlockId) ?? null;
+  const selectedTemplateOverrides = draft?.templateVersionId
+    ? templateStructureOverrides[draft.templateVersionId] ?? {}
+    : {};
+  const titlePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'TITLE');
+  const recipientPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'RECIPIENT');
+  const bodyPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'BODY');
+  const attachmentPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'ATTACHMENT');
+  const signaturePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'SIGNATURE');
+  const datePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'DATE');
 
   function selectBodyBlock(blockId: number, shouldScroll = true) {
     setSelectedBodyBlockId(blockId);
@@ -454,8 +473,10 @@ function Workbench() {
     }
     try {
       const updatedDraft = await updateDraftTemplateVersion(draft.id, templateVersionId);
+      const updatedProfile = templateVersionId ? await getTemplateProfile(templateVersionId).catch(() => null) : null;
       setDraft(updatedDraft);
       setBlocks(updatedDraft.blocks);
+      setSelectedTemplateProfile(updatedProfile);
       setQualityCheck(null);
       showToast({
         title: templateVersionId ? '模板已绑定到草稿' : '已取消模板绑定',
@@ -941,8 +962,8 @@ function Workbench() {
             <section aria-label="公文预览">
           <div className="document-stage">
             <article className="document-paper">
-              <h2 className="document-title">{title}</h2>
-              <p>{recipient}：</p>
+              <h2 className="document-title" style={titlePreviewStyle}>{title}</h2>
+              <p style={recipientPreviewStyle}>{recipient}：</p>
               {bodyNavigationBlocks.length > 0 ? bodyNavigationBlocks
                 .map((block) => (
                 selectedBodyBlockId === block.id ? (
@@ -960,6 +981,7 @@ function Workbench() {
                         syncParagraphEditorHeight(node);
                       }
                     }}
+                    style={bodyPreviewStyle}
                     value={block.content}
                   />
                 ) : (
@@ -971,6 +993,7 @@ function Workbench() {
                     ref={(node) => {
                       paragraphRefs.current[block.id] = node;
                     }}
+                    style={bodyPreviewStyle}
                     type="button"
                   >
                     <span className="visually-hidden">选择段落：</span>
@@ -978,11 +1001,11 @@ function Workbench() {
                   </button>
                 )
               )) : <p>请在左侧填写正文内容。</p>}
-              {attachment && <p>附件：{attachment}</p>}
-              <p className="signature">
-                {signature}
+              {attachment && <p style={attachmentPreviewStyle}>附件：{attachment}</p>}
+              <p className="signature" style={signaturePreviewStyle}>
+                <span>{signature}</span>
                 <br />
-                {date}
+                <span style={datePreviewStyle}>{date}</span>
               </p>
             </article>
           </div>
@@ -1134,6 +1157,19 @@ function Workbench() {
             <TemplateManagementPage
               defaultDocumentTypeCode={draft?.documentTypeCode ?? 'NOTICE'}
               documentTypes={documentTypes}
+              structureOverrides={templateStructureOverrides}
+              onStructureOverrideChange={(templateVersionId, structureKey, nextOverride) => {
+                setTemplateStructureOverrides((current) => ({
+                  ...current,
+                  [templateVersionId]: {
+                    ...(current[templateVersionId] ?? {}),
+                    [structureKey]: nextOverride,
+                  },
+                }));
+                if (draft?.templateVersionId === templateVersionId && selectedTemplateProfile) {
+                  setSelectedTemplateProfile({ ...selectedTemplateProfile });
+                }
+              }}
               onTemplateVersionCreated={async () => {
                 if (draft) {
                   setTemplateVersions(await listTemplateVersions(draft.documentTypeCode));
@@ -1453,10 +1489,18 @@ function OverviewPage({
 function TemplateManagementPage({
   defaultDocumentTypeCode,
   documentTypes,
+  structureOverrides,
+  onStructureOverrideChange,
   onTemplateVersionCreated,
 }: {
   defaultDocumentTypeCode: string;
   documentTypes: DocumentType[];
+  structureOverrides: TemplateStructureOverridesByVersion;
+  onStructureOverrideChange: (
+    templateVersionId: number,
+    structureKey: string,
+    nextOverride: TemplateStructureOverride,
+  ) => void;
   onTemplateVersionCreated: () => Promise<void>;
 }) {
   const { showToast } = useToast();
@@ -1468,6 +1512,12 @@ function TemplateManagementPage({
   const [versions, setVersions] = useState<TemplateVersionSummary[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [profile, setProfile] = useState<TemplateProfile | null>(null);
+  const [profileContext, setProfileContext] = useState<{
+    templateVersionId: number;
+    templateName: string;
+    versionNo: number;
+    originalFileName: string;
+  } | null>(null);
   const [uploadResult, setUploadResult] = useState<TemplateUploadResult | null>(null);
   const [selectedTemplateFile, setSelectedTemplateFile] = useState<File | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'uploading' | 'error'>('loading');
@@ -1536,6 +1586,7 @@ function TemplateManagementPage({
     setTemplateName('');
     setSelectedTemplateId(null);
     setProfile(null);
+    setProfileContext(null);
     setUploadResult(null);
     setSelectedTemplateFile(null);
   }
@@ -1546,6 +1597,7 @@ function TemplateManagementPage({
     setTemplateName('');
     setSelectedTemplateId(null);
     setProfile(null);
+    setProfileContext(null);
     setUploadResult(null);
     setSelectedTemplateFile(null);
     setTemplates([]);
@@ -1556,6 +1608,7 @@ function TemplateManagementPage({
     setSelectedTemplateId(template?.id ?? null);
     setTemplateName(template?.templateName ?? '');
     setProfile(null);
+    setProfileContext(null);
     setUploadResult(null);
     setSelectedTemplateFile(null);
     setPageMode('create');
@@ -1566,6 +1619,12 @@ function TemplateManagementPage({
       setStatus('loading');
       const parsedProfile = await getTemplateProfile(version.templateVersionId);
       setProfile(parsedProfile);
+      setProfileContext({
+        templateVersionId: version.templateVersionId,
+        templateName: version.templateName,
+        versionNo: version.versionNo,
+        originalFileName: version.originalFileName,
+      });
       setUploadResult(null);
       setStatus('idle');
       setMessage(`${version.templateName} v${version.versionNo} 解析结果已加载`);
@@ -1608,6 +1667,12 @@ function TemplateManagementPage({
       setVersions(loadedVersions);
       setUploadResult(result);
       setProfile(parsedProfile);
+      setProfileContext({
+        templateVersionId: result.templateVersionId,
+        templateName: template.templateName,
+        versionNo: result.versionNo,
+        originalFileName: file.name,
+      });
       setPageMode('list');
       setStatus('idle');
       setMessage('模板已解析');
@@ -1622,24 +1687,31 @@ function TemplateManagementPage({
     }
   }
 
+  function handleCloseProfileDialog() {
+    setProfile(null);
+    setProfileContext(null);
+    setUploadResult(null);
+  }
+
   return (
-    <main className="settings-page" aria-label="模板管理">
-      <section className="settings-panel template-admin-panel">
-        <div className="settings-header">
-          <div>
-            <div className="eyebrow">模板库</div>
-            <h2>
-              {pageMode === 'create' ? (selectedTemplateId ? '上传新版本' : '新增模板') : '模板管理'}
-              {activeDocumentType && <span className="template-title-suffix"> - {activeDocumentType.name}</span>}
-            </h2>
-            <p>{activeDocumentType ? '新增模板后会解析占位符和风险。' : '先选择文种，再管理该文种下的模板。'}</p>
+    <>
+      <main className="settings-page" aria-label="模板管理">
+        <section className="settings-panel template-admin-panel">
+          <div className="settings-header">
+            <div>
+              <div className="eyebrow">模板库</div>
+              <h2>
+                {pageMode === 'create' ? (selectedTemplateId ? '上传新版本' : '新增模板') : '模板管理'}
+                {activeDocumentType && <span className="template-title-suffix"> - {activeDocumentType.name}</span>}
+              </h2>
+              <p>{activeDocumentType ? '新增模板后会解析占位符和风险。' : '先选择文种，再管理该文种下的模板。'}</p>
+            </div>
+            {pageMode !== 'folders' && (
+              <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+                {status === 'uploading' ? '解析中' : `${templates.length} 个模板 · ${versions.length} 个版本`}
+              </span>
+            )}
           </div>
-          {pageMode !== 'folders' && (
-            <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
-              {status === 'uploading' ? '解析中' : `${templates.length} 个模板 · ${versions.length} 个版本`}
-            </span>
-          )}
-        </div>
 
         {pageMode === 'folders' && (
           <div className="template-folder-grid">
@@ -1695,15 +1767,15 @@ function TemplateManagementPage({
                         <FileText aria-hidden="true" />
                         <div>
                           <h3>{template.templateName}</h3>
-                          <span>{template.status} · {templateVersions.length} 个版本</span>
+                          <span className="template-card-meta">{template.status} · {templateVersions.length} 个版本</span>
                         </div>
                       </div>
-                      <p>{latestVersion ? `最新版本 v${latestVersion.versionNo} · ${latestVersion.originalFileName}` : '尚未上传 Word 版本'}</p>
+                      <p className="template-card-file">{latestVersion ? `最新版本 v${latestVersion.versionNo} · ${latestVersion.originalFileName}` : '尚未上传 Word 版本'}</p>
                       <div className="template-card-actions">
                         <Button disabled={!latestVersion || status === 'loading'} icon={<Eye aria-hidden="true" />} onClick={() => latestVersion && handleViewProfile(latestVersion)} variant="secondary">
                           解析结果
                         </Button>
-                        <Button disabled={status === 'loading'} icon={<Upload aria-hidden="true" />} onClick={() => handleStartCreate(template)} variant="ghost">
+                        <Button disabled={status === 'loading'} icon={<Upload aria-hidden="true" />} onClick={() => handleStartCreate(template)} variant="secondary">
                           上传新版本
                         </Button>
                       </div>
@@ -1773,6 +1845,21 @@ function TemplateManagementPage({
           </>
         )}
 
+        </section>
+      </main>
+
+      <Dialog
+        actions={(
+          <Button onClick={handleCloseProfileDialog} variant="secondary">
+            关闭
+          </Button>
+        )}
+        className="template-profile-dialog"
+        description={profileContext ? `${profileContext.templateName} v${profileContext.versionNo} · ${profileContext.originalFileName}` : undefined}
+        onClose={handleCloseProfileDialog}
+        open={Boolean(profile)}
+        title="解析结果"
+      >
         {uploadResult && (
           <div className="template-profile-summary">
             <div className="metric-card">
@@ -1792,18 +1879,56 @@ function TemplateManagementPage({
 
         {profile && (
           <div className="template-profile-grid">
-            <section className="template-profile-box">
-              <h3>占位符</h3>
-              {profile.placeholders.length === 0 ? (
-                <p className="empty-note">未解析到占位符。</p>
-              ) : profile.placeholders.map((placeholder) => (
-                <div className="template-profile-item" key={`${placeholder.key}-${placeholder.paragraphKey}`}>
-                  <ClipboardList aria-hidden="true" />
-                  <span>{placeholder.key}</span>
-                  {placeholder.splitAcrossRuns && <small>跨 run</small>}
+            {profile.placeholders.length > 0 && (
+              <section className="template-profile-box">
+                <h3>占位符</h3>
+                {profile.placeholders.map((placeholder) => (
+                  <div className="template-profile-item" key={`${placeholder.key}-${placeholder.paragraphKey}`}>
+                    <ClipboardList aria-hidden="true" />
+                    <span>{placeholder.key}</span>
+                    {placeholder.splitAcrossRuns && <small>跨 run</small>}
+                  </div>
+                ))}
+              </section>
+            )}
+            <section className="template-profile-box template-profile-wide">
+              <h3>结构与维度</h3>
+              {(profile.structures ?? []).length === 0 ? (
+                <p className="empty-note">未识别到可配置的正文结构。</p>
+              ) : (
+                <div className="template-structure-list">
+                  {(profile.structures ?? []).slice(0, 10).map((structure) => (
+                    <TemplateStructureEditor
+                      key={structure.structureKey}
+                      onChange={(nextOverride) => {
+                        if (profileContext) {
+                          onStructureOverrideChange(profileContext.templateVersionId, structure.structureKey, nextOverride);
+                        }
+                      }}
+                      override={profileContext ? structureOverrides[profileContext.templateVersionId]?.[structure.structureKey] : undefined}
+                      structure={structure}
+                    />
+                  ))}
                 </div>
-              ))}
+              )}
             </section>
+            {profile.templateAnalysis && (
+              <section className="template-profile-box">
+                <h3>智能识别</h3>
+                <div className="template-analysis-summary">
+                  <strong>{templateKindLabel(profile.templateAnalysis.templateKind)}</strong>
+                  <span>{Math.round(profile.templateAnalysis.confidence * 100)}% · {profile.templateAnalysis.documentTypeCode || 'UNKNOWN'} · {profile.templateAnalysis.source}</span>
+                </div>
+                {profile.templateAnalysis.suggestedPlaceholders.length === 0 ? (
+                  <p className="empty-note">暂无建议占位符。</p>
+                ) : profile.templateAnalysis.suggestedPlaceholders.map((suggestion) => (
+                  <div className="template-profile-risk" key={`${suggestion.field}-${suggestion.reason}`}>
+                    <strong>{suggestion.field}</strong>
+                    <span>{suggestion.reason}</span>
+                  </div>
+                ))}
+              </section>
+            )}
             <section className="template-profile-box">
               <h3>解析风险</h3>
               {profile.validationItems.length === 0 ? (
@@ -1817,8 +1942,111 @@ function TemplateManagementPage({
             </section>
           </div>
         )}
-      </section>
-    </main>
+      </Dialog>
+    </>
+  );
+}
+
+function TemplateStructureEditor({
+  structure,
+  override,
+  onChange,
+}: {
+  structure: TemplateProfile['structures'][number];
+  override?: TemplateStructureOverride;
+  onChange: (nextOverride: TemplateStructureOverride) => void;
+}) {
+  const effectiveFormatting = { ...structure.formatting, ...(override ?? {}) };
+
+  function updateDimension<Key extends keyof TemplateStructureFormatting>(
+    key: Key,
+    value: TemplateStructureFormatting[Key],
+  ) {
+    onChange({ ...(override ?? {}), [key]: value });
+  }
+
+  return (
+    <article className="template-structure-item">
+      <div className="template-structure-main">
+        <div>
+          <strong>{structure.label}</strong>
+          <span>{locationLabel(structure.locationType)} · {structureSourceLabel(structure.source)}</span>
+        </div>
+        <p>{structure.textPreview || '该结构暂无可展示文字'}</p>
+      </div>
+      <div className="template-dimension-grid" aria-label={`${structure.label} 可编辑维度`}>
+        <label>
+          <span>字体</span>
+          <input
+            onChange={(event) => updateDimension('fontFamily', event.target.value || null)}
+            placeholder="默认"
+            value={effectiveFormatting.fontFamily ?? ''}
+          />
+        </label>
+        <label>
+          <span>字号 pt</span>
+          <input
+            min="8"
+            onChange={(event) => updateDimension('fontSizeHalfPoints', pointToHalfPoint(event.target.value))}
+            placeholder="默认"
+            type="number"
+            value={effectiveFormatting.fontSizeHalfPoints ? effectiveFormatting.fontSizeHalfPoints / 2 : ''}
+          />
+        </label>
+        <label>
+          <span>对齐</span>
+          <select
+            onChange={(event) => updateDimension('alignment', event.target.value || null)}
+            value={effectiveFormatting.alignment ?? ''}
+          >
+            <option value="">默认</option>
+            <option value="LEFT">左对齐</option>
+            <option value="CENTER">居中</option>
+            <option value="RIGHT">右对齐</option>
+            <option value="BOTH">两端对齐</option>
+          </select>
+        </label>
+        <label>
+          <span>首行缩进 mm</span>
+          <input
+            min="0"
+            onChange={(event) => updateDimension('indentationFirstLine', millimeterToTwips(event.target.value))}
+            placeholder="默认"
+            type="number"
+            value={effectiveFormatting.indentationFirstLine ? twipsToMillimeters(effectiveFormatting.indentationFirstLine) : ''}
+          />
+        </label>
+        <label>
+          <span>行距</span>
+          <input
+            min="1"
+            onChange={(event) => updateDimension('spacingBetween', lineSpacingToProfileValue(event.target.value))}
+            placeholder="默认"
+            step="0.1"
+            type="number"
+            value={effectiveFormatting.spacingBetween ? effectiveFormatting.spacingBetween / 100 : ''}
+          />
+        </label>
+        <label>
+          <span>段后 mm</span>
+          <input
+            min="0"
+            onChange={(event) => updateDimension('spacingAfter', millimeterToTwips(event.target.value))}
+            placeholder="默认"
+            type="number"
+            value={effectiveFormatting.spacingAfter ? twipsToMillimeters(effectiveFormatting.spacingAfter) : ''}
+          />
+        </label>
+        <label className="template-dimension-check">
+          <input
+            checked={Boolean(effectiveFormatting.bold)}
+            onChange={(event) => updateDimension('bold', event.target.checked)}
+            type="checkbox"
+          />
+          <span>加粗</span>
+        </label>
+      </div>
+    </article>
   );
 }
 
@@ -2078,6 +2306,110 @@ function qualityCategoryLabel(category: string) {
 
 function localOperationLabel(operationType: AiLocalOperationType) {
   return LOCAL_OPERATION_OPTIONS.find((option) => option.value === operationType)?.label ?? '段落';
+}
+
+function templateKindLabel(templateKind: string) {
+  const labels: Record<string, string> = {
+    STANDARD_PLACEHOLDER_TEMPLATE: '标准占位符模板',
+    STYLE_TEMPLATE: '样式模板',
+    REFERENCE_DOCUMENT: '范文/示例公文',
+    ORDINARY_DOCUMENT: '普通 Word 文件',
+    UNKNOWN_DOCUMENT: '待人工确认',
+  };
+  return labels[templateKind] ?? templateKind;
+}
+
+function structurePreviewStyle(
+  profile: TemplateProfile | null,
+  overrides: TemplateStructureOverrideMap,
+  structureType: string,
+): CSSProperties {
+  const structure = profile?.structures?.find((candidate) => candidate.structureType === structureType);
+  if (!structure) {
+    return {};
+  }
+  return formattingToCss({ ...structure.formatting, ...(overrides[structure.structureKey] ?? {}) });
+}
+
+function formattingToCss(formatting: TemplateStructureFormatting): CSSProperties {
+  const style: CSSProperties = {};
+  if (formatting.fontFamily) {
+    style.fontFamily = formatting.fontFamily;
+  }
+  if (formatting.fontSizeHalfPoints) {
+    style.fontSize = `${formatting.fontSizeHalfPoints / 2}pt`;
+  }
+  if (typeof formatting.bold === 'boolean') {
+    style.fontWeight = formatting.bold ? 700 : 400;
+  }
+  if (formatting.alignment) {
+    style.textAlign = alignmentToCss(formatting.alignment);
+  }
+  if (formatting.indentationFirstLine) {
+    style.textIndent = `${twipsToMillimeters(formatting.indentationFirstLine)}mm`;
+  }
+  if (formatting.spacingBetween) {
+    style.lineHeight = String(formatting.spacingBetween / 100);
+  }
+  if (formatting.spacingBefore) {
+    style.marginBlockStart = `${twipsToMillimeters(formatting.spacingBefore)}mm`;
+  }
+  if (formatting.spacingAfter) {
+    style.marginBlockEnd = `${twipsToMillimeters(formatting.spacingAfter)}mm`;
+  }
+  return style;
+}
+
+function alignmentToCss(alignment: string): CSSProperties['textAlign'] {
+  const normalized = alignment.toUpperCase();
+  if (normalized === 'CENTER') {
+    return 'center';
+  }
+  if (normalized === 'RIGHT') {
+    return 'right';
+  }
+  if (normalized === 'BOTH') {
+    return 'justify';
+  }
+  return 'left';
+}
+
+function pointToHalfPoint(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 2) : null;
+}
+
+function millimeterToTwips(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed / 0.0176389) : null;
+}
+
+function lineSpacingToProfileValue(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) : null;
+}
+
+function locationLabel(locationType: string) {
+  const labels: Record<string, string> = {
+    PARAGRAPH: '正文段落',
+    TABLE: '表格内',
+    HEADER: '页眉',
+    FOOTER: '页脚',
+  };
+  return labels[locationType] ?? locationType;
+}
+
+function structureSourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    PLACEHOLDER: '来自占位符',
+    STYLE: '来自 Word 样式',
+    TEXT: '来自文本识别',
+  };
+  return labels[source] ?? source;
+}
+
+function twipsToMillimeters(twips: number) {
+  return Math.round(twips * 0.0176389);
 }
 
 function paragraphDisplayTitle(block: DraftBlock, index: number) {

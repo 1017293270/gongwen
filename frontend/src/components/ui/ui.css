@@ -148,6 +148,47 @@
   color: var(--color-text-subtle);
 }
 
+.ui-select-shell {
+  position: relative;
+  display: block;
+}
+
+.ui-select-control {
+  display: block;
+}
+
+.ui-select-shell-indicated .ui-select-control {
+  appearance: none;
+  padding-right: 44px;
+}
+
+.ui-select-icon {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition:
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.ui-select-shell:hover .ui-select-icon,
+.ui-select-shell:focus-within .ui-select-icon {
+  color: var(--color-text);
+}
+
+.ui-select-shell:focus-within .ui-select-icon {
+  transform: translateY(-50%) scale(1.04);
+}
+
+.ui-select-control:disabled + .ui-select-icon {
+  color: var(--color-text-subtle);
+}
+
 .ui-field-error .ui-field-control {
   border-color: color-mix(in srgb, var(--color-danger) 58%, var(--color-border));
 }
@@ -278,7 +319,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ui-button,
-  .ui-field-control {
+  .ui-field-control,
+  .ui-select-icon {
     transition: none;
   }
 

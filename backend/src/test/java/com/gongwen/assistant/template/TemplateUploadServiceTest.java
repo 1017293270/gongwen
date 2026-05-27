@@ -151,6 +151,29 @@ class TemplateUploadServiceTest {
     }
 
     @Test
+    void uploadAddsTemplateAnalysisWhenNoPlaceholderExists() {
+        byte[] content = DocxTestFactory.docxWithParagraphs("关于开展年度档案整理工作的通知", "各部门应按时完成归档工作。");
+        InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
+        InMemoryTemplateProfileRepository profileRepository = new InMemoryTemplateProfileRepository();
+        TemplateUploadService service = new TemplateUploadService(
+                (originalFileName, fileExtension, bytes) -> "storage/templates/notice.docx",
+                versionRepository,
+                profileRepository,
+                new TemplateProfileParser(),
+                new TemplateProperties("storage/templates", 20)
+        );
+
+        service.upload(3L, "notice.docx", DOCX_CONTENT_TYPE, content);
+
+        TemplateProfile profile = profileRepository.findByTemplateVersionId(1L).orElseThrow();
+        assertThat(profile.placeholders()).isEmpty();
+        assertThat(profile.templateAnalysis()).isNotNull();
+        assertThat(profile.templateAnalysis().suggestedPlaceholders())
+                .extracting("field")
+                .contains("标题", "正文");
+    }
+
+    @Test
     void uploadRejectsNonDocxTemplate() {
         InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
         TemplateUploadService service = new TemplateUploadService(

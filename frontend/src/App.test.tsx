@@ -599,6 +599,7 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: '测试连接' }));
     expect((await screen.findAllByText(/DeepSeek 连接正常/)).length).toBeGreaterThan(0);
   });
+
 });
 
 async function openWorkbench() {

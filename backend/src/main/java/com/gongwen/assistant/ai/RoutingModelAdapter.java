@@ -50,6 +50,11 @@ public class RoutingModelAdapter implements ModelAdapter {
         return activeAdapter().generateQualityReview(prompt);
     }
 
+    @Override
+    public TemplateAnalysisResponse generateTemplateAnalysis(TemplateAnalysisPrompt prompt) {
+        return activeAdapter().generateTemplateAnalysis(prompt);
+    }
+
     private ModelAdapter activeAdapter() {
         return configurationState.useDeepSeek() ? deepSeekModelAdapter : mockModelAdapter;
     }

@@ -1,6 +1,7 @@
 package com.gongwen.assistant.template.profile;
 
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFHeader;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFStyle;
@@ -11,6 +12,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,7 @@ public class TemplateProfileParser {
             collectTablePlaceholders(document, placeholders, validationItems);
             return new TemplateProfile(
                     SCHEMA_VERSION,
+                    parseStructures(document),
                     parseStyles(document),
                     deduplicatePlaceholders(placeholders),
                     parseSections(document),
@@ -42,38 +45,241 @@ public class TemplateProfileParser {
         }
     }
 
+    private List<TemplateStructureProfile> parseStructures(XWPFDocument document) {
+        List<TemplateStructureProfile> structures = new ArrayList<>();
+        for (int index = 0; index < document.getParagraphs().size(); index++) {
+            XWPFParagraph paragraph = document.getParagraphs().get(index);
+            addStructure(structures, paragraph, "PARAGRAPH", "paragraph-" + index);
+        }
+        for (int tableIndex = 0; tableIndex < document.getTables().size(); tableIndex++) {
+            XWPFTable table = document.getTables().get(tableIndex);
+            int cellIndex = 0;
+            for (var row : table.getRows()) {
+                for (var cell : row.getTableCells()) {
+                    for (int paragraphIndex = 0; paragraphIndex < cell.getParagraphs().size(); paragraphIndex++) {
+                        addStructure(
+                                structures,
+                                cell.getParagraphs().get(paragraphIndex),
+                                "TABLE",
+                                "table-" + tableIndex + "-cell-" + cellIndex + "-paragraph-" + paragraphIndex
+                        );
+                    }
+                    cellIndex++;
+                }
+            }
+        }
+        for (int headerIndex = 0; headerIndex < document.getHeaderList().size(); headerIndex++) {
+            XWPFHeader header = document.getHeaderList().get(headerIndex);
+            for (int paragraphIndex = 0; paragraphIndex < header.getParagraphs().size(); paragraphIndex++) {
+                addStructure(
+                        structures,
+                        header.getParagraphs().get(paragraphIndex),
+                        "HEADER",
+                        "header-" + headerIndex + "-paragraph-" + paragraphIndex
+                );
+            }
+        }
+        for (int footerIndex = 0; footerIndex < document.getFooterList().size(); footerIndex++) {
+            var footer = document.getFooterList().get(footerIndex);
+            for (int paragraphIndex = 0; paragraphIndex < footer.getParagraphs().size(); paragraphIndex++) {
+                addStructure(
+                        structures,
+                        footer.getParagraphs().get(paragraphIndex),
+                        "FOOTER",
+                        "footer-" + footerIndex + "-paragraph-" + paragraphIndex
+                );
+            }
+        }
+        return structures;
+    }
+
+    private void addStructure(
+            List<TemplateStructureProfile> structures,
+            XWPFParagraph paragraph,
+            String locationType,
+            String paragraphKey
+    ) {
+        String text = normalizeText(paragraph.getText());
+        if (text.isBlank()) {
+            return;
+        }
+        String type = inferStructureType(paragraph, text, locationType);
+        structures.add(new TemplateStructureProfile(
+                paragraphKey,
+                type,
+                structureLabel(type),
+                previewText(text),
+                locationType,
+                paragraph.getStyle(),
+                styleName(paragraph),
+                inferStructureSource(text, paragraph),
+                formattingFromParagraph(paragraph)
+        ));
+    }
+
+    private TemplateStructureFormattingProfile formattingFromParagraph(XWPFParagraph paragraph) {
+        XWPFRun run = firstRun(paragraph);
+        return new TemplateStructureFormattingProfile(
+                run == null ? null : run.getFontFamily(),
+                fontSizeHalfPoints(run),
+                run == null ? null : run.isBold(),
+                paragraph.getAlignment() == null ? null : paragraph.getAlignment().name(),
+                positiveOrNull(paragraph.getIndentationFirstLine()),
+                spacingBetween(paragraph),
+                positiveOrNull(paragraph.getSpacingBefore()),
+                positiveOrNull(paragraph.getSpacingAfter())
+        );
+    }
+
+    private String inferStructureType(XWPFParagraph paragraph, String text, String locationType) {
+        if ("HEADER".equals(locationType)) {
+            return "HEADER";
+        }
+        if ("FOOTER".equals(locationType)) {
+            return "FOOTER";
+        }
+        String raw = (text + " " + safeText(paragraph.getStyle()) + " " + safeText(styleName(paragraph))).toLowerCase();
+        if (containsAny(raw, "标题", "title", "{{标题", "{{title")) {
+            return "TITLE";
+        }
+        if (containsAny(raw, "主送", "recipient", "{{主送")) {
+            return "RECIPIENT";
+        }
+        if (containsAny(raw, "正文", "body", "{{正文")) {
+            return "BODY";
+        }
+        if (containsAny(raw, "附件", "attachment", "{{附件")) {
+            return "ATTACHMENT";
+        }
+        if (containsAny(raw, "落款", "signature", "{{落款")) {
+            return "SIGNATURE";
+        }
+        if (containsAny(raw, "日期", "date", "{{日期")) {
+            return "DATE";
+        }
+        if (containsAny(raw, "文号", "meta", "〔", "号")) {
+            return "META";
+        }
+        if (containsAny(raw, "机关", "单位", "unit")) {
+            return "UNIT";
+        }
+        if ("TABLE".equals(locationType)) {
+            return "TABLE";
+        }
+        return "UNKNOWN";
+    }
+
+    private String structureLabel(String type) {
+        return switch (type) {
+            case "UNIT" -> "发文机关";
+            case "META" -> "文号/元信息";
+            case "TITLE" -> "公文标题";
+            case "RECIPIENT" -> "主送机关";
+            case "BODY" -> "正文段落";
+            case "ATTACHMENT" -> "附件";
+            case "SIGNATURE" -> "落款";
+            case "DATE" -> "日期";
+            case "TABLE" -> "表格内容";
+            case "HEADER" -> "页眉";
+            case "FOOTER" -> "页脚";
+            default -> "未归类段落";
+        };
+    }
+
+    private String inferStructureSource(String text, XWPFParagraph paragraph) {
+        if (PLACEHOLDER_PATTERN.matcher(text).find()) {
+            return "PLACEHOLDER";
+        }
+        if (paragraph.getStyle() != null && !paragraph.getStyle().isBlank()) {
+            return "STYLE";
+        }
+        return "TEXT";
+    }
+
+    private boolean containsAny(String raw, String... values) {
+        for (String value : values) {
+            if (raw.contains(value.toLowerCase())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String previewText(String text) {
+        if (text.length() <= 120) {
+            return text;
+        }
+        return text.substring(0, 120) + "...";
+    }
+
     private List<TemplateStyleProfile> parseStyles(XWPFDocument document) {
         List<TemplateStyleProfile> profiles = new ArrayList<>();
         Set<String> styleIds = new LinkedHashSet<>();
-        document.getParagraphs().forEach(paragraph -> collectStyleId(paragraph, styleIds));
+        Map<String, XWPFParagraph> representativeParagraphs = new LinkedHashMap<>();
+        document.getParagraphs().forEach(paragraph -> collectStyleParagraph(paragraph, styleIds, representativeParagraphs));
         document.getTables().forEach(table -> table.getRows().forEach(row -> row.getTableCells()
-                .forEach(cell -> cell.getParagraphs().forEach(paragraph -> collectStyleId(paragraph, styleIds)))));
+                .forEach(cell -> cell.getParagraphs().forEach(paragraph -> collectStyleParagraph(paragraph, styleIds, representativeParagraphs)))));
 
         for (String styleId : styleIds) {
             XWPFStyle style = document.getStyles() == null ? null : document.getStyles().getStyle(styleId);
+            XWPFParagraph paragraph = representativeParagraphs.get(styleId);
+            XWPFRun run = firstRun(paragraph);
             profiles.add(new TemplateStyleProfile(
                     styleId,
                     style == null ? styleId : style.getName(),
                     style == null ? "PARAGRAPH" : String.valueOf(style.getType()),
                     style == null ? null : style.getBasisStyleID(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null
+                    run == null ? null : run.getFontFamily(),
+                    fontSizeHalfPoints(run),
+                    run == null ? null : run.isBold(),
+                    paragraph == null || paragraph.getAlignment() == null ? null : paragraph.getAlignment().name(),
+                    positiveOrNull(paragraph == null ? -1 : paragraph.getIndentationFirstLine()),
+                    spacingBetween(paragraph),
+                    positiveOrNull(paragraph == null ? -1 : paragraph.getSpacingBefore()),
+                    positiveOrNull(paragraph == null ? -1 : paragraph.getSpacingAfter())
             ));
         }
         return profiles;
     }
 
-    private void collectStyleId(XWPFParagraph paragraph, Set<String> styleIds) {
+    private void collectStyleParagraph(
+            XWPFParagraph paragraph,
+            Set<String> styleIds,
+            Map<String, XWPFParagraph> representativeParagraphs
+    ) {
         String styleId = paragraph.getStyle();
         if (styleId != null && !styleId.isBlank()) {
             styleIds.add(styleId);
+            representativeParagraphs.putIfAbsent(styleId, paragraph);
         }
+    }
+
+    private XWPFRun firstRun(XWPFParagraph paragraph) {
+        if (paragraph == null) {
+            return null;
+        }
+        return paragraph.getRuns().stream()
+                .filter(run -> run.text() != null && !run.text().isBlank())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Integer fontSizeHalfPoints(XWPFRun run) {
+        if (run == null || run.getFontSize() <= 0) {
+            return null;
+        }
+        return run.getFontSize() * 2;
+    }
+
+    private Integer spacingBetween(XWPFParagraph paragraph) {
+        if (paragraph == null || paragraph.getSpacingBetween() <= 0) {
+            return null;
+        }
+        return (int) Math.round(paragraph.getSpacingBetween() * 100);
+    }
+
+    private Integer positiveOrNull(int value) {
+        return value <= 0 ? null : value;
     }
 
     private void collectParagraphPlaceholders(
@@ -252,5 +458,9 @@ public class TemplateProfileParser {
 
     private String safeText(String text) {
         return text == null ? "" : text;
+    }
+
+    private String normalizeText(String text) {
+        return safeText(text).replaceAll("\\s+", " ").trim();
     }
 }

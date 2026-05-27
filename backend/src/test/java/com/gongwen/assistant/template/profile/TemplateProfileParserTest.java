@@ -37,6 +37,49 @@ class TemplateProfileParserTest {
     }
 
     @Test
+    void parsesKeyParagraphAndRunFormattingForStyleCandidates() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithOfficialStyleFormatting());
+
+        TemplateStructureProfile titleStructure = profile.structures().stream()
+                .filter(structure -> "TITLE".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(titleStructure.label()).isEqualTo("公文标题");
+        assertThat(titleStructure.textPreview()).contains("{{");
+        assertThat(titleStructure.formatting().alignment()).isEqualTo("CENTER");
+        assertThat(titleStructure.formatting().fontFamily()).isEqualTo("SimHei");
+        assertThat(titleStructure.formatting().fontSizeHalfPoints()).isEqualTo(44);
+
+        TemplateStructureProfile bodyStructure = profile.structures().stream()
+                .filter(structure -> "BODY".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(bodyStructure.formatting().alignment()).isEqualTo("BOTH");
+        assertThat(bodyStructure.formatting().indentationFirstLine()).isEqualTo(420);
+
+        TemplateStyleProfile titleStyle = profile.styles().stream()
+                .filter(style -> "official_title".equals(style.styleId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(titleStyle.alignment()).isEqualTo("CENTER");
+        assertThat(titleStyle.fontFamily()).isEqualTo("SimHei");
+        assertThat(titleStyle.fontSizeHalfPoints()).isEqualTo(44);
+        assertThat(titleStyle.bold()).isTrue();
+        assertThat(titleStyle.spacingBefore()).isEqualTo(240);
+        assertThat(titleStyle.spacingAfter()).isEqualTo(120);
+
+        TemplateStyleProfile bodyStyle = profile.styles().stream()
+                .filter(style -> "body_text".equals(style.styleId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(bodyStyle.alignment()).isEqualTo("BOTH");
+        assertThat(bodyStyle.fontFamily()).isEqualTo("FangSong");
+        assertThat(bodyStyle.fontSizeHalfPoints()).isEqualTo(32);
+        assertThat(bodyStyle.indentationFirstLine()).isEqualTo(420);
+        assertThat(bodyStyle.spacingBetween()).isGreaterThan(0);
+    }
+
+    @Test
     void parsesTablePlaceholders() {
         TemplateProfile profile = parser.parse(DocxTestFactory.docxWithTableCell("附件：{{附件}}"));
 
