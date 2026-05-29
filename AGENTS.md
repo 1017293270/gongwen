@@ -352,7 +352,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”首个切片，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已先落地草稿绑定模板后的 Word 导出入口。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v9。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已先落地草稿绑定模板后的 Word 导出入口。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v9。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
@@ -451,7 +451,7 @@ P8 基础质检当前约定：
 - 质检结果保存到 `quality_check_result.result_json`，并提供 `GET /api/drafts/{draftId}/quality-check/latest` 获取最近一次结果。
 - `ai_generation_trace` 使用 `QUALITY_CHECK` task type 记录 provider、model、状态、prompt 版本、输入摘要、建议数量、错误摘要和耗时；trace 不保存完整正文或完整材料文本。
 - AI 质检失败不会阻断规则质检，结果中追加 `AI_QUALITY_UNAVAILABLE` 或 `AI_QUALITY_RESPONSE_INVALID` 警告；规则、模板适配或 AI 返回的 `ERROR` 会让 `exportBlocked=true`。
-- 工作台左栏已提供“套版模板”选择，调用 `PUT /api/drafts/{id}/template-version` 绑定具体模板版本；质检会读取该版本的 `TemplateProfile` 检查占位符缺值、未映射占位符和跨 run 风险。
+- 工作台左栏已提供“套版模板”选择，调用 `PUT /api/drafts/{id}/template-version` 绑定具体模板版本；质检会读取该版本的 `TemplateProfile` 检查占位符缺值、未映射占位符、跨 run 风险以及和保存后生效格式不一致的结构格式告警。
 - 前端右栏“基础质检”面板已接入未检查、检查中、成功、警告、错误和重试状态；AI 建议首版只展示，不自动改正文。
 
 模板引擎当前约定：
@@ -462,7 +462,9 @@ P8 基础质检当前约定：
 - 模板能力覆盖必须用 L0-L5 矩阵做内部 QA 管理，但普通管理员主界面应围绕“结构、原文、可编辑维度和预览效果”组织，不再把能力矩阵作为核心展示。
 - 首版必须优先覆盖公文关键维度：占位符、标题样式、正文样式、正文行距、正文首行缩进、段前段后、标题居中、落款右对齐、页边距摘要和复杂结构风险。
 - 页眉页脚、页码、多级编号、复杂表格、图片或印章锚点、未知 OOXML 结构首版可只读展示和风险提示，但不能静默忽略；后续是否开放编辑必须按矩阵升级。
-- P10B 当前切片已让 `TemplateProfileParser` 输出 `structures`，每个结构包含结构类型、原文片段、位置、来源和字体、字号、加粗、对齐、首行缩进、行距、段前段后等维度；模板解析弹窗主展示改为“结构与维度”，维度编辑保存到 `template_rule` 的 `STRUCTURE_FORMATTING_OVERRIDE` 规则，工作台类 Word 预览会按所选模板的结构维度渲染。后续需把同一套生效维度接入 `.docx` 导出复现。
+- P10B 当前切片已让 `TemplateProfileParser` 输出 `structures`，每个结构包含结构类型、原文片段、位置、来源和字体、字号、加粗、对齐、首行缩进、行距、段前段后等维度；模板解析弹窗主展示改为“结构与维度”，维度编辑保存到 `template_rule` 的 `STRUCTURE_FORMATTING_OVERRIDE` 规则。
+- effective formatting 现在是预览、基础质检和 `.docx` 导出的共享合同：后端会把 `TemplateProfile.structures` 默认格式和保存的 override 合并为标题、主送、正文、落款、日期等语义槽位的最终格式，避免三处各自推断。
+- 当前已稳定复现的关键规则是标题居中、正文首行缩进与段落间距、落款右对齐、日期右对齐；后续 richer style inheritance 和 unsupported OOXML 风险显式提示仍属于 P10B 增强项。
 - P10C 当前前端切片新增 `WorkbenchNode` 派生模型：工作台会从 `DraftDetail + TemplateProfile + formattingOverrides` 派生正文结构节点，正文小标题和正文内容在左栏目录、中间纸张和右栏选中上下文中分开呈现；底层仍兼容 `DraftBlock`，后续需要新增后端 `draft_node` 持久化、AI/质检 `nodeId` 绑定和导出复现。
 - 当前 T1/P10 底座已提供 `GET /api/templates`、`POST /api/templates`、`DELETE /api/templates/{templateId}`、`POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。
 - `POST /api/templates` 对同名同文种模板按幂等创建处理：已存在时返回已有模板，随后上传文件会进入该模板的新版本；不同文种同名因旧表唯一键限制会返回稳定业务错误。
@@ -536,9 +538,9 @@ P8 基础质检当前约定：
 
 下一步建议：
 
-1. 推进 P11 导出体验增强：导出前调用或读取质检结果，`exportBlocked=true` 时阻止导出。
+1. 推进 P11 导出体验增强：导出前调用或读取质检结果，`exportBlocked=true` 时阻止导出，并补导出记录列表与历史文件下载。
 2. 推进 P10C 结构节点持久化：新增后端 `draft_node` 或兼容节点 API，让工作台节点内容和草稿级样式覆盖刷新后不丢失，并逐步接入 AI/质检 `nodeId`。
 3. P10 模板管理员后台继续扩展字段映射、模板启停、版本详情和模板列表操作；不要重复实现文种文件夹、模板卡片、上传解析首版。
-4. P8/P11 后续围绕模板版本 `TemplateProfile` 做导出前阻断和导出记录追溯，不要阻塞 P11 的导出闭环。
+4. P8/P11 后续围绕模板版本 `TemplateProfile` 做导出前阻断和导出记录追溯；P10B 的格式复现合同已落地，不要再把这部分回滚成 P11 前置依赖。
 5. P9 登录与基础权限仍是 MVP 闭环的关键后续，尤其是草稿、材料、模板、导出文件访问控制。
 6. 后续开发默认先跑 focused tests；除非风险明显升高，可按任务轻量验证，避免每个小步都跑全量测试。

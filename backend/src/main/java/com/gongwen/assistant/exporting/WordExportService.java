@@ -7,6 +7,9 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class WordExportService {
+    private static final String MISSING_TEMPLATE_VALUE = "MISSING_TEMPLATE_VALUE";
+    private static final String RENDER_FAILED = "WORD_EXPORT_RENDER_FAILED";
+
     private final ExportRecordRepository exportRecordRepository;
     private final DocxTemplateRenderer renderer;
 
@@ -24,18 +27,14 @@ public class WordExportService {
         String fileName = buildFileName(request);
         try {
             byte[] content = renderer.hasPlaceholders(templateBytes)
-                    ? renderer.render(templateBytes, request.values())
-                    : renderer.renderDraftSnapshot(request.values());
+                    ? renderer.render(templateBytes, request.values(), request.formatting())
+                    : renderer.renderDraftSnapshot(request.values(), request.formatting());
             exportRecordRepository.save(ExportRecord.success(request.templateName(), request.templateVersion(), fileName));
             return new WordExportResult(fileName, content);
         } catch (MissingTemplateValueException exception) {
-            exportRecordRepository.save(ExportRecord.failure(
-                    request.templateName(),
-                    request.templateVersion(),
-                    fileName,
-                    "MISSING_TEMPLATE_VALUE",
-                    exception.getMessage()));
-            throw new WordExportException("MISSING_TEMPLATE_VALUE", exception.getMessage(), exception);
+            throw recordFailure(request, fileName, MISSING_TEMPLATE_VALUE, exception.getMessage(), exception);
+        } catch (RuntimeException exception) {
+            throw recordFailure(request, fileName, RENDER_FAILED, normalizeRenderFailureMessage(exception), exception);
         }
     }
 
@@ -45,5 +44,29 @@ public class WordExportService {
                 : request.templateName().replaceAll("[\\\\/:*?\"<>|]", "_");
         int version = request.templateVersion() <= 0 ? 1 : request.templateVersion();
         return safeName + "-v" + version + ".docx";
+    }
+
+    private WordExportException recordFailure(
+            WordExportRequest request,
+            String fileName,
+            String errorCode,
+            String message,
+            RuntimeException cause
+    ) {
+        exportRecordRepository.save(ExportRecord.failure(
+                request.templateName(),
+                request.templateVersion(),
+                fileName,
+                errorCode,
+                message));
+        return new WordExportException(errorCode, message, cause);
+    }
+
+    private String normalizeRenderFailureMessage(RuntimeException exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "Word export rendering failed";
+        }
+        return message;
     }
 }

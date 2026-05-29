@@ -76,7 +76,7 @@ class TemplateProfileParserTest {
         assertThat(bodyStyle.fontFamily()).isEqualTo("FangSong");
         assertThat(bodyStyle.fontSizeHalfPoints()).isEqualTo(32);
         assertThat(bodyStyle.indentationFirstLine()).isEqualTo(420);
-        assertThat(bodyStyle.spacingBetween()).isGreaterThan(0);
+        assertThat(bodyStyle.spacingBetween()).isEqualTo(150);
     }
 
     @Test

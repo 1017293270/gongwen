@@ -18,11 +18,18 @@ import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.material.MaterialDto;
 import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.material.MaterialSaveCommand;
+import com.gongwen.assistant.template.profile.TemplateProfile;
+import com.gongwen.assistant.template.profile.TemplateProfileRepository;
+import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,6 +39,9 @@ class QualityCheckServiceTest {
     private final InMemoryMaterialRepository materialRepository = new InMemoryMaterialRepository();
     private final InMemoryTraceRepository traceRepository = new InMemoryTraceRepository();
     private final InMemoryQualityCheckRepository qualityCheckRepository = new InMemoryQualityCheckRepository();
+    private final EmptyTemplateProfileRepository emptyTemplateProfileRepository = new EmptyTemplateProfileRepository();
+    private final EmptyTemplateStructureFormattingRepository emptyTemplateStructureFormattingRepository =
+            new EmptyTemplateStructureFormattingRepository();
 
     @Test
     void combinesRuleErrorsWithAiSuggestionsAndPersistsResult() {
@@ -72,7 +82,10 @@ class QualityCheckServiceTest {
                 new PromptBuilder(),
                 new FailingQualityModelAdapter(),
                 traceRepository,
-                qualityCheckRepository
+                qualityCheckRepository,
+                emptyTemplateProfileRepository,
+                emptyTemplateStructureFormattingRepository,
+                new TemplateEffectiveFormattingService()
         );
 
         QualityCheckResponse response = service.runCheck(draft.id());
@@ -84,6 +97,138 @@ class QualityCheckServiceTest {
         assertThat(traceRepository.saved.status()).isEqualTo("FAILED");
     }
 
+    @Test
+    void addsFormattingWarningsFromEffectiveTemplateFormatting() {
+        long templateVersionId = 41L;
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "格式风险", List.of(
+                new DraftBlockUpdateRequest("TITLE", "格式风险", 10),
+                new DraftBlockUpdateRequest("RECIPIENT", "各部门", 20),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "第一段正文", 30),
+                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 90),
+                new DraftBlockUpdateRequest("DATE", "2026年5月29日", 100)
+        ));
+        draftRepository.updateTemplateVersion(draft.id(), templateVersionId);
+        QualityCheckService service = newServiceWithTemplateFormatting(
+                formattingProfile(
+                        structure("title-1", "TITLE", "LEFT", 0, 0),
+                        structure("body-1", "BODY", "LEFT", 0, null),
+                        structure("signature-1", "SIGNATURE", "CENTER", 0, 0),
+                        structure("date-1", "DATE", "LEFT", 0, 0)
+                ),
+                Map.of()
+        );
+
+        QualityCheckResponse response = service.runCheck(draft.id());
+
+        assertThat(response.exportBlocked()).isFalse();
+        assertThat(response.items()).extracting(QualityCheckItem::code)
+                .contains(
+                        "TEMPLATE_TITLE_ALIGNMENT_RISK",
+                        "TEMPLATE_BODY_INDENT_RISK",
+                        "TEMPLATE_BODY_SPACING_RISK",
+                        "TEMPLATE_SIGNATURE_ALIGNMENT_RISK",
+                        "TEMPLATE_DATE_ALIGNMENT_RISK"
+                );
+        assertThat(response.items().stream()
+                .filter(item -> item.code().startsWith("TEMPLATE_") && item.code().endsWith("_RISK"))
+                .map(QualityCheckItem::severity))
+                .containsOnly("WARNING");
+    }
+
+    @Test
+    void usesFormattingOverridesBeforeRaisingTemplateWarnings() {
+        long templateVersionId = 42L;
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "格式覆盖", List.of(
+                new DraftBlockUpdateRequest("TITLE", "格式覆盖", 10),
+                new DraftBlockUpdateRequest("RECIPIENT", "各部门", 20),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "第一段正文", 30),
+                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 90),
+                new DraftBlockUpdateRequest("DATE", "2026年5月29日", 100)
+        ));
+        draftRepository.updateTemplateVersion(draft.id(), templateVersionId);
+        QualityCheckService service = newServiceWithTemplateFormatting(
+                formattingProfile(
+                        structure("title-1", "TITLE", "LEFT", 0, 0),
+                        structure("body-1", "BODY", "LEFT", 0, null),
+                        structure("signature-1", "SIGNATURE", "LEFT", 0, 0),
+                        structure("date-1", "DATE", "LEFT", 0, 0)
+                ),
+                Map.of(
+                        "title-1", new TemplateStructureFormattingProfile(null, null, null, "CENTER", null, null, null, null),
+                        "body-1", new TemplateStructureFormattingProfile(null, null, null, null, 560, 360, null, null),
+                        "signature-1", new TemplateStructureFormattingProfile(null, null, null, "RIGHT", null, null, null, null),
+                        "date-1", new TemplateStructureFormattingProfile(null, null, null, "RIGHT", null, null, null, null)
+                )
+        );
+
+        QualityCheckResponse response = service.runCheck(draft.id());
+
+        assertThat(response.items()).extracting(QualityCheckItem::code)
+                .doesNotContain(
+                        "TEMPLATE_TITLE_ALIGNMENT_RISK",
+                        "TEMPLATE_BODY_INDENT_RISK",
+                        "TEMPLATE_BODY_SPACING_RISK",
+                        "TEMPLATE_SIGNATURE_ALIGNMENT_RISK",
+                        "TEMPLATE_DATE_ALIGNMENT_RISK"
+                );
+    }
+
+    @Test
+    void degradesNullAiResponseToInvalidWarningWithoutBlockingWhenRulesPass() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "异常响应", List.of(
+                new DraftBlockUpdateRequest("TITLE", "异常响应", 10),
+                new DraftBlockUpdateRequest("RECIPIENT", "各部门", 20),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "第一段正文", 30),
+                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 90),
+                new DraftBlockUpdateRequest("DATE", "2026年5月29日", 100)
+        ));
+        QualityCheckService service = new QualityCheckService(
+                new DraftService(draftRepository),
+                materialRepository,
+                new PromptBuilder(),
+                new NullResponseQualityModelAdapter(),
+                traceRepository,
+                qualityCheckRepository,
+                emptyTemplateProfileRepository,
+                emptyTemplateStructureFormattingRepository,
+                new TemplateEffectiveFormattingService()
+        );
+
+        QualityCheckResponse response = service.runCheck(draft.id());
+
+        assertThat(response.status()).isEqualTo("WARNING");
+        assertThat(response.exportBlocked()).isFalse();
+        assertThat(response.items()).extracting(QualityCheckItem::code)
+                .contains("AI_QUALITY_RESPONSE_INVALID");
+        assertThat(traceRepository.saved.status()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void addsFormattingWarningWhenEffectiveFormattingSlotIsMissing() {
+        long templateVersionId = 43L;
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "缺少格式槽位", List.of(
+                new DraftBlockUpdateRequest("TITLE", "缺少格式槽位", 10),
+                new DraftBlockUpdateRequest("RECIPIENT", "各部门", 20),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "第一段正文", 30),
+                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 90),
+                new DraftBlockUpdateRequest("DATE", "2026年5月29日", 100)
+        ));
+        draftRepository.updateTemplateVersion(draft.id(), templateVersionId);
+        QualityCheckService service = newServiceWithTemplateFormatting(
+                formattingProfile(
+                        structure("title-1", "TITLE", "CENTER", 0, 0),
+                        structure("body-1", "BODY", "LEFT", 560, 360),
+                        structure("signature-1", "SIGNATURE", "RIGHT", 0, 0)
+                ),
+                Map.of()
+        );
+
+        QualityCheckResponse response = service.runCheck(draft.id());
+
+        assertThat(response.items()).extracting(QualityCheckItem::code)
+                .contains("TEMPLATE_DATE_ALIGNMENT_RISK");
+    }
+
     private QualityCheckService newService() {
         return new QualityCheckService(
                 new DraftService(draftRepository),
@@ -91,7 +236,69 @@ class QualityCheckServiceTest {
                 new PromptBuilder(),
                 new QualityModelAdapter(),
                 traceRepository,
-                qualityCheckRepository
+                qualityCheckRepository,
+                emptyTemplateProfileRepository,
+                emptyTemplateStructureFormattingRepository,
+                new TemplateEffectiveFormattingService()
+        );
+    }
+
+    private QualityCheckService newServiceWithTemplateFormatting(
+            TemplateProfile profile,
+            Map<String, TemplateStructureFormattingProfile> overrides
+    ) {
+        return new QualityCheckService(
+                new DraftService(draftRepository),
+                materialRepository,
+                new PromptBuilder(),
+                new QualityModelAdapter(),
+                traceRepository,
+                qualityCheckRepository,
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(overrides),
+                new TemplateEffectiveFormattingService()
+        );
+    }
+
+    private TemplateProfile formattingProfile(TemplateStructureProfile... structures) {
+        return new TemplateProfile(
+                1,
+                List.of(structures),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+    }
+
+    private TemplateStructureProfile structure(
+            String key,
+            String type,
+            String alignment,
+            Integer indentationFirstLine,
+            Integer spacingBetween
+    ) {
+        return new TemplateStructureProfile(
+                key,
+                type,
+                type,
+                type + " preview",
+                "PARAGRAPH",
+                null,
+                null,
+                "PROFILE",
+                new TemplateStructureFormattingProfile(
+                        "FangSong",
+                        32,
+                        false,
+                        alignment,
+                        indentationFirstLine,
+                        spacingBetween,
+                        0,
+                        0
+                )
         );
     }
 
@@ -127,6 +334,13 @@ class QualityCheckServiceTest {
         @Override
         public AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
             throw new com.gongwen.assistant.ai.ModelAdapterException("AI_DEEPSEEK_HTTP_ERROR", "failed");
+        }
+    }
+
+    private static final class NullResponseQualityModelAdapter extends QualityModelAdapter {
+        @Override
+        public AiQualityReviewResponse generateQualityReview(QualityCheckPrompt prompt) {
+            return null;
         }
     }
 
@@ -193,7 +407,28 @@ class QualityCheckServiceTest {
         @Override
         public DraftDetailDto replaceBlocks(long id, List<DraftBlockUpdateRequest> blocks) {
             DraftDetailDto existing = findById(id);
-            draft = new DraftDetailDto(id, existing.documentTypeCode(), existing.title(), existing.status(), toDtos(blocks));
+            draft = new DraftDetailDto(
+                    id,
+                    existing.documentTypeCode(),
+                    existing.title(),
+                    existing.status(),
+                    existing.templateVersionId(),
+                    toDtos(blocks)
+            );
+            return draft;
+        }
+
+        @Override
+        public DraftDetailDto updateTemplateVersion(long id, Long templateVersionId) {
+            DraftDetailDto existing = findById(id);
+            draft = new DraftDetailDto(
+                    id,
+                    existing.documentTypeCode(),
+                    existing.title(),
+                    existing.status(),
+                    templateVersionId,
+                    existing.blocks()
+            );
             return draft;
         }
 
@@ -207,6 +442,64 @@ class QualityCheckServiceTest {
                 sorted.add(new DraftBlockDto(blockId++, block.blockType(), block.content(), block.sortOrder()));
             }
             return sorted;
+        }
+    }
+
+    private record FixedTemplateProfileRepository(TemplateProfile profile) implements TemplateProfileRepository {
+        @Override
+        public void save(long templateVersionId, TemplateProfile profile, String profileHash) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<TemplateProfile> findByTemplateVersionId(long templateVersionId) {
+            return Optional.ofNullable(profile);
+        }
+    }
+
+    private record FixedTemplateStructureFormattingRepository(
+            Map<String, TemplateStructureFormattingProfile> overrides
+    ) implements TemplateStructureFormattingRepository {
+        @Override
+        public Map<String, TemplateStructureFormattingProfile> findOverrides(long templateVersionId) {
+            return overrides;
+        }
+
+        @Override
+        public void saveOverride(
+                long templateVersionId,
+                String structureKey,
+                TemplateStructureFormattingProfile formatting
+        ) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class EmptyTemplateProfileRepository implements TemplateProfileRepository {
+        @Override
+        public void save(long templateVersionId, TemplateProfile profile, String profileHash) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<TemplateProfile> findByTemplateVersionId(long templateVersionId) {
+            return Optional.empty();
+        }
+    }
+
+    private static final class EmptyTemplateStructureFormattingRepository implements TemplateStructureFormattingRepository {
+        @Override
+        public Map<String, TemplateStructureFormattingProfile> findOverrides(long templateVersionId) {
+            return Map.of();
+        }
+
+        @Override
+        public void saveOverride(
+                long templateVersionId,
+                String structureKey,
+                TemplateStructureFormattingProfile formatting
+        ) {
+            throw new UnsupportedOperationException();
         }
     }
 }

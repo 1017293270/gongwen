@@ -12,10 +12,14 @@ import com.gongwen.assistant.ai.QualityCheckPrompt;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
+import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import com.gongwen.assistant.material.MaterialRepository;
+import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
 import com.gongwen.assistant.template.profile.TemplatePlaceholderProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import com.gongwen.assistant.template.profile.TemplateValidationItem;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -39,6 +43,8 @@ public class QualityCheckService {
     private final AiGenerationTraceRepository traceRepository;
     private final QualityCheckRepository qualityCheckRepository;
     private final TemplateProfileRepository templateProfileRepository;
+    private final TemplateStructureFormattingRepository templateStructureFormattingRepository;
+    private final TemplateEffectiveFormattingService templateEffectiveFormattingService;
 
     @Autowired
     public QualityCheckService(
@@ -48,7 +54,9 @@ public class QualityCheckService {
             ModelAdapter modelAdapter,
             AiGenerationTraceRepository traceRepository,
             QualityCheckRepository qualityCheckRepository,
-            TemplateProfileRepository templateProfileRepository
+            TemplateProfileRepository templateProfileRepository,
+            TemplateStructureFormattingRepository templateStructureFormattingRepository,
+            TemplateEffectiveFormattingService templateEffectiveFormattingService
     ) {
         this.draftService = draftService;
         this.materialRepository = materialRepository;
@@ -57,26 +65,8 @@ public class QualityCheckService {
         this.traceRepository = traceRepository;
         this.qualityCheckRepository = qualityCheckRepository;
         this.templateProfileRepository = templateProfileRepository;
-    }
-
-    public QualityCheckService(
-            DraftService draftService,
-            MaterialRepository materialRepository,
-            PromptBuilder promptBuilder,
-            ModelAdapter modelAdapter,
-            AiGenerationTraceRepository traceRepository,
-            QualityCheckRepository qualityCheckRepository
-    ) {
-        this(draftService, materialRepository, promptBuilder, modelAdapter, traceRepository, qualityCheckRepository, new TemplateProfileRepository() {
-            @Override
-            public void save(long templateVersionId, TemplateProfile profile, String profileHash) {
-            }
-
-            @Override
-            public Optional<TemplateProfile> findByTemplateVersionId(long templateVersionId) {
-                return Optional.empty();
-            }
-        });
+        this.templateStructureFormattingRepository = templateStructureFormattingRepository;
+        this.templateEffectiveFormattingService = templateEffectiveFormattingService;
     }
 
     public QualityCheckResponse runCheck(long draftId) {
@@ -90,7 +80,8 @@ public class QualityCheckService {
 
         try {
             AiQualityReviewResponse aiResponse = modelAdapter.generateQualityReview(prompt);
-            List<QualityCheckItem> aiItems = aiResponse.suggestions().stream()
+            List<AiQualitySuggestion> suggestions = requireAiSuggestions(aiResponse);
+            List<QualityCheckItem> aiItems = suggestions.stream()
                     .map(this::toQualityItem)
                     .toList();
             items.addAll(aiItems);
@@ -261,7 +252,71 @@ public class QualityCheckService {
                     "请在模板管理中检查该模板风险。"
             ));
         }
+        items.addAll(formattingRiskItems(profile, draft.templateVersionId()));
         return items;
+    }
+
+    private List<QualityCheckItem> formattingRiskItems(TemplateProfile profile, Long templateVersionId) {
+        ExportFormattingContext formatting = templateEffectiveFormattingService.resolve(
+                profile,
+                templateVersionId == null ? java.util.Map.of() : templateStructureFormattingRepository.findOverrides(templateVersionId)
+        );
+        List<QualityCheckItem> items = new ArrayList<>();
+        addAlignmentRisk(items, "TEMPLATE_TITLE_ALIGNMENT_RISK", formatting.title(), "CENTER", "标题", "建议在模板管理中把标题结构调整为居中。");
+        addBodyIndentRisk(items, formatting.body());
+        addBodySpacingRisk(items, formatting.body());
+        addAlignmentRisk(items, "TEMPLATE_SIGNATURE_ALIGNMENT_RISK", formatting.signature(), "RIGHT", "落款", "建议在模板管理中把落款结构调整为右对齐。");
+        addAlignmentRisk(items, "TEMPLATE_DATE_ALIGNMENT_RISK", formatting.date(), "RIGHT", "日期", "建议在模板管理中把日期结构调整为右对齐。");
+        return items;
+    }
+
+    private void addAlignmentRisk(
+            List<QualityCheckItem> items,
+            String code,
+            TemplateStructureFormattingProfile formatting,
+            String expectedAlignment,
+            String label,
+            String suggestion
+    ) {
+        if (formatting == null || !expectedAlignment.equalsIgnoreCase(normalizeAlignment(formatting.alignment()))) {
+            items.add(new QualityCheckItem(
+                    "WARNING",
+                    "TEMPLATE_FORMATTING",
+                    code,
+                    "模板" + label + "的有效对齐方式与当前公文规范存在风险。",
+                    null,
+                    null,
+                    suggestion
+            ));
+        }
+    }
+
+    private void addBodyIndentRisk(List<QualityCheckItem> items, TemplateStructureFormattingProfile formatting) {
+        if (formatting == null || formatting.indentationFirstLine() == null || formatting.indentationFirstLine() <= 0) {
+            items.add(new QualityCheckItem(
+                    "WARNING",
+                    "TEMPLATE_FORMATTING",
+                    "TEMPLATE_BODY_INDENT_RISK",
+                    "模板正文的有效首行缩进缺失或不符合当前公文规范。",
+                    null,
+                    null,
+                    "建议在模板管理中为正文结构补齐正数首行缩进。"
+            ));
+        }
+    }
+
+    private void addBodySpacingRisk(List<QualityCheckItem> items, TemplateStructureFormattingProfile formatting) {
+        if (formatting == null || formatting.spacingBetween() == null) {
+            items.add(new QualityCheckItem(
+                    "WARNING",
+                    "TEMPLATE_FORMATTING",
+                    "TEMPLATE_BODY_SPACING_RISK",
+                    "模板正文的有效行距缺失，导出后可能无法复现预期版式。",
+                    null,
+                    null,
+                    "建议在模板管理中为正文结构补齐行距设置。"
+            ));
+        }
     }
 
     private String blockTypeForPlaceholder(String key) {
@@ -376,5 +431,16 @@ public class QualityCheckService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private String normalizeAlignment(String alignment) {
+        return alignment == null ? "" : alignment.strip();
+    }
+
+    private List<AiQualitySuggestion> requireAiSuggestions(AiQualityReviewResponse aiResponse) {
+        if (aiResponse == null || aiResponse.suggestions() == null) {
+            throw new IllegalArgumentException("AI quality response suggestions must not be null");
+        }
+        return aiResponse.suggestions();
     }
 }

@@ -8,6 +8,7 @@ import type {
   AiProviderSettingsUpdate,
   AiProviderStatus,
   ApiResponse,
+  CreateDocumentTypeRequest,
   DocumentType,
   DraftBlockUpdate,
   DraftDetail,
@@ -20,6 +21,7 @@ import type {
   TemplateSummary,
   TemplateUploadResult,
   TemplateVersionSummary,
+  UpdateDocumentTypeRequest,
 } from './draftTypes';
 
 function apiBaseUrl() {
@@ -83,6 +85,26 @@ function parseFileName(contentDisposition: string | null) {
 
 export function listDocumentTypes() {
   return requestJson<DocumentType[]>('/api/document-types');
+}
+
+export function createDocumentType(request: CreateDocumentTypeRequest) {
+  return requestJson<DocumentType>('/api/document-types', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateDocumentType(code: string, request: UpdateDocumentTypeRequest) {
+  return requestJson<DocumentType>(`/api/document-types/${encodeURIComponent(code)}`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteDocumentType(code: string) {
+  return requestJson<void>(`/api/document-types/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+  });
 }
 
 export function createDraft(documentTypeCode: string, title: string) {

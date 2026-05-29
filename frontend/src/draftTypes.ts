@@ -12,6 +12,17 @@ export type DocumentType = {
   sortOrder: number;
 };
 
+export type CreateDocumentTypeRequest = {
+  code: string;
+  name: string;
+  sortOrder: number;
+};
+
+export type UpdateDocumentTypeRequest = {
+  name: string;
+  sortOrder: number;
+};
+
 export type DraftBlock = {
   id: number;
   blockType: string;
