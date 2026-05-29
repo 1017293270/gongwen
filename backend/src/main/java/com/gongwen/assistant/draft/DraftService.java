@@ -37,12 +37,30 @@ public class DraftService {
         return draftRepository.findById(id);
     }
 
+    public List<DraftSummaryDto> listDrafts(String documentTypeCode) {
+        String normalizedDocumentTypeCode = documentTypeCode == null || documentTypeCode.isBlank()
+                ? "NOTICE"
+                : documentTypeCode;
+        return draftRepository.listByDocumentType(normalizedDocumentTypeCode);
+    }
+
     public DraftDetailDto updateBlocks(long id, UpdateDraftBlocksRequest request) {
         return draftRepository.replaceBlocks(id, request.blocks());
     }
 
+    public DraftDetailDto updateTitle(long id, UpdateDraftTitleRequest request) {
+        String title = request == null || request.title() == null || request.title().isBlank()
+                ? "未命名草稿"
+                : request.title().strip();
+        return draftRepository.updateTitle(id, title);
+    }
+
     public DraftDetailDto updateTemplateVersion(long id, UpdateDraftTemplateRequest request) {
         return draftRepository.updateTemplateVersion(id, request == null ? null : request.templateVersionId());
+    }
+
+    public void deleteDraft(long id) {
+        draftRepository.deleteById(id);
     }
 
     private List<DraftBlockUpdateRequest> defaultBlocks(String title) {

@@ -2,6 +2,7 @@ package com.gongwen.assistant.template;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -95,5 +96,20 @@ public class JdbcTemplateRepository implements TemplateRepository {
                 id)
                 .stream()
                 .findFirst();
+    }
+
+    @Override
+    @Transactional
+    public void deleteById(long id) {
+        findById(id)
+                .orElseThrow(() -> new TemplateException("TEMPLATE_NOT_FOUND", "Template not found"));
+        jdbcTemplate.update("""
+                update draft
+                set template_version_id = null, updated_at = now()
+                where template_version_id in (
+                    select id from document_template_version where template_id = ?
+                )
+                """, id);
+        jdbcTemplate.update("delete from document_template where id = ?", id);
     }
 }

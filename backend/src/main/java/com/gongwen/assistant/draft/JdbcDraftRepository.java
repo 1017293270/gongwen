@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -57,6 +58,24 @@ public class JdbcDraftRepository implements DraftRepository {
     }
 
     @Override
+    public List<DraftSummaryDto> listByDocumentType(String documentTypeCode) {
+        return jdbcTemplate.query("""
+                        select id, document_type_code, title, status, template_version_id, updated_at
+                        from draft
+                        where document_type_code = ?
+                        order by updated_at desc, id desc
+                        """,
+                (rs, rowNum) -> new DraftSummaryDto(
+                        rs.getLong("id"),
+                        rs.getString("document_type_code"),
+                        rs.getString("title"),
+                        rs.getString("status"),
+                        rs.getObject("template_version_id") == null ? null : rs.getLong("template_version_id"),
+                        rs.getObject("updated_at", OffsetDateTime.class).toInstant().toString()),
+                documentTypeCode);
+    }
+
+    @Override
     @Transactional
     public DraftDetailDto replaceBlocks(long id, List<DraftBlockUpdateRequest> blocks) {
         findById(id);
@@ -72,10 +91,26 @@ public class JdbcDraftRepository implements DraftRepository {
     }
 
     @Override
+    public DraftDetailDto updateTitle(long id, String title) {
+        findById(id);
+        jdbcTemplate.update("update draft set title = ?, updated_at = now() where id = ?", title, id);
+        return findById(id);
+    }
+
+    @Override
     public DraftDetailDto updateTemplateVersion(long id, Long templateVersionId) {
         findById(id);
         jdbcTemplate.update("update draft set template_version_id = ?, updated_at = now() where id = ?", templateVersionId, id);
         return findById(id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteById(long id) {
+        findById(id);
+        jdbcTemplate.update("delete from quality_check_result where draft_id = ?", id);
+        jdbcTemplate.update("delete from ai_generation_trace where draft_id = ?", id);
+        jdbcTemplate.update("delete from draft where id = ?", id);
     }
 
     private void insertBlocks(long draftId, List<DraftBlockUpdateRequest> blocks) {

@@ -3,6 +3,8 @@ package com.gongwen.assistant.template;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -12,13 +14,16 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,6 +40,9 @@ class TemplateUploadControllerTest {
 
     @MockBean
     private TemplateProfileRepository profileRepository;
+
+    @MockBean
+    private TemplateStructureFormattingRepository structureFormattingRepository;
 
     @MockBean
     private TemplateVersionRepository versionRepository;
@@ -86,6 +94,50 @@ class TemplateUploadControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.schemaVersion").value(1));
+    }
+
+    @Test
+    void returnsStructureFormattingOverrides() throws Exception {
+        when(structureFormattingRepository.findOverrides(9L))
+                .thenReturn(Map.of("paragraph-0", new TemplateStructureFormattingProfile(
+                        "SimSun",
+                        52,
+                        true,
+                        "CENTER",
+                        null,
+                        100,
+                        null,
+                        180
+                )));
+
+        mockMvc.perform(get("/api/templates/versions/9/structure-formatting").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data['paragraph-0'].fontFamily").value("SimSun"))
+                .andExpect(jsonPath("$.data['paragraph-0'].alignment").value("CENTER"));
+    }
+
+    @Test
+    void updatesStructureFormattingOverride() throws Exception {
+        mockMvc.perform(put("/api/templates/versions/9/structures/paragraph-0/formatting")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "fontFamily": "SimSun",
+                                  "fontSizeHalfPoints": 52,
+                                  "bold": true,
+                                  "alignment": "CENTER",
+                                  "indentationFirstLine": null,
+                                  "spacingBetween": 100,
+                                  "spacingBefore": null,
+                                  "spacingAfter": 180
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.fontFamily").value("SimSun"));
+
+        verify(structureFormattingRepository).saveOverride(eq(9L), eq("paragraph-0"), any(TemplateStructureFormattingProfile.class));
     }
 
     @Test

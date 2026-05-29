@@ -28,6 +28,15 @@ export type DraftDetail = {
   blocks: DraftBlock[];
 };
 
+export type DraftSummary = {
+  id: number;
+  documentTypeCode: string;
+  title: string;
+  status: string;
+  templateVersionId: number | null;
+  updatedAt: string;
+};
+
 export type TemplateVersionSummary = {
   templateVersionId: number;
   templateId: number;
@@ -137,6 +146,37 @@ export type TemplateStructureFormatting = {
   spacingBetween: number | null;
   spacingBefore: number | null;
   spacingAfter: number | null;
+};
+
+export type TemplateStructureFormattingOverrides = Record<string, Partial<TemplateStructureFormatting>>;
+
+export type WorkbenchNodeType =
+  | 'TITLE'
+  | 'RECIPIENT'
+  | 'BODY_SECTION'
+  | 'ATTACHMENT'
+  | 'SIGNATURE'
+  | 'DATE'
+  | 'STATIC_TEMPLATE_TEXT'
+  | 'HEADER'
+  | 'FOOTER';
+
+export type WorkbenchNodePart = 'whole' | 'heading' | 'content';
+
+export type WorkbenchNodeSource = 'TEMPLATE' | 'DRAFT' | 'AI' | 'USER';
+
+export type WorkbenchNode = {
+  nodeId: string;
+  nodeType: WorkbenchNodeType;
+  templateStructureKey?: string;
+  draftBlockId?: number;
+  sortOrder: number;
+  label: string;
+  heading?: string;
+  content: string;
+  source: WorkbenchNodeSource;
+  locked: boolean;
+  formatting?: Partial<TemplateStructureFormatting>;
 };
 
 export type DraftBlockUpdate = {

@@ -12,7 +12,9 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -53,6 +55,20 @@ class DraftControllerTest {
     }
 
     @Test
+    void listsDraftsByDocumentType() throws Exception {
+        when(draftService.listDrafts("REQUEST")).thenReturn(List.of(
+                new DraftSummaryDto(2L, "REQUEST", "请示调研草稿", "DRAFT", null, "2026-05-27T08:00:00Z")
+        ));
+
+        mockMvc.perform(get("/api/drafts").param("documentTypeCode", "REQUEST"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data[0].id").value(2))
+                .andExpect(jsonPath("$.data[0].documentTypeCode").value("REQUEST"))
+                .andExpect(jsonPath("$.data[0].title").value("请示调研草稿"));
+    }
+
+    @Test
     void updatesBlocks() throws Exception {
         when(draftService.updateBlocks(eq(1L), any())).thenReturn(sampleDraft("新标题"));
 
@@ -65,6 +81,28 @@ class DraftControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.title").value("新标题"));
+    }
+
+    @Test
+    void updatesTitle() throws Exception {
+        when(draftService.updateTitle(eq(1L), any())).thenReturn(sampleDraft("已重命名通知草稿"));
+
+        mockMvc.perform(put("/api/drafts/1/title")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateDraftTitleRequest("已重命名通知草稿"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.title").value("已重命名通知草稿"));
+
+        verify(draftService).updateTitle(eq(1L), any());
+    }
+
+    @Test
+    void deletesDraft() throws Exception {
+        mockMvc.perform(delete("/api/drafts/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(draftService).deleteDraft(1L);
     }
 
     @Test

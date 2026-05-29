@@ -2,6 +2,7 @@ import {
   AlertCircle,
   Archive,
   ArrowLeft,
+  Check,
   CheckCircle2,
   ClipboardList,
   Eye,
@@ -10,23 +11,31 @@ import {
   FolderOpen,
   LayoutDashboard,
   LibraryBig,
+  Pencil,
   Plus,
   Save,
   Settings,
   Sparkles,
+  Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import { ChangeEvent, CSSProperties, MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createDraft,
   createTemplate,
+  deleteDraft,
+  deleteTemplate,
+  exportDraftWord,
   getAiProviderSettings,
   getTemplateProfile,
+  getTemplateStructureFormatting,
   generateDraftOutline,
   generateDraftParagraph,
   generateLocalOperation,
   getDraft,
   listDocumentTypes,
+  listDrafts,
   listDraftMaterials,
   listTemplates,
   listTemplateVersions,
@@ -34,7 +43,9 @@ import {
   saveDraftBlocks,
   testAiProviderConnection,
   updateAiProviderSettings,
+  updateDraftTitle,
   updateDraftTemplateVersion,
+  updateTemplateStructureFormatting,
   uploadDraftMaterial,
   uploadTemplateVersion,
 } from './api';
@@ -58,19 +69,31 @@ import type {
   DraftBlock,
   DraftBlockUpdate,
   DraftDetail,
+  DraftSummary,
   Material,
   QualityCheckItem,
   QualityCheckResult,
   TemplateProfile,
   TemplateStructureFormatting,
+  TemplateStructureFormattingOverrides,
   TemplateSummary,
   TemplateUploadResult,
   TemplateVersionSummary,
+  WorkbenchNode,
 } from './draftTypes';
 import { estimateAiProgress } from './progress';
+import {
+  bodyNodeEditorLabel,
+  bodyNodeLabel,
+  bodyNodePreview,
+  composeBodySectionParts,
+  composeBodySectionContent,
+  deriveWorkbenchNodes,
+} from './workbenchNodes';
 
 const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
 const CURRENT_DRAFT_ID_KEY = 'gongwen.currentDraftId';
+const DELETED_NODE_STORAGE_PREFIX = 'gongwen.deletedNodes';
 
 const BLOCK_SORT_ORDER: Record<string, number> = {
   TITLE: 10,
@@ -87,12 +110,35 @@ type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
 type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
+type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
 type AppView = 'overview' | 'workbench' | 'drafts' | 'templates' | 'materials' | 'exports' | 'ai-tasks' | 'settings';
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
+type DraftListStatus = 'idle' | 'loading' | 'creating' | 'error';
+type DraftListPageMode = 'folders' | 'list';
 type AiDialog = 'outline' | 'quality' | 'local' | null;
 type TemplateStructureOverride = Partial<TemplateStructureFormatting>;
-type TemplateStructureOverrideMap = Record<string, TemplateStructureOverride>;
+type TemplateStructureOverrideMap = TemplateStructureFormattingOverrides;
 type TemplateStructureOverridesByVersion = Record<number, TemplateStructureOverrideMap>;
+type DraftWorkspaceData = {
+  loadedDraft: DraftDetail;
+  loadedMaterials: Material[];
+  loadedTemplateVersions: TemplateVersionSummary[];
+  loadedTemplateProfile: TemplateProfile | null;
+  loadedStructureOverrides: TemplateStructureOverrideMap;
+};
+
+function pickLatestTemplateVersions(versions: TemplateVersionSummary[]) {
+  const latestByTemplateId = new Map<number, TemplateVersionSummary>();
+  versions.forEach((version) => {
+    const current = latestByTemplateId.get(version.templateId);
+    if (!current || version.versionNo > current.versionNo || (
+      version.versionNo === current.versionNo && version.templateVersionId > current.templateVersionId
+    )) {
+      latestByTemplateId.set(version.templateId, version);
+    }
+  });
+  return Array.from(latestByTemplateId.values()).sort((left, right) => left.templateName.localeCompare(right.templateName, 'zh-CN'));
+}
 
 const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
   { value: 'FORMALIZE', label: '正式化' },
@@ -140,12 +186,18 @@ function Workbench() {
   const { showToast } = useToast();
   const [activeView, setActiveView] = useState<AppView>('overview');
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
+  const [draftSummaries, setDraftSummaries] = useState<DraftSummary[]>([]);
+  const [selectedDraftDocumentTypeCode, setSelectedDraftDocumentTypeCode] = useState('NOTICE');
+  const [draftListPageMode, setDraftListPageMode] = useState<DraftListPageMode>('folders');
+  const [draftListStatus, setDraftListStatus] = useState<DraftListStatus>('idle');
+  const [draftListMessage, setDraftListMessage] = useState('');
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [templateVersions, setTemplateVersions] = useState<TemplateVersionSummary[]>([]);
   const [selectedTemplateProfile, setSelectedTemplateProfile] = useState<TemplateProfile | null>(null);
   const [templateStructureOverrides, setTemplateStructureOverrides] = useState<TemplateStructureOverridesByVersion>({});
+  const [deletedNodeIds, setDeletedNodeIds] = useState<Set<string>>(() => new Set());
   const [outline, setOutline] = useState<AiOutline | null>(null);
   const [outlineStatus, setOutlineStatus] = useState<OutlineStatus>('idle');
   const [outlineError, setOutlineError] = useState('');
@@ -155,7 +207,7 @@ function Workbench() {
   const [paragraphErrors, setParagraphErrors] = useState<Record<string, string>>({});
   const [allParagraphStatus, setAllParagraphStatus] = useState<ParagraphStatus>('idle');
   const [allParagraphError, setAllParagraphError] = useState('');
-  const [selectedBodyBlockId, setSelectedBodyBlockId] = useState<number | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [localOperationType, setLocalOperationType] = useState<AiLocalOperationType>('FORMALIZE');
   const [localOperationInstruction, setLocalOperationInstruction] = useState('');
   const [localOperationStatus, setLocalOperationStatus] = useState<LocalOperationStatus>('idle');
@@ -164,8 +216,10 @@ function Workbench() {
   const [qualityCheck, setQualityCheck] = useState<QualityCheckResult | null>(null);
   const [qualityCheckStatus, setQualityCheckStatus] = useState<QualityCheckStatus>('idle');
   const [qualityCheckError, setQualityCheckError] = useState('');
+  const [exportStatus, setExportStatus] = useState<ExportStatus>('idle');
+  const [exportError, setExportError] = useState('');
   const [discardSuggestionConfirmOpen, setDiscardSuggestionConfirmOpen] = useState(false);
-  const paragraphRefs = useRef<Record<number, HTMLElement | null>>({});
+  const paragraphRefs = useRef<Record<string, HTMLElement | null>>({});
   const outlineRequestRef = useRef<AbortController | null>(null);
   const qualityRequestRef = useRef<AbortController | null>(null);
   const localOperationRequestRef = useRef<AbortController | null>(null);
@@ -205,21 +259,13 @@ function Workbench() {
         setMaterialStatus('loading');
         setStatusMessage('正在加载草稿');
         const types = await listDocumentTypes();
-        const loadedDraft = await loadCurrentDraft();
-        const loadedMaterials = await listDraftMaterials(loadedDraft.id);
-        const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode);
-        const loadedTemplateProfile = loadedDraft.templateVersionId
-          ? await getTemplateProfile(loadedDraft.templateVersionId).catch(() => null)
-          : null;
+        const workspaceData = await loadWorkspaceData(await loadCurrentDraft());
         if (!mounted) {
           return;
         }
         setDocumentTypes(types);
-        setDraft(loadedDraft);
-        setBlocks(loadedDraft.blocks);
-        setMaterials(loadedMaterials);
-        setTemplateVersions(loadedTemplateVersions);
-        setSelectedTemplateProfile(loadedTemplateProfile);
+        setSelectedDraftDocumentTypeCode(workspaceData.loadedDraft.documentTypeCode);
+        applyWorkspaceData(workspaceData);
         setStatus('idle');
         setMaterialStatus('idle');
         setStatusMessage('草稿已载入');
@@ -273,6 +319,42 @@ function Workbench() {
     };
   }, [activeView]);
 
+  useEffect(() => {
+    if (activeView !== 'drafts' || documentTypes.length === 0) {
+      return undefined;
+    }
+
+    let mounted = true;
+
+    async function loadDraftSummaries() {
+      try {
+        setDraftListStatus('loading');
+        setDraftListMessage('正在加载草稿列表');
+        const code = selectedDraftDocumentTypeCode || documentTypes[0].code;
+        const summaries = await listDrafts(code);
+        if (!mounted) {
+          return;
+        }
+        setDraftSummaries(summaries);
+        setDraftListStatus('idle');
+        setDraftListMessage(summaries.length > 0 ? '草稿列表已加载' : '当前文种暂无草稿');
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        setDraftSummaries([]);
+        setDraftListStatus('error');
+        setDraftListMessage(error instanceof Error ? error.message : '草稿列表加载失败');
+      }
+    }
+
+    void loadDraftSummaries();
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeView, documentTypes, selectedDraftDocumentTypeCode]);
+
   async function loadCurrentDraft() {
     const storedDraftId = Number(window.localStorage.getItem(CURRENT_DRAFT_ID_KEY));
     if (Number.isInteger(storedDraftId) && storedDraftId > 0) {
@@ -288,6 +370,157 @@ function Workbench() {
     return createdDraft;
   }
 
+  async function loadWorkspaceData(loadedDraft: DraftDetail): Promise<DraftWorkspaceData> {
+    const loadedMaterials = await listDraftMaterials(loadedDraft.id);
+    const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode).catch(() => []);
+    const [loadedTemplateProfile, loadedStructureOverrides] = loadedDraft.templateVersionId
+      ? await Promise.all([
+        getTemplateProfile(loadedDraft.templateVersionId).catch(() => null),
+        getTemplateStructureFormatting(loadedDraft.templateVersionId).catch(() => ({})),
+      ])
+      : [null, {}];
+    return {
+      loadedDraft,
+      loadedMaterials,
+      loadedTemplateVersions,
+      loadedTemplateProfile,
+      loadedStructureOverrides,
+    };
+  }
+
+  function applyWorkspaceData(workspaceData: DraftWorkspaceData) {
+    const {
+      loadedDraft,
+      loadedMaterials,
+      loadedTemplateVersions,
+      loadedTemplateProfile,
+      loadedStructureOverrides,
+    } = workspaceData;
+    setDraft(loadedDraft);
+    setBlocks(loadedDraft.blocks);
+    setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(loadedDraft.id, loadedDraft.templateVersionId)));
+    setMaterials(loadedMaterials);
+    setTemplateVersions(loadedTemplateVersions);
+    setSelectedTemplateProfile(loadedTemplateProfile);
+    setSelectedNodeId(null);
+    setOutline(null);
+    setQualityCheck(null);
+    setLocalOperationSuggestion(null);
+    setLocalOperationStatus('idle');
+    setExportError('');
+    if (loadedDraft.templateVersionId) {
+      setTemplateStructureOverrides((current) => ({
+        ...current,
+        [loadedDraft.templateVersionId as number]: loadedStructureOverrides,
+      }));
+    }
+  }
+
+  async function openDraftInWorkbench(draftId: number) {
+    try {
+      setStatus('loading');
+      setMaterialStatus('loading');
+      setStatusMessage('正在加载草稿');
+      const openedDraft = await getDraft(draftId);
+      const workspaceData = await loadWorkspaceData(openedDraft);
+      window.localStorage.setItem(CURRENT_DRAFT_ID_KEY, String(openedDraft.id));
+      setSelectedDraftDocumentTypeCode(openedDraft.documentTypeCode);
+      applyWorkspaceData(workspaceData);
+      setStatus('idle');
+      setMaterialStatus('idle');
+      setStatusMessage('草稿已载入');
+      setActiveView('workbench');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '草稿加载失败';
+      setStatus('error');
+      setMaterialStatus('error');
+      setStatusMessage(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function createBlankDraftInDraftList(documentTypeCode: string) {
+    const documentTypeName = documentTypes.find((type) => type.code === documentTypeCode)?.name ?? '公文';
+    try {
+      setDraftListStatus('creating');
+      setDraftListMessage('正在创建草稿');
+      setStatus('loading');
+      setMaterialStatus('loading');
+      const createdDraft = await createDraft(documentTypeCode, `未命名${documentTypeName}`);
+      const workspaceData = await loadWorkspaceData(createdDraft);
+      window.localStorage.setItem(CURRENT_DRAFT_ID_KEY, String(createdDraft.id));
+      setSelectedDraftDocumentTypeCode(createdDraft.documentTypeCode);
+      applyWorkspaceData(workspaceData);
+      setDraftSummaries((current) => [
+        draftDetailToSummary(createdDraft),
+        ...current.filter((summary) => summary.id !== createdDraft.id),
+      ]);
+      setDraftListStatus('idle');
+      setDraftListMessage('草稿已创建');
+      setStatus('idle');
+      setMaterialStatus('idle');
+      setStatusMessage('空白草稿已载入');
+      showToast({ title: '草稿已创建', description: '可从当前文种列表进入工作台继续编辑。', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '草稿创建失败';
+      setDraftListStatus('error');
+      setDraftListMessage(message);
+      setStatus('error');
+      setMaterialStatus('error');
+      setStatusMessage(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function deleteDraftFromList(draftId: number) {
+    try {
+      await deleteDraft(draftId);
+      setDraftSummaries((current) => current.filter((summary) => summary.id !== draftId));
+      if (draft?.id === draftId) {
+        window.localStorage.removeItem(CURRENT_DRAFT_ID_KEY);
+        setDraft(null);
+        setBlocks([]);
+        setMaterials([]);
+        setTemplateVersions([]);
+        setSelectedTemplateProfile(null);
+        setStatus('error');
+        setMaterialStatus('idle');
+        setStatusMessage('当前草稿已删除，请从草稿列表进入其他草稿或新建草稿。');
+      }
+      setDraftListStatus('idle');
+      setDraftListMessage('草稿已删除');
+      showToast({ title: '草稿已删除', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '草稿删除失败';
+      setDraftListStatus('error');
+      setDraftListMessage(message);
+      showToast({ title: message, tone: 'error' });
+      throw error;
+    }
+  }
+
+  async function renameDraftFromList(draftId: number, title: string) {
+    try {
+      const renamedDraft = await updateDraftTitle(draftId, title);
+      setDraftSummaries((current) => current.map((summary) => (
+        summary.id === draftId ? { ...summary, title: renamedDraft.title, updatedAt: new Date().toISOString() } : summary
+      )));
+      if (draft?.id === draftId) {
+        setDraft(renamedDraft);
+        setBlocks(renamedDraft.blocks);
+      }
+      setDraftListStatus('idle');
+      setDraftListMessage('草稿名称已更新');
+      showToast({ title: '草稿名称已更新', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '草稿重命名失败';
+      setDraftListStatus('error');
+      setDraftListMessage(message);
+      showToast({ title: message, tone: 'error' });
+      throw error;
+    }
+  }
+
   const blockValues = useMemo(() => {
     return blocks.reduce<Record<string, string>>((acc, block) => {
       acc[block.blockType] = block.content;
@@ -295,35 +528,104 @@ function Workbench() {
     }, {});
   }, [blocks]);
 
-  const currentDocumentType = documentTypes.find((type) => type.code === draft?.documentTypeCode);
+  const currentWorkbenchDocumentTypeCode = selectedDraftDocumentTypeCode || draft?.documentTypeCode || 'NOTICE';
+  const currentDocumentType = documentTypes.find((type) => type.code === currentWorkbenchDocumentTypeCode);
   const title = blockValues.TITLE ?? draft?.title ?? DEFAULT_TITLE;
   const recipient = blockValues.RECIPIENT ?? '';
   const bodyBlocks = blocks
     .filter((block) => block.blockType === 'BODY_PARAGRAPH')
     .sort((a, b) => a.sortOrder - b.sortOrder);
-  const bodyNavigationBlocks = bodyBlocks.filter((block) => block.content.trim() || bodyBlocks.length === 1);
   const attachment = blockValues.ATTACHMENT ?? '';
   const signature = blockValues.SIGNATURE ?? '';
   const date = blockValues.DATE ?? '';
-  const selectedBodyBlock = bodyBlocks.find((block) => block.id === selectedBodyBlockId) ?? null;
   const selectedTemplateOverrides = draft?.templateVersionId
     ? templateStructureOverrides[draft.templateVersionId] ?? {}
     : {};
+  const workbenchNodes = useMemo(
+    () => deriveWorkbenchNodes(draft ? { ...draft, blocks } : null, selectedTemplateProfile, selectedTemplateOverrides)
+      .filter((node) => !deletedNodeIds.has(node.nodeId)),
+    [blocks, deletedNodeIds, draft, selectedTemplateProfile, selectedTemplateOverrides],
+  );
+  const bodySectionNodes = workbenchNodes.filter((node) => node.nodeType === 'BODY_SECTION');
+  const selectedNode = workbenchNodes.find((node) => node.nodeId === selectedNodeId) ?? null;
+  const selectedBodyNode = selectedNode?.nodeType === 'BODY_SECTION' ? selectedNode : null;
+  const selectedBodyBlock = selectedBodyNode
+    ? bodyBlocks.find((block) => selectedBodyNode.draftBlockId && block.id === selectedBodyNode.draftBlockId)
+      ?? bodyBlocks.find((block) => block.sortOrder === selectedBodyNode.sortOrder)
+      ?? null
+    : null;
   const titlePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'TITLE');
   const recipientPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'RECIPIENT');
   const bodyPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'BODY');
   const attachmentPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'ATTACHMENT');
   const signaturePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'SIGNATURE');
   const datePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'DATE');
+  const templateHeaderStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['HEADER']);
+  const templateTopStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['UNIT', 'META']);
+  const templateFooterStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['FOOTER']);
+  const templateUnknownStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['UNKNOWN'])
+    .filter((item) => !looksLikePlaceholderOnly(item.structure.textPreview));
+  const latestTemplateVersions = useMemo(
+    () => pickLatestTemplateVersions(templateVersions),
+    [templateVersions],
+  );
 
-  function selectBodyBlock(blockId: number, shouldScroll = true) {
-    setSelectedBodyBlockId(blockId);
+  function handleSidebarNavigate(view: AppView) {
+    if (view === 'drafts') {
+      setDraftListPageMode('folders');
+    }
+    setActiveView(view);
+  }
+
+  function handleReturnToDraftDirectory() {
+    setSelectedDraftDocumentTypeCode(draft?.documentTypeCode ?? selectedDraftDocumentTypeCode);
+    setDraftListPageMode('list');
+    setActiveView('drafts');
+  }
+
+  async function handleWorkbenchDocumentTypeChange(documentTypeCode: string) {
+    if (documentTypeCode === currentWorkbenchDocumentTypeCode) {
+      return;
+    }
+
+    try {
+      setSelectedDraftDocumentTypeCode(documentTypeCode);
+      setDraftListPageMode('list');
+      setStatus('loading');
+      setMaterialStatus('loading');
+      setStatusMessage('正在切换文种');
+      const summaries = await listDrafts(documentTypeCode);
+      setDraftSummaries(summaries);
+      if (summaries.length === 0) {
+        setDraftListStatus('idle');
+        setDraftListMessage('当前文种暂无草稿');
+        setStatus('idle');
+        setMaterialStatus('idle');
+        setStatusMessage('当前文种暂无草稿，请先新建草稿。');
+        setActiveView('drafts');
+        showToast({ title: '当前文种暂无草稿，请先新建草稿。', tone: 'info' });
+        return;
+      }
+      setDraftListStatus('idle');
+      setDraftListMessage('草稿列表已加载');
+      await openDraftInWorkbench(summaries[0].id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '文种切换失败';
+      setStatus('error');
+      setMaterialStatus('error');
+      setStatusMessage(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  function selectNode(nodeId: string, shouldScroll = true) {
+    setSelectedNodeId(nodeId);
     setLocalOperationError('');
     setLocalOperationSuggestion(null);
     setLocalOperationStatus('idle');
     if (shouldScroll) {
       window.setTimeout(() => {
-        const target = paragraphRefs.current[blockId];
+        const target = paragraphRefs.current[nodeId];
         if (typeof target?.scrollIntoView === 'function') {
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -362,28 +664,140 @@ function Workbench() {
     )));
   }
 
+  function updateBodyNodeContent(node: WorkbenchNode, content: string) {
+    setStatus('idle');
+    setStatusMessage('草稿有未保存修改');
+    setLocalOperationSuggestion(null);
+    const nextBlockContent = composeBodySectionContent(node, content);
+    const sortOrder = node.sortOrder || BLOCK_SORT_ORDER.BODY_PARAGRAPH;
+    setBlocks((currentBlocks) => {
+      const existingBlock = currentBlocks.find((block) => (
+        (node.draftBlockId && block.id === node.draftBlockId)
+        || (block.blockType === 'BODY_PARAGRAPH' && block.sortOrder === sortOrder)
+      ));
+      if (existingBlock) {
+        return currentBlocks.map((block) => (
+          block === existingBlock ? { ...block, content: nextBlockContent } : block
+        ));
+      }
+      return [
+        ...currentBlocks,
+        {
+          id: 0,
+          blockType: 'BODY_PARAGRAPH',
+          content: nextBlockContent,
+          sortOrder,
+        },
+      ].sort((a, b) => a.sortOrder - b.sortOrder);
+    });
+  }
+
+  function updateBodyNodeHeading(node: WorkbenchNode, heading: string) {
+    setStatus('idle');
+    setStatusMessage('草稿有未保存修改');
+    setLocalOperationSuggestion(null);
+    const nextBlockContent = composeBodySectionParts(heading, node.content);
+    const sortOrder = node.sortOrder || BLOCK_SORT_ORDER.BODY_PARAGRAPH;
+    setBlocks((currentBlocks) => {
+      const existingBlock = currentBlocks.find((block) => (
+        (node.draftBlockId && block.id === node.draftBlockId)
+        || (block.blockType === 'BODY_PARAGRAPH' && block.sortOrder === sortOrder)
+      ));
+      if (existingBlock) {
+        return currentBlocks.map((block) => (
+          block === existingBlock ? { ...block, content: nextBlockContent } : block
+        ));
+      }
+      return [
+        ...currentBlocks,
+        {
+          id: 0,
+          blockType: 'BODY_PARAGRAPH',
+          content: nextBlockContent,
+          sortOrder,
+        },
+      ].sort((a, b) => a.sortOrder - b.sortOrder);
+    });
+  }
+
+  function removeBodyNode(node: WorkbenchNode) {
+    const confirmed = window.confirm('删除当前草稿中的这个正文结构？模板内容不会被删除。');
+    if (!confirmed) {
+      return;
+    }
+    const storageKey = draft ? deletedNodeStorageKey(draft.id, draft.templateVersionId) : null;
+    setStatus('idle');
+    setStatusMessage('草稿有未保存修改');
+    setLocalOperationSuggestion(null);
+    setLocalOperationError('');
+    setLocalOperationStatus('idle');
+    setSelectedNodeId(null);
+    setDeletedNodeIds((current) => {
+      const next = new Set(current);
+      next.add(node.nodeId);
+      if (storageKey) {
+        writeDeletedNodeIds(storageKey, next);
+      }
+      return next;
+    });
+    const sortOrder = node.sortOrder || BLOCK_SORT_ORDER.BODY_PARAGRAPH;
+    setBlocks((currentBlocks) => currentBlocks.filter((block) => {
+      if (block.blockType !== 'BODY_PARAGRAPH') {
+        return true;
+      }
+      if (node.draftBlockId && block.id === node.draftBlockId) {
+        return false;
+      }
+      return block.sortOrder !== sortOrder;
+    }));
+  }
+
+  function draftBlockPayload(
+    sourceBlocks = blocks,
+    sourceBodyNodes = bodySectionNodes,
+  ): DraftBlockUpdate[] {
+    const nonBodyBlocks = sourceBlocks
+      .filter((block) => block.blockType !== 'BODY_PARAGRAPH')
+      .map((block) => ({
+        blockType: block.blockType,
+        content: block.content,
+        sortOrder: block.sortOrder,
+      }));
+    const bodyBlocksFromPaper = sourceBodyNodes
+      .map((node, index) => ({
+        blockType: 'BODY_PARAGRAPH',
+        content: composeBodySectionParts(node.heading ?? '', node.content),
+        sortOrder: node.sortOrder || BLOCK_SORT_ORDER.BODY_PARAGRAPH + index,
+      }))
+      .filter((block) => block.content.trim());
+    return [...nonBodyBlocks, ...bodyBlocksFromPaper].sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  async function saveCurrentDraft(message: string) {
+    if (!draft) {
+      return null;
+    }
+    setStatus('saving');
+    setStatusMessage(message);
+    const updatedDraft = await saveDraftBlocks(draft.id, draftBlockPayload());
+    window.localStorage.setItem(CURRENT_DRAFT_ID_KEY, String(updatedDraft.id));
+    setDraft(updatedDraft);
+    setBlocks(updatedDraft.blocks);
+    setStatus('saved');
+    setStatusMessage('已保存');
+    return updatedDraft;
+  }
+
   async function handleSave() {
     if (!draft) {
       return;
     }
 
     try {
-      setStatus('saving');
-      setStatusMessage('正在保存');
-      const payload: DraftBlockUpdate[] = blocks
-        .map((block) => ({
-          blockType: block.blockType,
-          content: block.content,
-          sortOrder: block.sortOrder,
-        }))
-        .sort((a, b) => a.sortOrder - b.sortOrder);
-      const updatedDraft = await saveDraftBlocks(draft.id, payload);
-      window.localStorage.setItem(CURRENT_DRAFT_ID_KEY, String(updatedDraft.id));
-      setDraft(updatedDraft);
-      setBlocks(updatedDraft.blocks);
-      setStatus('saved');
-      setStatusMessage('已保存');
-      showToast({ title: '草稿已保存', tone: 'success' });
+      const updatedDraft = await saveCurrentDraft('正在保存');
+      if (updatedDraft) {
+        showToast({ title: '草稿已保存', tone: 'success' });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '保存失败';
       setStatus('error');
@@ -473,10 +887,22 @@ function Workbench() {
     }
     try {
       const updatedDraft = await updateDraftTemplateVersion(draft.id, templateVersionId);
-      const updatedProfile = templateVersionId ? await getTemplateProfile(templateVersionId).catch(() => null) : null;
+      const [updatedProfile, updatedStructureOverrides] = templateVersionId
+        ? await Promise.all([
+          getTemplateProfile(templateVersionId).catch(() => null),
+          getTemplateStructureFormatting(templateVersionId).catch(() => ({})),
+        ])
+        : [null, {}];
       setDraft(updatedDraft);
       setBlocks(updatedDraft.blocks);
+      setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(updatedDraft.id, updatedDraft.templateVersionId)));
       setSelectedTemplateProfile(updatedProfile);
+      if (templateVersionId) {
+        setTemplateStructureOverrides((current) => ({
+          ...current,
+          [templateVersionId]: updatedStructureOverrides,
+        }));
+      }
       setQualityCheck(null);
       showToast({
         title: templateVersionId ? '模板已绑定到草稿' : '已取消模板绑定',
@@ -586,10 +1012,10 @@ function Workbench() {
   }
 
   async function handleGenerateLocalOperation() {
-    if (!draft || !selectedBodyBlock) {
+    if (!draft || !selectedBodyNode || !selectedBodyBlock) {
       setActiveAiDialog('local');
       setLocalOperationStatus('error');
-      setLocalOperationError('请先在预览中选择正文段落');
+      setLocalOperationError(selectedBodyNode ? '请先保存当前正文结构后再生成建议' : '请先在预览中选择正文结构');
       return;
     }
 
@@ -657,6 +1083,26 @@ function Workbench() {
     }
   }
 
+  async function handleExportWord() {
+    if (!draft) {
+      return;
+    }
+    try {
+      setExportStatus('exporting');
+      setExportError('');
+      const updatedDraft = await saveCurrentDraft('导出前保存当前草稿');
+      const result = await exportDraftWord(updatedDraft?.id ?? draft.id);
+      downloadBlob(result.blob, result.fileName);
+      setExportStatus('success');
+      showToast({ title: 'Word 已导出', description: result.fileName, tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Word 导出失败';
+      setExportStatus('error');
+      setExportError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
   async function handleAcceptLocalOperation() {
     if (!draft || !localOperationSuggestion) {
       return;
@@ -676,7 +1122,9 @@ function Workbench() {
       const updatedDraft = await saveDraftBlocks(draft.id, payload);
       setDraft(updatedDraft);
       setBlocks(updatedDraft.blocks);
-      setSelectedBodyBlockId(localOperationSuggestion.targetBlockId);
+      if (selectedBodyNode) {
+        setSelectedNodeId(selectedBodyNode.nodeId);
+      }
       setLocalOperationSuggestion(null);
       setLocalOperationStatus('saved');
       setStatus('saved');
@@ -760,43 +1208,54 @@ function Workbench() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="app-sidebar">
-        <div className="sidebar-brand">
-          <div className="sidebar-mark">文</div>
-          <div>
-            <div className="brand-title">公文助手</div>
-            <div className="brand-subtitle">AI 公文工作台</div>
+    <div className={`app-shell ${activeView === 'workbench' ? 'app-shell--workbench-focus' : ''}`}>
+      {activeView !== 'workbench' && (
+        <aside className="app-sidebar">
+          <div className="sidebar-brand">
+            <div className="sidebar-mark">文</div>
+            <div>
+              <div className="brand-title">公文助手</div>
+              <div className="brand-subtitle">AI 公文工作台</div>
+            </div>
           </div>
-        </div>
-        <nav className="sidebar-nav" aria-label="主导航">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                aria-current={activeView === item.view ? 'page' : undefined}
-                aria-label={item.label}
-                className="nav-item"
-                key={item.view}
-                onClick={() => setActiveView(item.view)}
-                type="button"
-              >
-                <Icon aria-hidden="true" className="nav-icon" />
-                <span className="nav-copy">
-                  <span className="nav-label">{item.label}</span>
-                  <span className="nav-description">{item.description}</span>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
+          <nav className="sidebar-nav" aria-label="主导航">
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  aria-current={activeView === item.view ? 'page' : undefined}
+                  aria-label={item.label}
+                  className="nav-item"
+                  key={item.view}
+                  onClick={() => handleSidebarNavigate(item.view)}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" className="nav-icon" />
+                  <span className="nav-copy">
+                    <span className="nav-label">{item.label}</span>
+                    <span className="nav-description">{item.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+      )}
 
       <div className="app-main">
         <header className="app-header">
-          <div>
-            <h1 className="page-title">{activeView === 'workbench' ? '公文工作台' : viewTitle(activeView)}</h1>
-            <p className="brand-subtitle">{activeView === 'workbench' ? '通知 / 请示 / 报告起草工作台' : viewSubtitle(activeView)}</p>
+          <div className={`header-title-group ${activeView === 'workbench' ? 'header-title-group-workbench' : ''}`}>
+            <div className="header-title-copy">
+              <div className="header-title-row">
+                <h1 className="page-title">{activeView === 'workbench' ? '公文工作台' : viewTitle(activeView)}</h1>
+                {activeView === 'workbench' && (
+                  <Button icon={<ArrowLeft aria-hidden="true" />} onClick={handleReturnToDraftDirectory} variant="secondary">
+                    回到目录
+                  </Button>
+                )}
+              </div>
+              <p className="brand-subtitle">{activeView === 'workbench' ? '通知 / 请示 / 报告起草工作台' : viewSubtitle(activeView)}</p>
+            </div>
           </div>
           <div className="header-actions">
             {activeView === 'overview' && (
@@ -816,7 +1275,13 @@ function Workbench() {
                 >
                   {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
                 </Button>
-                <Button icon={<FileDown aria-hidden="true" />}>
+                <Button
+                  disabled={!draft || !draft.templateVersionId || exportStatus === 'exporting' || status === 'loading'}
+                  icon={<FileDown aria-hidden="true" />}
+                  isLoading={exportStatus === 'exporting'}
+                  loadingLabel="正在导出"
+                  onClick={() => void handleExportWord()}
+                >
                   导出 Word
                 </Button>
                 <Button
@@ -852,21 +1317,27 @@ function Workbench() {
             <p className="panel-kicker">当前草稿：{currentDocumentType?.name ?? '通知'}</p>
           </div>
           <div className="panel-body">
-            <SelectField disabled label="文种" value={draft?.documentTypeCode ?? 'NOTICE'}>
+            <SelectField
+              disabled={documentTypes.length === 0 || status === 'loading'}
+              hint="切换后会进入该文种当前草稿；若该文种暂无草稿，则返回对应目录。"
+              label="文种"
+              onChange={(event) => void handleWorkbenchDocumentTypeChange(event.target.value)}
+              value={currentWorkbenchDocumentTypeCode}
+            >
               {documentTypes.length === 0 ? <option value="NOTICE">通知</option> : documentTypes.map((type) => (
                 <option key={type.code} value={type.code}>{type.name}</option>
               ))}
             </SelectField>
 
             <SelectField
-              disabled={!draft || templateVersions.length === 0}
-              hint={templateVersions.length === 0 ? '暂无已解析模板，先通过模板 API 上传版本。' : '质检会按所选模板检查占位符适配。'}
+              disabled={!draft || latestTemplateVersions.length === 0}
+              hint={latestTemplateVersions.length === 0 ? '暂无已解析模板，先通过模板 API 上传版本。' : '仅展示每个模板的最新版本，质检会按所选模板检查占位符适配。'}
               label="套版模板"
               onChange={(event) => void handleTemplateVersionChange(event.target.value ? Number(event.target.value) : null)}
               value={draft?.templateVersionId ? String(draft.templateVersionId) : ''}
             >
               <option value="">未选择模板</option>
-              {templateVersions.map((template) => (
+              {latestTemplateVersions.map((template) => (
                 <option key={template.templateVersionId} value={template.templateVersionId}>
                   {template.templateName} v{template.versionNo}
                 </option>
@@ -880,24 +1351,33 @@ function Workbench() {
             <section className="paragraph-index" aria-label="正文段落目录">
               <div className="paragraph-index-header">
                 <span className="field-label">正文</span>
-                <span className="paragraph-count">{bodyNavigationBlocks.length} 段</span>
+                <span className="paragraph-count">{bodySectionNodes.length} 段</span>
               </div>
-              {bodyNavigationBlocks.length > 0 ? (
+              {bodySectionNodes.length > 0 ? (
                 <div className="paragraph-index-list">
-                  {bodyNavigationBlocks.map((block, index) => (
-                    <button
-                      aria-current={selectedBodyBlockId === block.id ? 'true' : undefined}
-                      className={`paragraph-index-item ${selectedBodyBlockId === block.id ? 'selected' : ''}`}
-                      key={block.id}
-                      onClick={() => selectBodyBlock(block.id)}
-                      type="button"
+                  {bodySectionNodes.map((node, index) => (
+                    <div
+                      aria-current={selectedNodeId === node.nodeId ? 'true' : undefined}
+                      className={`paragraph-index-item ${selectedNodeId === node.nodeId ? 'selected' : ''}`}
+                      key={node.nodeId}
                     >
-                      <span className="paragraph-index-number">{index + 1}</span>
-                      <span className="paragraph-index-copy">
-                        <span className="paragraph-index-title">{paragraphDisplayTitle(block, index)}</span>
-                        <span className="paragraph-index-preview">{paragraphPreview(block.content)}</span>
-                      </span>
-                    </button>
+                      <button className="paragraph-index-select" onClick={() => selectNode(node.nodeId)} type="button">
+                        <span className="paragraph-index-number">{index + 1}</span>
+                        <span className="paragraph-index-copy">
+                          <span className="paragraph-index-title">{bodyNodeLabel(node, index)}</span>
+                          <span className="paragraph-index-preview">{bodyNodePreview(node)}</span>
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`删除正文结构：${bodyNodeLabel(node, index)}`}
+                        className="paragraph-index-delete"
+                        onClick={() => removeBodyNode(node)}
+                        title="删除当前草稿结构，不删除模板"
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -962,42 +1442,74 @@ function Workbench() {
             <section aria-label="公文预览">
           <div className="document-stage">
             <article className="document-paper">
+              {templateHeaderStructures.length > 0 && (
+                <div className="document-template-region document-template-header" aria-label="模板页眉">
+                  {templateHeaderStructures.map(({ structure, style }) => (
+                    <p key={structure.structureKey} style={style}>{structure.textPreview}</p>
+                  ))}
+                </div>
+              )}
+              {templateTopStructures.length > 0 && (
+                <div className="document-template-region document-template-top" aria-label="模板头部结构">
+                  {templateTopStructures.map(({ structure, style }) => (
+                    <p key={structure.structureKey} style={style}>{stripTemplateBraces(structure.textPreview)}</p>
+                  ))}
+                </div>
+              )}
               <h2 className="document-title" style={titlePreviewStyle}>{title}</h2>
               <p style={recipientPreviewStyle}>{recipient}：</p>
-              {bodyNavigationBlocks.length > 0 ? bodyNavigationBlocks
-                .map((block) => (
-                selectedBodyBlockId === block.id ? (
-                  <textarea
-                    aria-label={`编辑段落：${block.content.trim().slice(0, 18)}`}
-                    className="document-paragraph-editor"
-                    key={block.id}
-                    onChange={(event) => {
-                      syncParagraphEditorHeight(event.currentTarget);
-                      updateBlockById(block.id, event.target.value);
+              {bodySectionNodes.length > 0 ? bodySectionNodes.map((node, index) => (
+                selectedNodeId === node.nodeId ? (
+                  <section
+                    className="document-node selected"
+                    key={node.nodeId}
+                    ref={(element) => {
+                      paragraphRefs.current[node.nodeId] = element;
                     }}
-                    ref={(node) => {
-                      paragraphRefs.current[block.id] = node;
-                      if (node) {
-                        syncParagraphEditorHeight(node);
-                      }
-                    }}
-                    style={bodyPreviewStyle}
-                    value={block.content}
-                  />
+                    style={node.formatting ? formattingToCss(node.formatting) : bodyPreviewStyle}
+                    tabIndex={-1}
+                  >
+                    <input
+                      aria-label={`编辑标题：${bodyNodeLabel(node, index)}`}
+                      className="document-heading-editor"
+                      onChange={(event) => updateBodyNodeHeading(node, event.target.value)}
+                      placeholder="正文标题"
+                      value={node.heading ?? ''}
+                    />
+                    <textarea
+                      aria-label={`编辑段落：${bodyNodeEditorLabel(node, index)}`}
+                      className="document-paragraph-editor"
+                      onChange={(event) => {
+                        syncParagraphEditorHeight(event.currentTarget);
+                        updateBodyNodeContent(node, event.target.value);
+                      }}
+                      ref={(element) => {
+                        if (element) {
+                          syncParagraphEditorHeight(element);
+                        }
+                      }}
+                      style={node.formatting ? formattingToCss(node.formatting) : bodyPreviewStyle}
+                      value={node.content}
+                    />
+                    <Button icon={<Trash2 aria-hidden="true" />} onClick={() => removeBodyNode(node)} variant="ghost">
+                      删除当前结构
+                    </Button>
+                  </section>
                 ) : (
                   <button
                     aria-pressed={false}
-                    className="document-paragraph"
-                    key={block.id}
-                    onClick={() => selectBodyBlock(block.id, false)}
-                    ref={(node) => {
-                      paragraphRefs.current[block.id] = node;
+                    className="document-node"
+                    key={node.nodeId}
+                    onClick={() => selectNode(node.nodeId, false)}
+                    ref={(element) => {
+                      paragraphRefs.current[node.nodeId] = element;
                     }}
-                    style={bodyPreviewStyle}
+                    style={node.formatting ? formattingToCss(node.formatting) : bodyPreviewStyle}
                     type="button"
                   >
-                    <span className="visually-hidden">选择段落：</span>
-                    {block.content.trim() || '点击填写正文段落'}
+                    <span className="visually-hidden">选择正文结构：</span>
+                    {node.heading && <span className="document-node-heading">{node.heading}</span>}
+                    <span className="document-node-content">{node.content.trim() || '点击填写正文段落'}</span>
                   </button>
                 )
               )) : <p>请在左侧填写正文内容。</p>}
@@ -1007,6 +1519,20 @@ function Workbench() {
                 <br />
                 <span style={datePreviewStyle}>{date}</span>
               </p>
+              {templateUnknownStructures.length > 0 && (
+                <div className="document-template-region document-template-extra" aria-label="模板未映射结构">
+                  {templateUnknownStructures.slice(0, 4).map(({ structure, style }) => (
+                    <p key={structure.structureKey} style={style}>{stripTemplateBraces(structure.textPreview)}</p>
+                  ))}
+                </div>
+              )}
+              {templateFooterStructures.length > 0 && (
+                <div className="document-template-region document-template-footer" aria-label="模板页脚">
+                  {templateFooterStructures.map(({ structure, style }) => (
+                    <p key={structure.structureKey} style={style}>{structure.textPreview}</p>
+                  ))}
+                </div>
+              )}
             </article>
           </div>
             </section>
@@ -1074,21 +1600,41 @@ function Workbench() {
                 {qualityCheckStatus === 'error' ? '重试质检' : '运行质检'}
               </Button>
               {qualityCheckStatus === 'error' && <StatusMessage title={qualityCheckError} tone="warning" />}
-              {qualityCheck && (
-                <div className="ai-task-summary" aria-label="质检摘要">
-                  <span>{qualitySummary(qualityCheck)}</span>
-                  <button className="summary-link" onClick={() => setActiveAiDialog('quality')} type="button">
-                    查看结果
-                  </button>
+            {qualityCheck && (
+              <div className="ai-task-summary" aria-label="质检摘要">
+                <span>{qualitySummary(qualityCheck)}</span>
+                <button className="summary-link" onClick={() => setActiveAiDialog('quality')} type="button">
+                  查看结果
+                </button>
+              </div>
+            )}
+            <div className="export-action" aria-label="Word 导出">
+              <div>
+                <div className="outline-title">Word 导出</div>
+                <div className="panel-kicker">
+                  {draft?.templateVersionId ? '导出当前草稿，用于和模板结果对比' : '请先选择套版模板'}
                 </div>
-              )}
+              </div>
+              <Button
+                disabled={!draft || !draft.templateVersionId || exportStatus === 'exporting' || status === 'loading'}
+                icon={<FileDown aria-hidden="true" />}
+                isLoading={exportStatus === 'exporting'}
+                loadingLabel="正在导出"
+                onClick={() => void handleExportWord()}
+                variant="secondary"
+              >
+                导出当前草稿
+              </Button>
+              {exportError && <StatusMessage title={exportError} tone="warning" />}
+              {exportStatus === 'success' && !exportError && <StatusMessage title="已生成 Word 文件，可打开和模板对比。" tone="success" />}
+            </div>
             </div>
             <div className="local-operation" aria-label="局部段落操作">
               <div className="local-operation-header">
                 <div>
                   <div className="outline-title">局部段落操作</div>
                   <div className="panel-kicker">
-                    {selectedBodyBlock ? `已选择段落 #${selectedBodyBlock.sortOrder}` : '请先在预览中选择正文段落'}
+                    {selectedBodyNode ? `已选择：${bodyNodeLabel(selectedBodyNode, bodySectionNodes.indexOf(selectedBodyNode))}` : '请先在预览中选择正文结构'}
                   </div>
                 </div>
               </div>
@@ -1116,7 +1662,7 @@ function Workbench() {
                 value={localOperationInstruction}
               />
               <Button
-                disabled={!draft || !selectedBodyBlock || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                disabled={!draft || !selectedBodyNode || !selectedBodyBlock || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
                 icon={<Sparkles aria-hidden="true" />}
                 isLoading={localOperationStatus === 'generating'}
                 loadingLabel="正在生成建议"
@@ -1153,12 +1699,34 @@ function Workbench() {
               settings={aiSettings}
               status={aiSettingsStatus}
             />
+          ) : activeView === 'drafts' ? (
+            <DraftListPage
+              currentDraftId={draft?.id ?? null}
+              documentTypes={documentTypes}
+              drafts={draftSummaries}
+              message={draftListMessage}
+              onCreateBlankDraft={(documentTypeCode) => void createBlankDraftInDraftList(documentTypeCode)}
+              onDeleteDraft={(draftId) => deleteDraftFromList(draftId)}
+              onOpenDraft={(draftId) => void openDraftInWorkbench(draftId)}
+              onRenameDraft={(draftId, title) => renameDraftFromList(draftId, title)}
+              onSelectDocumentType={setSelectedDraftDocumentTypeCode}
+              preferredPageMode={draftListPageMode}
+              selectedDocumentTypeCode={selectedDraftDocumentTypeCode}
+              status={draftListStatus}
+            />
           ) : activeView === 'templates' ? (
             <TemplateManagementPage
               defaultDocumentTypeCode={draft?.documentTypeCode ?? 'NOTICE'}
               documentTypes={documentTypes}
               structureOverrides={templateStructureOverrides}
-              onStructureOverrideChange={(templateVersionId, structureKey, nextOverride) => {
+              onStructureOverridesLoaded={(templateVersionId, overrides) => {
+                setTemplateStructureOverrides((current) => ({
+                  ...current,
+                  [templateVersionId]: overrides,
+                }));
+              }}
+              onStructureOverrideChange={async (templateVersionId, structureKey, nextOverride) => {
+                await updateTemplateStructureFormatting(templateVersionId, structureKey, nextOverride);
                 setTemplateStructureOverrides((current) => ({
                   ...current,
                   [templateVersionId]: {
@@ -1169,6 +1737,7 @@ function Workbench() {
                 if (draft?.templateVersionId === templateVersionId && selectedTemplateProfile) {
                   setSelectedTemplateProfile({ ...selectedTemplateProfile });
                 }
+                showToast({ title: '结构维度已保存', tone: 'success' });
               }}
               onTemplateVersionCreated={async () => {
                 if (draft) {
@@ -1310,7 +1879,7 @@ function Workbench() {
             </Button>
           )}
           className="ai-task-dialog"
-          description={selectedBodyBlock ? `目标段落 #${selectedBodyBlock.sortOrder}` : '请先在预览中选择正文段落。'}
+          description={selectedBodyNode ? `目标结构：${bodyNodeLabel(selectedBodyNode, bodySectionNodes.indexOf(selectedBodyNode))}` : '请先在预览中选择正文结构。'}
           onClose={closeAiDialog}
           open={activeAiDialog === 'local'}
           title="生成段落建议"
@@ -1325,7 +1894,7 @@ function Workbench() {
             )}
             {localOperationError && (
               <StatusMessage title={localOperationError} tone="warning">
-                {selectedBodyBlock ? (
+                {selectedBodyNode && selectedBodyBlock ? (
                   <Button icon={<Sparkles aria-hidden="true" />} onClick={() => void handleGenerateLocalOperation()} variant="secondary">
                     重试生成建议
                   </Button>
@@ -1490,17 +2059,19 @@ function TemplateManagementPage({
   defaultDocumentTypeCode,
   documentTypes,
   structureOverrides,
+  onStructureOverridesLoaded,
   onStructureOverrideChange,
   onTemplateVersionCreated,
 }: {
   defaultDocumentTypeCode: string;
   documentTypes: DocumentType[];
   structureOverrides: TemplateStructureOverridesByVersion;
+  onStructureOverridesLoaded: (templateVersionId: number, overrides: TemplateStructureOverrideMap) => void;
   onStructureOverrideChange: (
     templateVersionId: number,
     structureKey: string,
     nextOverride: TemplateStructureOverride,
-  ) => void;
+  ) => Promise<void>;
   onTemplateVersionCreated: () => Promise<void>;
 }) {
   const { showToast } = useToast();
@@ -1520,6 +2091,8 @@ function TemplateManagementPage({
   } | null>(null);
   const [uploadResult, setUploadResult] = useState<TemplateUploadResult | null>(null);
   const [selectedTemplateFile, setSelectedTemplateFile] = useState<File | null>(null);
+  const [templateToDelete, setTemplateToDelete] = useState<TemplateSummary | null>(null);
+  const [isDeletingTemplate, setIsDeletingTemplate] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'uploading' | 'error'>('loading');
   const [message, setMessage] = useState('正在加载模板');
   const activeDocumentType = fallbackDocumentTypes.find((type) => type.code === documentTypeCode);
@@ -1617,8 +2190,12 @@ function TemplateManagementPage({
   async function handleViewProfile(version: TemplateVersionSummary) {
     try {
       setStatus('loading');
-      const parsedProfile = await getTemplateProfile(version.templateVersionId);
+      const [parsedProfile, formattingOverrides] = await Promise.all([
+        getTemplateProfile(version.templateVersionId),
+        getTemplateStructureFormatting(version.templateVersionId),
+      ]);
       setProfile(parsedProfile);
+      onStructureOverridesLoaded(version.templateVersionId, formattingOverrides);
       setProfileContext({
         templateVersionId: version.templateVersionId,
         templateName: version.templateName,
@@ -1658,7 +2235,10 @@ function TemplateManagementPage({
         : await createTemplate(name, activeDocumentTypeCode);
       setSelectedTemplateId(template.id);
       const result = await uploadTemplateVersion(template.id, file);
-      const parsedProfile = await getTemplateProfile(result.templateVersionId);
+      const [parsedProfile, formattingOverrides] = await Promise.all([
+        getTemplateProfile(result.templateVersionId),
+        getTemplateStructureFormatting(result.templateVersionId),
+      ]);
       const [loadedTemplates, loadedVersions] = await Promise.all([
         listTemplates(activeDocumentTypeCode),
         listTemplateVersions(activeDocumentTypeCode),
@@ -1667,6 +2247,7 @@ function TemplateManagementPage({
       setVersions(loadedVersions);
       setUploadResult(result);
       setProfile(parsedProfile);
+      onStructureOverridesLoaded(result.templateVersionId, formattingOverrides);
       setProfileContext({
         templateVersionId: result.templateVersionId,
         templateName: template.templateName,
@@ -1684,6 +2265,36 @@ function TemplateManagementPage({
       setStatus('error');
       setMessage(errorMessage);
       showToast({ title: errorMessage, tone: 'error' });
+    }
+  }
+
+  async function handleConfirmDeleteTemplate() {
+    if (!templateToDelete) {
+      return;
+    }
+    try {
+      setIsDeletingTemplate(true);
+      await deleteTemplate(templateToDelete.id);
+      setTemplates((current) => current.filter((template) => template.id !== templateToDelete.id));
+      setVersions((current) => current.filter((version) => version.templateId !== templateToDelete.id));
+      if (selectedTemplateId === templateToDelete.id) {
+        setSelectedTemplateId(null);
+      }
+      setProfile(null);
+      setProfileContext(null);
+      setUploadResult(null);
+      setMessage('模板已删除');
+      setStatus('idle');
+      setTemplateToDelete(null);
+      await onTemplateVersionCreated();
+      showToast({ title: '模板已删除', tone: 'success' });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '模板删除失败';
+      setStatus('error');
+      setMessage(errorMessage);
+      showToast({ title: errorMessage, tone: 'error' });
+    } finally {
+      setIsDeletingTemplate(false);
     }
   }
 
@@ -1763,6 +2374,17 @@ function TemplateManagementPage({
                   const latestVersion = templateVersions[0];
                   return (
                     <article className="template-card" key={template.id}>
+                      <div className="template-card-controls">
+                        <button
+                          aria-label={`删除模板：${template.templateName}`}
+                          className="template-card-icon-button danger"
+                          disabled={status === 'loading' || status === 'uploading' || isDeletingTemplate}
+                          onClick={() => setTemplateToDelete(template)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </button>
+                      </div>
                       <div className="template-card-title">
                         <FileText aria-hidden="true" />
                         <div>
@@ -1902,8 +2524,9 @@ function TemplateManagementPage({
                       key={structure.structureKey}
                       onChange={(nextOverride) => {
                         if (profileContext) {
-                          onStructureOverrideChange(profileContext.templateVersionId, structure.structureKey, nextOverride);
+                          return onStructureOverrideChange(profileContext.templateVersionId, structure.structureKey, nextOverride);
                         }
+                        return Promise.resolve();
                       }}
                       override={profileContext ? structureOverrides[profileContext.templateVersionId]?.[structure.structureKey] : undefined}
                       structure={structure}
@@ -1943,6 +2566,16 @@ function TemplateManagementPage({
           </div>
         )}
       </Dialog>
+      <ConfirmDialog
+        cancelLabel="继续保留"
+        confirmLabel="删除模板"
+        description={templateToDelete ? `将删除“${templateToDelete.templateName}”及全部模板版本，并解除草稿中的模板绑定。此操作不可撤销。` : undefined}
+        isConfirming={isDeletingTemplate}
+        onCancel={() => setTemplateToDelete(null)}
+        onConfirm={() => void handleConfirmDeleteTemplate()}
+        open={Boolean(templateToDelete)}
+        title="删除这个模板？"
+      />
     </>
   );
 }
@@ -1954,98 +2587,156 @@ function TemplateStructureEditor({
 }: {
   structure: TemplateProfile['structures'][number];
   override?: TemplateStructureOverride;
-  onChange: (nextOverride: TemplateStructureOverride) => void;
+  onChange: (nextOverride: TemplateStructureOverride) => Promise<void>;
 }) {
+  const { showToast } = useToast();
   const effectiveFormatting = { ...structure.formatting, ...(override ?? {}) };
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [draftOverride, setDraftOverride] = useState<TemplateStructureOverride>(override ?? {});
+  const draftFormatting = { ...structure.formatting, ...draftOverride };
+  const hasOverride = override ? Object.keys(override).length > 0 : false;
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftOverride(override ?? {});
+    }
+  }, [isEditing, override]);
 
   function updateDimension<Key extends keyof TemplateStructureFormatting>(
     key: Key,
     value: TemplateStructureFormatting[Key],
   ) {
-    onChange({ ...(override ?? {}), [key]: value });
+    setDraftOverride((current) => ({ ...current, [key]: value }));
+  }
+
+  async function handleApply() {
+    try {
+      setIsSaving(true);
+      await onChange(draftOverride);
+      setIsEditing(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '结构维度保存失败';
+      showToast({ title: message, tone: 'error' });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleCancel() {
+    setDraftOverride(override ?? {});
+    setIsEditing(false);
   }
 
   return (
     <article className="template-structure-item">
-      <div className="template-structure-main">
-        <div>
-          <strong>{structure.label}</strong>
-          <span>{locationLabel(structure.locationType)} · {structureSourceLabel(structure.source)}</span>
+      <div className="template-structure-header">
+        <div className="template-structure-title">
+          <div>
+            <strong>{structure.label}</strong>
+            <span>{locationLabel(structure.locationType)} · {structureSourceLabel(structure.source)}</span>
+          </div>
+          {hasOverride && <small>已调整</small>}
         </div>
+        <div className="template-structure-actions">
+          {isEditing ? (
+            <>
+              <Button icon={<Check aria-hidden="true" />} isLoading={isSaving} loadingLabel="保存中" onClick={handleApply} variant="secondary">
+                应用
+              </Button>
+              <Button disabled={isSaving} icon={<X aria-hidden="true" />} onClick={handleCancel} variant="ghost">
+                取消
+              </Button>
+            </>
+          ) : (
+            <Button icon={<Pencil aria-hidden="true" />} onClick={() => setIsEditing(true)} variant="secondary">
+              编辑
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="template-structure-main">
         <p>{structure.textPreview || '该结构暂无可展示文字'}</p>
+        <div className="template-dimension-summary" aria-label={`${structure.label} 当前维度`}>
+          {dimensionSummary(effectiveFormatting).map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
       </div>
-      <div className="template-dimension-grid" aria-label={`${structure.label} 可编辑维度`}>
-        <label>
-          <span>字体</span>
-          <input
-            onChange={(event) => updateDimension('fontFamily', event.target.value || null)}
-            placeholder="默认"
-            value={effectiveFormatting.fontFamily ?? ''}
-          />
-        </label>
-        <label>
-          <span>字号 pt</span>
-          <input
-            min="8"
-            onChange={(event) => updateDimension('fontSizeHalfPoints', pointToHalfPoint(event.target.value))}
-            placeholder="默认"
-            type="number"
-            value={effectiveFormatting.fontSizeHalfPoints ? effectiveFormatting.fontSizeHalfPoints / 2 : ''}
-          />
-        </label>
-        <label>
-          <span>对齐</span>
-          <select
-            onChange={(event) => updateDimension('alignment', event.target.value || null)}
-            value={effectiveFormatting.alignment ?? ''}
-          >
-            <option value="">默认</option>
-            <option value="LEFT">左对齐</option>
-            <option value="CENTER">居中</option>
-            <option value="RIGHT">右对齐</option>
-            <option value="BOTH">两端对齐</option>
-          </select>
-        </label>
-        <label>
-          <span>首行缩进 mm</span>
-          <input
-            min="0"
-            onChange={(event) => updateDimension('indentationFirstLine', millimeterToTwips(event.target.value))}
-            placeholder="默认"
-            type="number"
-            value={effectiveFormatting.indentationFirstLine ? twipsToMillimeters(effectiveFormatting.indentationFirstLine) : ''}
-          />
-        </label>
-        <label>
-          <span>行距</span>
-          <input
-            min="1"
-            onChange={(event) => updateDimension('spacingBetween', lineSpacingToProfileValue(event.target.value))}
-            placeholder="默认"
-            step="0.1"
-            type="number"
-            value={effectiveFormatting.spacingBetween ? effectiveFormatting.spacingBetween / 100 : ''}
-          />
-        </label>
-        <label>
-          <span>段后 mm</span>
-          <input
-            min="0"
-            onChange={(event) => updateDimension('spacingAfter', millimeterToTwips(event.target.value))}
-            placeholder="默认"
-            type="number"
-            value={effectiveFormatting.spacingAfter ? twipsToMillimeters(effectiveFormatting.spacingAfter) : ''}
-          />
-        </label>
-        <label className="template-dimension-check">
-          <input
-            checked={Boolean(effectiveFormatting.bold)}
-            onChange={(event) => updateDimension('bold', event.target.checked)}
-            type="checkbox"
-          />
-          <span>加粗</span>
-        </label>
-      </div>
+      {isEditing && (
+        <div className="template-dimension-grid" aria-label={`${structure.label} 可编辑维度`}>
+          <label>
+            <span>字体</span>
+            <input
+              onChange={(event) => updateDimension('fontFamily', event.target.value || null)}
+              placeholder="默认"
+              value={draftFormatting.fontFamily ?? ''}
+            />
+          </label>
+          <label>
+            <span>字号 pt</span>
+            <input
+              min="8"
+              onChange={(event) => updateDimension('fontSizeHalfPoints', pointToHalfPoint(event.target.value))}
+              placeholder="默认"
+              type="number"
+              value={draftFormatting.fontSizeHalfPoints ? draftFormatting.fontSizeHalfPoints / 2 : ''}
+            />
+          </label>
+          <label>
+            <span>对齐</span>
+            <select
+              onChange={(event) => updateDimension('alignment', event.target.value || null)}
+              value={draftFormatting.alignment ?? ''}
+            >
+              <option value="">默认</option>
+              <option value="LEFT">左对齐</option>
+              <option value="CENTER">居中</option>
+              <option value="RIGHT">右对齐</option>
+              <option value="BOTH">两端对齐</option>
+            </select>
+          </label>
+          <label>
+            <span>首行缩进 mm</span>
+            <input
+              min="0"
+              onChange={(event) => updateDimension('indentationFirstLine', millimeterToTwips(event.target.value))}
+              placeholder="默认"
+              type="number"
+              value={draftFormatting.indentationFirstLine ? twipsToMillimeters(draftFormatting.indentationFirstLine) : ''}
+            />
+          </label>
+          <label>
+            <span>行距</span>
+            <input
+              min="1"
+              onChange={(event) => updateDimension('spacingBetween', lineSpacingToProfileValue(event.target.value))}
+              placeholder="默认"
+              step="0.1"
+              type="number"
+              value={draftFormatting.spacingBetween ? draftFormatting.spacingBetween / 100 : ''}
+            />
+          </label>
+          <label>
+            <span>段后 mm</span>
+            <input
+              min="0"
+              onChange={(event) => updateDimension('spacingAfter', millimeterToTwips(event.target.value))}
+              placeholder="默认"
+              type="number"
+              value={draftFormatting.spacingAfter ? twipsToMillimeters(draftFormatting.spacingAfter) : ''}
+            />
+          </label>
+          <label className="template-dimension-check">
+            <input
+              checked={Boolean(draftFormatting.bold)}
+              onChange={(event) => updateDimension('bold', event.target.checked)}
+              type="checkbox"
+            />
+            <span>加粗</span>
+          </label>
+        </div>
+      )}
     </article>
   );
 }
@@ -2060,6 +2751,262 @@ function PlaceholderPage({ view }: { view: AppView }) {
         <p>{viewSubtitle(view)}。当前入口已预留，后续阶段会接入真实列表、权限和操作。</p>
       </section>
     </main>
+  );
+}
+
+function DraftListPage({
+  currentDraftId,
+  documentTypes,
+  drafts,
+  message,
+  onCreateBlankDraft,
+  onDeleteDraft,
+  onOpenDraft,
+  onRenameDraft,
+  onSelectDocumentType,
+  preferredPageMode,
+  selectedDocumentTypeCode,
+  status,
+}: {
+  currentDraftId: number | null;
+  documentTypes: DocumentType[];
+  drafts: DraftSummary[];
+  message: string;
+  onCreateBlankDraft: (documentTypeCode: string) => void;
+  onDeleteDraft: (draftId: number) => Promise<void>;
+  onOpenDraft: (draftId: number) => void;
+  onRenameDraft: (draftId: number, title: string) => Promise<void>;
+  onSelectDocumentType: (documentTypeCode: string) => void;
+  preferredPageMode: DraftListPageMode;
+  selectedDocumentTypeCode: string;
+  status: DraftListStatus;
+}) {
+  const selectedDocumentType = documentTypes.find((type) => type.code === selectedDocumentTypeCode)
+    ?? documentTypes[0]
+    ?? { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 };
+  const [pageMode, setPageMode] = useState<DraftListPageMode>(preferredPageMode);
+  const [draftToDelete, setDraftToDelete] = useState<DraftSummary | null>(null);
+  const [draftToRename, setDraftToRename] = useState<DraftSummary | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
+  const [isDeletingDraft, setIsDeletingDraft] = useState(false);
+  const [isRenamingDraft, setIsRenamingDraft] = useState(false);
+  const isBusy = status === 'loading' || status === 'creating';
+  const empty = !isBusy && drafts.length === 0 && status !== 'error';
+
+  useEffect(() => {
+    setPageMode(preferredPageMode);
+  }, [preferredPageMode]);
+
+  function handleSelectDocumentType(code: string) {
+    onSelectDocumentType(code);
+    setPageMode('list');
+  }
+
+  function handleBackToFolders() {
+    setPageMode('folders');
+  }
+
+  async function handleConfirmDeleteDraft() {
+    if (!draftToDelete) {
+      return;
+    }
+    try {
+      setIsDeletingDraft(true);
+      await onDeleteDraft(draftToDelete.id);
+      setDraftToDelete(null);
+    } finally {
+      setIsDeletingDraft(false);
+    }
+  }
+
+  function handleStartRenameDraft(item: DraftSummary) {
+    setDraftToRename(item);
+    setRenameTitle(item.title);
+  }
+
+  async function handleConfirmRenameDraft() {
+    if (!draftToRename || !renameTitle.trim()) {
+      return;
+    }
+    try {
+      setIsRenamingDraft(true);
+      await onRenameDraft(draftToRename.id, renameTitle.trim());
+      setDraftToRename(null);
+      setRenameTitle('');
+    } finally {
+      setIsRenamingDraft(false);
+    }
+  }
+
+  return (
+    <>
+    <main className="settings-page drafts-page" aria-busy={isBusy} aria-label="草稿列表">
+      <section className="settings-panel template-admin-panel">
+        <div className="settings-header">
+          <div>
+            <div className="eyebrow">Drafts</div>
+            <h2>
+              草稿列表
+              {pageMode === 'list' && <span className="template-title-suffix"> - {selectedDocumentType.name}</span>}
+            </h2>
+            <p>{pageMode === 'list' ? '新建草稿会留在当前文种列表中，再进入工作台继续编辑。' : '先选择文种，再管理该文种下的草稿。'}</p>
+          </div>
+          {pageMode !== 'folders' && (
+            <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+              {status === 'loading' ? '加载中' : `${drafts.length} 个草稿`}
+            </span>
+          )}
+        </div>
+
+        {pageMode === 'folders' && (
+          <div className="template-folder-grid" aria-label="文种">
+            {documentTypes.map((type) => (
+              <button
+                aria-label={type.name}
+                className="template-folder-card"
+                disabled={isBusy}
+                key={type.code}
+                onClick={() => handleSelectDocumentType(type.code)}
+                type="button"
+              >
+                <FolderOpen aria-hidden="true" />
+                <span>{type.name}</span>
+                <small>{type.code}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {pageMode === 'list' && (
+          <>
+            <div className="template-list-toolbar">
+              <Button icon={<ArrowLeft aria-hidden="true" />} onClick={handleBackToFolders} variant="secondary">
+                返回文种
+              </Button>
+              <Button
+                disabled={isBusy}
+                icon={<Plus aria-hidden="true" />}
+                isLoading={status === 'creating'}
+                loadingLabel="正在创建"
+                onClick={() => onCreateBlankDraft(selectedDocumentType.code)}
+              >
+                新建草稿
+              </Button>
+            </div>
+
+            {message && !(empty && message === '当前文种暂无草稿') && (
+              <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />
+            )}
+
+            {isBusy && (
+              <div className="template-card-grid" aria-label="草稿加载中" aria-live="polite">
+                <div className="template-card skeleton-row" />
+                <div className="template-card skeleton-row" />
+              </div>
+            )}
+
+            {empty && (
+              <div className="template-empty-panel">
+                <FileText aria-hidden="true" />
+                <div>
+                  <strong>当前文种暂无草稿</strong>
+                  <span>为{selectedDocumentType.name}新建第一个草稿，随后进入工作台编辑保存。</span>
+                </div>
+              </div>
+            )}
+
+            {!isBusy && drafts.length > 0 && (
+              <div className="template-card-grid" aria-label={`${selectedDocumentType.name}草稿`}>
+                {drafts.map((item) => (
+                    <article className="template-card" key={item.id}>
+                      <div className="template-card-controls">
+                        <button
+                          aria-label={`重命名草稿：${item.title}`}
+                          className="template-card-icon-button"
+                          disabled={isBusy || isRenamingDraft || isDeletingDraft}
+                          onClick={() => handleStartRenameDraft(item)}
+                          type="button"
+                        >
+                          <Pencil aria-hidden="true" />
+                        </button>
+                        <button
+                          aria-label={`删除草稿：${item.title}`}
+                          className="template-card-icon-button danger"
+                          disabled={isBusy || isRenamingDraft || isDeletingDraft}
+                          onClick={() => setDraftToDelete(item)}
+                          type="button"
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </button>
+                      </div>
+                      <div className="template-card-title">
+                      <FileText aria-hidden="true" />
+                      <div>
+                        <h3>{item.title}</h3>
+                        <span className="template-card-meta">
+                          {item.status}
+                          {currentDraftId === item.id ? ' · 当前草稿' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="template-card-file">
+                      {item.templateVersionId ? `已绑定模板版本 #${item.templateVersionId}` : '未选择模板'}
+                      {' · '}
+                      {formatTimestamp(item.updatedAt)}
+                    </p>
+                    <div className="template-card-actions">
+                      <Button icon={<FileText aria-hidden="true" />} onClick={() => onOpenDraft(item.id)} variant="secondary">
+                        进入工作台
+                      </Button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </section>
+    </main>
+
+    <ConfirmDialog
+      cancelLabel="继续保留"
+      confirmLabel="删除草稿"
+      description={draftToDelete ? `将删除“${draftToDelete.title}”及其草稿块、材料和质检结果。此操作不可撤销。` : undefined}
+      isConfirming={isDeletingDraft}
+      onCancel={() => setDraftToDelete(null)}
+      onConfirm={() => void handleConfirmDeleteDraft()}
+      open={Boolean(draftToDelete)}
+      title="删除这个草稿？"
+    />
+    <Dialog
+      actions={(
+        <>
+          <Button disabled={isRenamingDraft} onClick={() => setDraftToRename(null)} variant="secondary">
+            取消
+          </Button>
+          <Button
+            disabled={!renameTitle.trim()}
+            isLoading={isRenamingDraft}
+            loadingLabel="保存中"
+            onClick={() => void handleConfirmRenameDraft()}
+          >
+            保存名称
+          </Button>
+        </>
+      )}
+      description={draftToRename ? `调整“${draftToRename.title}”在草稿列表中的显示名称。` : undefined}
+      onClose={() => setDraftToRename(null)}
+      open={Boolean(draftToRename)}
+      title="重命名草稿"
+    >
+      <TextField
+        disabled={isRenamingDraft}
+        label="草稿名称"
+        onChange={(event) => setRenameTitle(event.target.value)}
+        value={renameTitle}
+      />
+    </Dialog>
+    </>
   );
 }
 
@@ -2331,7 +3278,21 @@ function structurePreviewStyle(
   return formattingToCss({ ...structure.formatting, ...(overrides[structure.structureKey] ?? {}) });
 }
 
-function formattingToCss(formatting: TemplateStructureFormatting): CSSProperties {
+function templateStructuresByType(
+  profile: TemplateProfile | null,
+  overrides: TemplateStructureOverrideMap,
+  structureTypes: string[],
+) {
+  const allowed = new Set(structureTypes);
+  return (profile?.structures ?? [])
+    .filter((structure) => allowed.has(structure.structureType))
+    .map((structure) => ({
+      structure,
+      style: formattingToCss({ ...structure.formatting, ...(overrides[structure.structureKey] ?? {}) }),
+    }));
+}
+
+function formattingToCss(formatting: Partial<TemplateStructureFormatting>): CSSProperties {
   const style: CSSProperties = {};
   if (formatting.fontFamily) {
     style.fontFamily = formatting.fontFamily;
@@ -2374,6 +3335,15 @@ function alignmentToCss(alignment: string): CSSProperties['textAlign'] {
   return 'left';
 }
 
+function stripTemplateBraces(text: string) {
+  return text.replace(/\{\{\s*([^{}]+?)\s*}}/g, '$1');
+}
+
+function looksLikePlaceholderOnly(text: string) {
+  const normalized = text.trim();
+  return /^\{\{\s*[^{}]+?\s*}}$/.test(normalized);
+}
+
 function pointToHalfPoint(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 2) : null;
@@ -2406,6 +3376,29 @@ function structureSourceLabel(source: string) {
     TEXT: '来自文本识别',
   };
   return labels[source] ?? source;
+}
+
+function dimensionSummary(formatting: TemplateStructureFormatting) {
+  const items = [
+    formatting.fontFamily,
+    formatting.fontSizeHalfPoints ? `${formatting.fontSizeHalfPoints / 2}pt` : null,
+    formatting.alignment ? alignmentLabel(formatting.alignment) : null,
+    formatting.indentationFirstLine ? `首行 ${twipsToMillimeters(formatting.indentationFirstLine)}mm` : null,
+    formatting.spacingBetween ? `行距 ${formatting.spacingBetween / 100}` : null,
+    formatting.spacingAfter ? `段后 ${twipsToMillimeters(formatting.spacingAfter)}mm` : null,
+    formatting.bold ? '加粗' : null,
+  ].filter((item): item is string => Boolean(item));
+  return items.length > 0 ? items : ['沿用模板默认'];
+}
+
+function alignmentLabel(alignment: string) {
+  const labels: Record<string, string> = {
+    LEFT: '左对齐',
+    CENTER: '居中',
+    RIGHT: '右对齐',
+    BOTH: '两端对齐',
+  };
+  return labels[alignment] ?? alignment;
 }
 
 function twipsToMillimeters(twips: number) {
@@ -2441,6 +3434,35 @@ function syncParagraphEditorHeight(textarea: HTMLTextAreaElement) {
   textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function deletedNodeStorageKey(draftId: number, templateVersionId: number | null) {
+  return `${DELETED_NODE_STORAGE_PREFIX}.${draftId}.${templateVersionId ?? 'none'}`;
+}
+
+function readDeletedNodeIds(storageKey: string) {
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeDeletedNodeIds(storageKey: string, nodeIds: Set<string>) {
+  window.localStorage.setItem(storageKey, JSON.stringify([...nodeIds]));
+}
+
 function formatFileSize(size: number) {
   if (size < 1024) {
     return `${size} B`;
@@ -2449,4 +3471,28 @@ function formatFileSize(size: number) {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatTimestamp(value: string) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return '时间未知';
+  }
+  return timestamp.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function draftDetailToSummary(draft: DraftDetail): DraftSummary {
+  return {
+    id: draft.id,
+    documentTypeCode: draft.documentTypeCode,
+    title: draft.title,
+    status: draft.status,
+    templateVersionId: draft.templateVersionId,
+    updatedAt: new Date().toISOString(),
+  };
 }

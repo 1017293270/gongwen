@@ -50,27 +50,81 @@ class DraftServiceTest {
     }
 
     @Test
+    void listsDraftsFilteredByDocumentType() {
+        service.createDraft(new CreateDraftRequest("NOTICE", "通知草稿"));
+        service.createDraft(new CreateDraftRequest("REQUEST", "请示草稿"));
+
+        List<DraftSummaryDto> drafts = service.listDrafts("REQUEST");
+
+        assertThat(drafts).extracting(DraftSummaryDto::title)
+                .containsExactly("请示草稿");
+        assertThat(drafts).extracting(DraftSummaryDto::documentTypeCode)
+                .containsExactly("REQUEST");
+    }
+
+    @Test
+    void renamesDraftAndKeepsBlocks() {
+        DraftDetailDto draft = service.createDraft(new CreateDraftRequest("NOTICE", "原草稿名称"));
+
+        DraftDetailDto renamed = service.updateTitle(draft.id(), new UpdateDraftTitleRequest("已重命名通知草稿"));
+
+        assertThat(renamed.title()).isEqualTo("已重命名通知草稿");
+        assertThat(renamed.blocks()).extracting(DraftBlockDto::blockType)
+                .containsExactly("TITLE", "RECIPIENT", "BODY_PARAGRAPH", "ATTACHMENT", "SIGNATURE", "DATE");
+        assertThat(service.listDrafts("NOTICE")).extracting(DraftSummaryDto::title)
+                .containsExactly("已重命名通知草稿");
+    }
+
+    @Test
     void failsWhenDraftDoesNotExist() {
         assertThatThrownBy(() -> service.getDraft(99L))
                 .isInstanceOf(DraftNotFoundException.class)
                 .hasMessageContaining("99");
     }
 
+    @Test
+    void deletesDraftAndRemovesItFromDocumentTypeList() {
+        DraftDetailDto draft = service.createDraft(new CreateDraftRequest("NOTICE", "待删除草稿"));
+
+        service.deleteDraft(draft.id());
+
+        assertThat(service.listDrafts("NOTICE")).isEmpty();
+        assertThatThrownBy(() -> service.getDraft(draft.id()))
+                .isInstanceOf(DraftNotFoundException.class);
+    }
+
     private static final class InMemoryDraftRepository implements DraftRepository {
-        private DraftDetailDto draft;
+        private final List<DraftDetailDto> drafts = new ArrayList<>();
+        private long nextDraftId = 1L;
 
         @Override
         public DraftDetailDto createDraft(String documentTypeCode, String title, List<DraftBlockUpdateRequest> blocks) {
-            this.draft = new DraftDetailDto(1L, documentTypeCode, title, "DRAFT", toDtos(blocks));
+            DraftDetailDto draft = new DraftDetailDto(nextDraftId++, documentTypeCode, title, "DRAFT", toDtos(blocks));
+            drafts.add(draft);
             return draft;
         }
 
         @Override
         public DraftDetailDto findById(long id) {
-            if (draft == null || draft.id() != id) {
-                throw new DraftNotFoundException(id);
-            }
-            return draft;
+            return drafts.stream()
+                    .filter(draft -> draft.id() == id)
+                    .findFirst()
+                    .orElseThrow(() -> new DraftNotFoundException(id));
+        }
+
+        @Override
+        public List<DraftSummaryDto> listByDocumentType(String documentTypeCode) {
+            return drafts.stream()
+                    .filter(draft -> draft.documentTypeCode().equals(documentTypeCode))
+                    .map(draft -> new DraftSummaryDto(
+                            draft.id(),
+                            draft.documentTypeCode(),
+                            draft.title(),
+                            draft.status(),
+                            draft.templateVersionId(),
+                            "2026-05-27T08:00:00Z"
+                    ))
+                    .toList();
         }
 
         @Override
@@ -81,8 +135,30 @@ class DraftServiceTest {
                     .findFirst()
                     .map(DraftBlockUpdateRequest::content)
                     .orElse(existing.title());
-            this.draft = new DraftDetailDto(id, existing.documentTypeCode(), title, existing.status(), toDtos(blocks));
-            return draft;
+            DraftDetailDto updated = new DraftDetailDto(id, existing.documentTypeCode(), title, existing.status(), toDtos(blocks));
+            drafts.replaceAll(draft -> draft.id() == id ? updated : draft);
+            return updated;
+        }
+
+        @Override
+        public DraftDetailDto updateTitle(long id, String title) {
+            DraftDetailDto existing = findById(id);
+            DraftDetailDto updated = new DraftDetailDto(
+                    id,
+                    existing.documentTypeCode(),
+                    title,
+                    existing.status(),
+                    existing.templateVersionId(),
+                    existing.blocks()
+            );
+            drafts.replaceAll(draft -> draft.id() == id ? updated : draft);
+            return updated;
+        }
+
+        @Override
+        public void deleteById(long id) {
+            findById(id);
+            drafts.removeIf(draft -> draft.id() == id);
         }
 
         private List<DraftBlockDto> toDtos(List<DraftBlockUpdateRequest> blocks) {

@@ -3,6 +3,7 @@ package com.gongwen.assistant.template;
 import com.gongwen.assistant.support.DocxTestFactory;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -11,6 +12,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -26,6 +29,9 @@ class TemplateControllerTest {
 
     @MockBean
     private TemplateProfileRepository profileRepository;
+
+    @MockBean
+    private TemplateStructureFormattingRepository structureFormattingRepository;
 
     @MockBean
     private TemplateVersionRepository versionRepository;
@@ -48,5 +54,14 @@ class TemplateControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.placeholders[0]").value("标题"))
                 .andExpect(jsonPath("$.data.placeholders[1]").value("正文"));
+    }
+
+    @Test
+    void deletesTemplate() throws Exception {
+        mockMvc.perform(delete("/api/templates/7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(templateRepository).deleteById(7L);
     }
 }

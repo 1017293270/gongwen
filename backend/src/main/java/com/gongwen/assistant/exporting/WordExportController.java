@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -21,16 +22,30 @@ public class WordExportController {
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
     private final WordExportService exportService;
+    private final DraftWordExportService draftWordExportService;
     private final BuiltinDocxTemplateFactory templateFactory;
 
-    public WordExportController(WordExportService exportService, BuiltinDocxTemplateFactory templateFactory) {
+    public WordExportController(
+            WordExportService exportService,
+            DraftWordExportService draftWordExportService,
+            BuiltinDocxTemplateFactory templateFactory
+    ) {
         this.exportService = exportService;
+        this.draftWordExportService = draftWordExportService;
         this.templateFactory = templateFactory;
     }
 
     @PostMapping("/word")
     public ResponseEntity<byte[]> exportWord(@RequestBody WordExportRequest request) {
-        WordExportResult result = exportService.export(templateFactory.createNoticeTemplate(), request);
+        return wordResponse(exportService.export(templateFactory.createNoticeTemplate(), request));
+    }
+
+    @PostMapping("/drafts/{draftId}/word")
+    public ResponseEntity<byte[]> exportDraftWord(@PathVariable long draftId) {
+        return wordResponse(draftWordExportService.exportDraft(draftId));
+    }
+
+    private ResponseEntity<byte[]> wordResponse(WordExportResult result) {
         ContentDisposition disposition = ContentDisposition.attachment()
                 .filename(result.fileName(), StandardCharsets.UTF_8)
                 .build();
