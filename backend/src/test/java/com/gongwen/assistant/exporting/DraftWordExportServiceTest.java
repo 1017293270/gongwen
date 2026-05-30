@@ -5,6 +5,10 @@ import com.gongwen.assistant.draft.DraftBlockUpdateRequest;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftRepository;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
+import com.gongwen.assistant.quality.QualityCheckItem;
+import com.gongwen.assistant.quality.QualityCheckRecord;
+import com.gongwen.assistant.quality.QualityCheckRepository;
+import com.gongwen.assistant.quality.QualityCheckResponse;
 import com.gongwen.assistant.support.DocxTestFactory;
 import com.gongwen.assistant.template.TemplateRepository;
 import com.gongwen.assistant.template.TemplateSummary;
@@ -26,6 +30,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -265,6 +270,59 @@ class DraftWordExportServiceTest {
     }
 
     @Test
+    void blocksExportWhenLatestQualityCheckBlocksExport() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE);
+        Path templatePath = tempDir.resolve("quality-blocked-template.docx");
+        Files.write(templatePath, templateBytes);
+        CapturingWordExportService wordExportService = new CapturingWordExportService();
+
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(21L, 9L, "Blocked export")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(emptyProfile()),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                wordExportService,
+                new FixedQualityCheckRepository(qualityCheck(true, "主送对象不能为空。")),
+                null
+        );
+
+        assertThatThrownBy(() -> service.exportDraft(21L))
+                .isInstanceOf(WordExportException.class)
+                .satisfies(error -> {
+                    WordExportException exception = (WordExportException) error;
+                    assertThat(exception.errorCode()).isEqualTo("QUALITY_CHECK_BLOCKED");
+                    assertThat(exception.getMessage()).contains("主送对象不能为空。");
+                });
+        assertThat(wordExportService.lastRequest).isNull();
+    }
+
+    @Test
+    void requiresQualityCheckBeforeExportingWhenGateIsEnabled() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE);
+        Path templatePath = tempDir.resolve("quality-required-template.docx");
+        Files.write(templatePath, templateBytes);
+
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(22L, 9L, "Unchecked export")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(emptyProfile()),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                new FixedQualityCheckRepository(null),
+                null
+        );
+
+        assertThatThrownBy(() -> service.exportDraft(22L))
+                .isInstanceOf(WordExportException.class)
+                .satisfies(error ->
+                        assertThat(((WordExportException) error).errorCode()).isEqualTo("QUALITY_CHECK_REQUIRED"));
+    }
+
+    @Test
     void wordExportRequestNormalizesNullFormattingToEmptyContext() {
         WordExportRequest request = new WordExportRequest("Test Template", 2, Map.of("BODY_PARAGRAPH", "body"));
 
@@ -317,6 +375,28 @@ class DraftWordExportServiceTest {
 
     private static TemplateProfile emptyProfile() {
         return new TemplateProfile(1, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    private static QualityCheckResponse qualityCheck(boolean exportBlocked, String message) {
+        return new QualityCheckResponse(
+                UUID.randomUUID(),
+                21L,
+                exportBlocked ? "ERROR" : "PASS",
+                exportBlocked,
+                UUID.randomUUID(),
+                Instant.now(),
+                exportBlocked
+                        ? List.of(new QualityCheckItem(
+                                "ERROR",
+                                "REQUIRED_FIELD",
+                                "REQUIRED_RECIPIENT_MISSING",
+                                message,
+                                "RECIPIENT",
+                                2L,
+                                "请先补齐该字段后再导出。"
+                        ))
+                        : List.of()
+        );
     }
 
     private record FixedDraftRepository(DraftDetailDto draft) implements DraftRepository {
@@ -474,6 +554,18 @@ class DraftWordExportServiceTest {
         @Override
         public void save(ExportRecord record) {
             this.savedStatus = record.status();
+        }
+    }
+
+    private record FixedQualityCheckRepository(QualityCheckResponse response) implements QualityCheckRepository {
+        @Override
+        public void save(QualityCheckRecord record) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<QualityCheckResponse> findLatestByDraftId(long draftId) {
+            return Optional.ofNullable(response);
         }
     }
 

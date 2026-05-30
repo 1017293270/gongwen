@@ -741,6 +741,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
+      .mockResolvedValueOnce(jsonResponse(qualityCheckPass()))
       .mockResolvedValueOnce(docxResponse('测试模板-v2.docx'));
     stubFetch(fetchMock);
 
@@ -752,11 +753,38 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
       method: 'PUT',
     }));
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
+      method: 'POST',
+    }));
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
       method: 'POST',
     }));
     expect(clickSpy).toHaveBeenCalled();
     expect(await screen.findByText('Word 已导出')).toBeInTheDocument();
+  });
+
+  it('blocks Word export when the automatic quality check has blocking issues', async () => {
+    const exportDraft = { ...sampleDraft('导出阻断草稿'), templateVersionId: 9 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(exportDraft))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(exportDraft))
+      .mockResolvedValueOnce(jsonResponse(qualityCheckBlocked()));
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: '导出 Word' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/exports/drafts/1/word'))).toBe(false);
+    expect((await screen.findAllByText(/导出已阻断/)).length).toBeGreaterThan(0);
   });
 
   it('materializes template-derived body sections before exporting Word', async () => {
@@ -801,6 +829,9 @@ describe('App', () => {
       if (url.endsWith('/api/drafts/1/blocks')) {
         const payload = JSON.parse(String(init?.body));
         return Promise.resolve(jsonResponse({ ...draft, blocks: payload.blocks }));
+      }
+      if (url.endsWith('/api/drafts/1/quality-check')) {
+        return Promise.resolve(jsonResponse(qualityCheckPass()));
       }
       if (url.endsWith('/api/exports/drafts/1/word')) {
         return Promise.resolve(docxResponse('测试模板-v2.docx'));
@@ -1645,6 +1676,40 @@ function docxResponse(fileName: string) {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     }),
   } as Response;
+}
+
+function qualityCheckPass() {
+  return {
+    id: 'quality-pass',
+    draftId: 1,
+    status: 'PASS',
+    exportBlocked: false,
+    aiTraceId: null,
+    checkedAt: '2026-05-30T00:00:00Z',
+    items: [],
+  };
+}
+
+function qualityCheckBlocked() {
+  return {
+    id: 'quality-blocked',
+    draftId: 1,
+    status: 'ERROR',
+    exportBlocked: true,
+    aiTraceId: null,
+    checkedAt: '2026-05-30T00:00:00Z',
+    items: [
+      {
+        severity: 'ERROR',
+        category: 'REQUIRED_FIELD',
+        code: 'REQUIRED_RECIPIENT_MISSING',
+        message: '主送对象不能为空。',
+        targetBlockType: 'RECIPIENT',
+        targetBlockId: 2,
+        suggestion: '请补齐该字段后再导出。',
+      },
+    ],
+  };
 }
 
 function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {

@@ -135,7 +135,7 @@ type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
 type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
-type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
+type ExportStatus = 'idle' | 'exporting' | 'success' | 'blocked' | 'error';
 type AppView =
   | 'overview'
   | 'workbench'
@@ -1182,7 +1182,28 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setExportStatus('exporting');
       setExportError('');
       const updatedDraft = await saveCurrentDraft('导出前保存当前草稿');
-      const result = await exportDraftWord(updatedDraft?.id ?? draft.id);
+      const exportDraftId = updatedDraft?.id ?? draft.id;
+      let exportQualityCheck: QualityCheckResult;
+      try {
+        setQualityCheckStatus('checking');
+        setQualityCheckError('');
+        exportQualityCheck = await runQualityCheck(exportDraftId);
+        setQualityCheck(exportQualityCheck);
+        setQualityCheckStatus('success');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '导出前质检失败';
+        setQualityCheckStatus('error');
+        setQualityCheckError(message);
+        throw error;
+      }
+      if (exportQualityCheck.exportBlocked) {
+        const message = `导出已阻断：${qualitySummary(exportQualityCheck)}`;
+        setExportStatus('blocked');
+        setExportError(message);
+        showToast({ title: '导出已阻断', description: qualitySummary(exportQualityCheck), tone: 'error' });
+        return;
+      }
+      const result = await exportDraftWord(exportDraftId);
       downloadBlob(result.blob, result.fileName);
       setExportStatus('success');
       showToast({ title: 'Word 已导出', description: result.fileName, tone: 'success' });
@@ -1387,7 +1408,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   disabled={!draft || !draft.templateVersionId || exportStatus === 'exporting' || status === 'loading'}
                   icon={<FileDown aria-hidden="true" />}
                   isLoading={exportStatus === 'exporting'}
-                  loadingLabel="正在导出"
+                  loadingLabel="正在质检并导出"
                   onClick={() => void handleExportWord()}
                 >
                   导出 Word
@@ -1720,14 +1741,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               <div>
                 <div className="outline-title">Word 导出</div>
                 <div className="panel-kicker">
-                  {draft?.templateVersionId ? '导出当前草稿，用于和模板结果对比' : '请先选择套版模板'}
+                  {draft?.templateVersionId ? '导出前会自动保存并运行基础质检' : '请先选择套版模板'}
                 </div>
               </div>
               <Button
                 disabled={!draft || !draft.templateVersionId || exportStatus === 'exporting' || status === 'loading'}
                 icon={<FileDown aria-hidden="true" />}
                 isLoading={exportStatus === 'exporting'}
-                loadingLabel="正在导出"
+                loadingLabel="正在质检并导出"
                 onClick={() => void handleExportWord()}
                 variant="secondary"
               >

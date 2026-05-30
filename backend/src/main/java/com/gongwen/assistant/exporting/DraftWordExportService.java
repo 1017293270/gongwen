@@ -3,6 +3,9 @@ package com.gongwen.assistant.exporting;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftRepository;
+import com.gongwen.assistant.quality.QualityCheckItem;
+import com.gongwen.assistant.quality.QualityCheckRepository;
+import com.gongwen.assistant.quality.QualityCheckResponse;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
@@ -46,6 +49,7 @@ public class DraftWordExportService {
     private final TemplateStructureFormattingRepository templateStructureFormattingRepository;
     private final TemplateEffectiveFormattingService templateEffectiveFormattingService;
     private final WordExportService wordExportService;
+    private final QualityCheckRepository qualityCheckRepository;
     private final CurrentUserProvider currentUserProvider;
 
     public DraftWordExportService(
@@ -65,6 +69,7 @@ public class DraftWordExportService {
                 templateStructureFormattingRepository,
                 templateEffectiveFormattingService,
                 wordExportService,
+                null,
                 null
         );
     }
@@ -78,6 +83,7 @@ public class DraftWordExportService {
             TemplateStructureFormattingRepository templateStructureFormattingRepository,
             TemplateEffectiveFormattingService templateEffectiveFormattingService,
             WordExportService wordExportService,
+            QualityCheckRepository qualityCheckRepository,
             CurrentUserProvider currentUserProvider
     ) {
         this.draftRepository = draftRepository;
@@ -87,6 +93,7 @@ public class DraftWordExportService {
         this.templateStructureFormattingRepository = templateStructureFormattingRepository;
         this.templateEffectiveFormattingService = templateEffectiveFormattingService;
         this.wordExportService = wordExportService;
+        this.qualityCheckRepository = qualityCheckRepository;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -119,6 +126,7 @@ public class DraftWordExportService {
                 .orElse(new TemplateSummary(version.templateId(), "\u516c\u6587\u6a21\u677f", draft.documentTypeCode(), "ACTIVE"));
 
         TemplateProfile profile = templateProfile(templateVersionId);
+        ensureQualityCheckAllowsExport(draft.id());
 
         return wordExportService.export(readTemplateBytes(version.filePath()), new WordExportRequest(
                 template.templateName(),
@@ -127,6 +135,31 @@ public class DraftWordExportService {
                 exportFormattingContext(templateVersionId, profile),
                 profile
         ));
+    }
+
+    private void ensureQualityCheckAllowsExport(long draftId) {
+        if (qualityCheckRepository == null) {
+            return;
+        }
+        QualityCheckResponse latest = qualityCheckRepository.findLatestByDraftId(draftId)
+                .orElseThrow(() -> new WordExportException(
+                        "QUALITY_CHECK_REQUIRED",
+                        "请先运行基础质检，通过后再导出 Word。",
+                        null
+                ));
+        if (!latest.exportBlocked()) {
+            return;
+        }
+        String blockingMessage = latest.items().stream()
+                .filter(item -> "ERROR".equalsIgnoreCase(item.severity()))
+                .findFirst()
+                .map(QualityCheckItem::message)
+                .orElse("基础质检存在阻断项。");
+        throw new WordExportException(
+                "QUALITY_CHECK_BLOCKED",
+                "导出已阻断：" + blockingMessage + " 请处理后重新质检。",
+                null
+        );
     }
 
     private CurrentUser currentUserOrNull() {
