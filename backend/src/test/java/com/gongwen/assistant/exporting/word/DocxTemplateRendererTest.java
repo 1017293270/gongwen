@@ -1,16 +1,22 @@
 package com.gongwen.assistant.exporting.word;
 
 import com.gongwen.assistant.support.DocxTestFactory;
+import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
+import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureProfile;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -140,6 +146,59 @@ class DocxTemplateRendererTest {
     }
 
     @Test
+    void referenceSnapshotExportPreservesTemplateSectionFooterAndTopStructures() throws Exception {
+        byte[] template = DocxTestFactory.docxWithNoticeReferenceSkeleton();
+        TemplateProfile profile = new TemplateProfileParser().parse(template);
+        ExportFormattingContext formatting = new TemplateEffectiveFormattingService().resolve(profile, Map.of());
+
+        byte[] exported = renderer.renderReferenceDraft(template, Map.of(
+                TITLE_KEY, "关于召开专题协调会的通知",
+                RECIPIENT_KEY, "各部门、各直属单位",
+                BODY_KEY, "为做好近期重点工作，现将有关事项通知如下：\n一、会议时间\n2026年6月3日（星期三）上午9:30。",
+                SIGNATURE_KEY, "办公室",
+                DATE_KEY, "2026年5月30日"
+        ), formatting, profile);
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(exported))) {
+            assertThat(document.getFooterList()).hasSize(1);
+            assertThat(document.getFooterList().getFirst().getText()).contains("-  -");
+            CTSectPr section = document.getDocument().getBody().getSectPr();
+            assertThat(section).isNotNull();
+            assertThat(intValue(section.getPgMar().getTop())).isEqualTo(2098);
+            assertThat(intValue(section.getPgMar().getLeft())).isEqualTo(1587);
+
+            assertThat(document.getParagraphs().get(0).getText()).isEqualTo("示例单位文件");
+            assertThat(document.getParagraphs().get(0).getRuns().get(0).getColor()).isEqualTo("C00000");
+            assertThat(document.getParagraphs().get(1).getText()).isEqualTo("示例办〔2026〕5号");
+            assertThat(document.getParagraphs().get(2).getText()).isEqualTo("关于召开专题协调会的通知");
+            assertThat(document.getParagraphs().get(3).getText()).isEqualTo("各部门、各直属单位：");
+            assertThat(DocxTestFactory.readText(exported))
+                    .doesNotContain("为统筹推进近期重点工作")
+                    .contains("办公室", "2026年5月30日");
+        }
+    }
+
+    @Test
+    void referenceSnapshotExportKeepsOriginalTopParagraphFormattingWhenStoredProfileIsStale() throws Exception {
+        byte[] template = DocxTestFactory.docxWithNoticeReferenceSkeleton();
+        TemplateProfile profile = withoutStructureColor(new TemplateProfileParser().parse(template));
+        ExportFormattingContext formatting = new TemplateEffectiveFormattingService().resolve(profile, Map.of());
+
+        byte[] exported = renderer.renderReferenceDraft(template, Map.of(
+                TITLE_KEY, "关于召开专题协调会的通知",
+                RECIPIENT_KEY, "各部门、各直属单位",
+                BODY_KEY, "正文内容",
+                SIGNATURE_KEY, "办公室",
+                DATE_KEY, "2026年5月30日"
+        ), formatting, profile);
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(exported))) {
+            assertThat(document.getParagraphs().get(0).getText()).isEqualTo("示例单位文件");
+            assertThat(document.getParagraphs().get(0).getRuns().get(0).getColor()).isEqualTo("C00000");
+        }
+    }
+
+    @Test
     void placeholderExportAppliesFormattingToMatchedParagraphs() throws Exception {
         byte[] template = DocxTestFactory.docxWithParagraphs(
                 "{{" + TITLE_KEY + "}}",
@@ -265,5 +324,52 @@ class DocxTemplateRendererTest {
             document.write(output);
             return output.toByteArray();
         }
+    }
+
+    private static TemplateProfile withoutStructureColor(TemplateProfile profile) {
+        List<TemplateStructureProfile> structures = profile.structures().stream()
+                .map(structure -> new TemplateStructureProfile(
+                        structure.structureKey(),
+                        structure.structureType(),
+                        structure.label(),
+                        structure.textPreview(),
+                        structure.locationType(),
+                        structure.styleId(),
+                        structure.styleName(),
+                        structure.source(),
+                        new TemplateStructureFormattingProfile(
+                                structure.formatting().fontFamily(),
+                                structure.formatting().fontSizeHalfPoints(),
+                                structure.formatting().bold(),
+                                structure.formatting().alignment(),
+                                structure.formatting().indentationFirstLine(),
+                                structure.formatting().spacingBetween(),
+                                structure.formatting().spacingBefore(),
+                                structure.formatting().spacingAfter(),
+                                null
+                        )
+                ))
+                .toList();
+        return new TemplateProfile(
+                profile.schemaVersion(),
+                structures,
+                profile.styles(),
+                profile.placeholders(),
+                profile.sections(),
+                profile.tables(),
+                profile.media(),
+                profile.validationItems(),
+                profile.templateAnalysis()
+        );
+    }
+
+    private static int intValue(Object value) {
+        if (value instanceof BigInteger number) {
+            return number.intValue();
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return new BigInteger(value.toString()).intValue();
     }
 }

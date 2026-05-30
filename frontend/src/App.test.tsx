@@ -230,6 +230,37 @@ describe('App', () => {
     expect(bodyBlocks[1].content).toContain('公司总部三楼第一会议室2');
   });
 
+  it('renders template top structure color from parsed profile formatting', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const draft = { ...sampleDraft('红头预览草稿'), templateVersionId: 9 };
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(draft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateTopColorProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    const unit = await within(screen.getByLabelText('公文预览')).findByText('示例单位文件');
+    expect(unit).toHaveStyle({ color: '#C00000' });
+  });
+
   it('removes a template-derived body section from the current draft without deleting the template', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     window.localStorage.setItem('gongwen.currentDraftId', '1');
@@ -1587,6 +1618,36 @@ function sampleOutline() {
       { heading: '一、主要事项', points: ['说明安排', '明确分工'] },
     ],
     missingInformation: ['会议时间'],
+  };
+}
+
+function templateTopColorProfile() {
+  return {
+    ...templateBodyProfile(),
+    structures: [
+      {
+        structureKey: 'unit-1',
+        structureType: 'UNIT',
+        label: '发文机关',
+        textPreview: '示例单位文件',
+        locationType: 'PARAGRAPH',
+        styleId: 'GongwenUnit',
+        styleName: 'GongwenUnit',
+        source: 'STYLE',
+        formatting: {
+          fontFamily: 'SimSun',
+          fontSizeHalfPoints: 36,
+          bold: true,
+          alignment: 'CENTER',
+          indentationFirstLine: 0,
+          spacingBetween: null,
+          spacingBefore: 0,
+          spacingAfter: 160,
+          colorHex: 'C00000',
+        },
+      },
+      ...templateBodyProfile().structures,
+    ],
   };
 }
 

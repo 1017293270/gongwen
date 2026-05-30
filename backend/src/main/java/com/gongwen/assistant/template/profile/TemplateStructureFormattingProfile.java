@@ -8,8 +8,22 @@ public record TemplateStructureFormattingProfile(
         Integer indentationFirstLine,
         Integer spacingBetween,
         Integer spacingBefore,
-        Integer spacingAfter
+        Integer spacingAfter,
+        String colorHex
 ) {
+    public TemplateStructureFormattingProfile(
+            String fontFamily,
+            Integer fontSizeHalfPoints,
+            Boolean bold,
+            String alignment,
+            Integer indentationFirstLine,
+            Integer spacingBetween,
+            Integer spacingBefore,
+            Integer spacingAfter
+    ) {
+        this(fontFamily, fontSizeHalfPoints, bold, alignment, indentationFirstLine, spacingBetween, spacingBefore, spacingAfter, null);
+    }
+
     public TemplateStructureFormattingProfile mergeOverride(TemplateStructureFormattingProfile override) {
         if (override == null) {
             return this;
@@ -22,7 +36,8 @@ public record TemplateStructureFormattingProfile(
                 override.indentationFirstLine() != null ? override.indentationFirstLine() : indentationFirstLine,
                 override.spacingBetween() != null ? override.spacingBetween() : spacingBetween,
                 override.spacingBefore() != null ? override.spacingBefore() : spacingBefore,
-                override.spacingAfter() != null ? override.spacingAfter() : spacingAfter
+                override.spacingAfter() != null ? override.spacingAfter() : spacingAfter,
+                preferNonBlank(override.colorHex(), colorHex)
         );
     }
 

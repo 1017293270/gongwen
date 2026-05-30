@@ -3303,6 +3303,9 @@ function formattingToCss(formatting: Partial<TemplateStructureFormatting>): CSSP
   if (typeof formatting.bold === 'boolean') {
     style.fontWeight = formatting.bold ? 700 : 400;
   }
+  if (formatting.colorHex) {
+    style.color = formatting.colorHex.startsWith('#') ? formatting.colorHex : `#${formatting.colorHex}`;
+  }
   if (formatting.alignment) {
     style.textAlign = alignmentToCss(formatting.alignment);
   }

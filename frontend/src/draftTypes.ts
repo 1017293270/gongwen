@@ -157,6 +157,7 @@ export type TemplateStructureFormatting = {
   spacingBetween: number | null;
   spacingBefore: number | null;
   spacingAfter: number | null;
+  colorHex?: string | null;
 };
 
 export type TemplateStructureFormattingOverrides = Record<string, Partial<TemplateStructureFormatting>>;

@@ -81,7 +81,7 @@ class TemplateProfileParserTest {
 
     @Test
     void classifiesReferenceNoticeSemanticSlotsWithoutTreatingAllBodyStyleParagraphsAsBody() {
-        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithNoticeReferenceFormatting());
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithNoticeReferenceSkeleton());
 
         assertThat(profile.structures())
                 .extracting(TemplateStructureProfile::structureType)
@@ -93,6 +93,12 @@ class TemplateProfileParserTest {
                 .orElseThrow();
         assertThat(recipient.textPreview()).isEqualTo("各部门、各直属单位：");
         assertThat(recipient.formatting().indentationFirstLine()).isNull();
+
+        TemplateStructureProfile unit = profile.structures().stream()
+                .filter(structure -> "UNIT".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(unit.formatting().colorHex()).isEqualTo("C00000");
 
         TemplateStructureProfile body = profile.structures().stream()
                 .filter(structure -> "BODY".equals(structure.structureType()))

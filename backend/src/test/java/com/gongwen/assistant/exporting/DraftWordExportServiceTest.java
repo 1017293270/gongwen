@@ -12,6 +12,7 @@ import com.gongwen.assistant.template.TemplateVersion;
 import com.gongwen.assistant.template.TemplateVersionRepository;
 import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
 import com.gongwen.assistant.template.profile.TemplateProfile;
+import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
@@ -108,6 +109,36 @@ class DraftWordExportServiceTest {
         assertThat(text).contains("General Office");
         assertThat(text).doesNotContain("This template body should not leak into the exported draft.");
         assertThat(records.savedStatus).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    void cleansSemanticLinesFromContaminatedBodyBlocksBeforeExporting() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithNoticeReferenceSkeleton();
+        Path templatePath = tempDir.resolve("reference-template.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = new TemplateProfileParser().parse(templateBytes);
+        CapturingWordExportService wordExportService = new CapturingWordExportService();
+
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(contaminatedDraft(1L, 9L)),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                wordExportService
+        );
+
+        service.exportDraft(1L);
+
+        assertThat(wordExportService.lastRequest.templateProfile()).isSameAs(profile);
+        assertThat(wordExportService.lastRequest.values().get("主送")).isEqualTo("各部门、各直属单位");
+        assertThat(wordExportService.lastRequest.values().get("附件")).isEqualTo("附件：会议议题征集表");
+        assertThat(wordExportService.lastRequest.values().get("落款")).isEqualTo("办公室");
+        assertThat(wordExportService.lastRequest.values().get("日期")).isEqualTo("2026年5月30日");
+        assertThat(wordExportService.lastRequest.values().get("正文"))
+                .contains("为统筹推进近期重点工作")
+                .doesNotContain("各部门、各直属单位：", "附件：会议议题征集表", "示例单位办公室", "2026年5月27日");
     }
 
     @Test
@@ -255,6 +286,31 @@ class DraftWordExportServiceTest {
                         new DraftBlockDto(5L, "ATTACHMENT", "Agenda", 40),
                         new DraftBlockDto(6L, "SIGNATURE", "General Office", 50),
                         new DraftBlockDto(7L, "DATE", "2026-05-07", 60)
+                )
+        );
+    }
+
+    private static DraftDetailDto contaminatedDraft(long draftId, Long templateVersionId) {
+        return new DraftDetailDto(
+                draftId,
+                "NOTICE",
+                "Contaminated notice",
+                "DRAFT",
+                templateVersionId,
+                List.of(
+                        new DraftBlockDto(1L, "TITLE", "关于召开专题协调会的通知", 10),
+                        new DraftBlockDto(2L, "RECIPIENT", "各部门、各直属单位", 20),
+                        new DraftBlockDto(3L, "BODY_PARAGRAPH", """
+                                各部门、各直属单位：
+                                为统筹推进近期重点工作，及时协调解决跨部门事项，现将有关事项通知如下：
+                                一、会议时间
+                                2026年6月3日（星期三）上午9:30。
+                                附件：会议议题征集表
+                                示例单位办公室
+                                2026年5月27日
+                                """.trim(), 30),
+                        new DraftBlockDto(4L, "SIGNATURE", "办公室", 50),
+                        new DraftBlockDto(5L, "DATE", "2026年5月30日", 60)
                 )
         );
     }

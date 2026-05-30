@@ -28,7 +28,11 @@ public class WordExportService {
         try {
             byte[] content = renderer.hasPlaceholders(templateBytes)
                     ? renderer.render(templateBytes, request.values(), request.formatting())
-                    : renderer.renderDraftSnapshot(request.values(), request.formatting());
+                    : renderer.renderReferenceDraft(
+                            templateBytes,
+                            request.values(),
+                            request.formatting(),
+                            request.templateProfile());
             exportRecordRepository.save(ExportRecord.success(request.templateName(), request.templateVersion(), fileName));
             return new WordExportResult(fileName, content);
         } catch (MissingTemplateValueException exception) {

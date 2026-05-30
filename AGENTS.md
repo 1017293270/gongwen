@@ -462,10 +462,11 @@ P8 基础质检当前约定：
 - 模板能力覆盖必须用 L0-L5 矩阵做内部 QA 管理，但普通管理员主界面应围绕“结构、原文、可编辑维度和预览效果”组织，不再把能力矩阵作为核心展示。
 - 首版必须优先覆盖公文关键维度：占位符、标题样式、正文样式、正文行距、正文首行缩进、段前段后、标题居中、落款右对齐、页边距摘要和复杂结构风险。
 - 页眉页脚、页码、多级编号、复杂表格、图片或印章锚点、未知 OOXML 结构首版可只读展示和风险提示，但不能静默忽略；后续是否开放编辑必须按矩阵升级。
-- P10B 当前切片已让 `TemplateProfileParser` 输出 `structures`，每个结构包含结构类型、原文片段、位置、来源和字体、字号、加粗、对齐、首行缩进、行距、段前段后等维度；模板解析弹窗主展示改为“结构与维度”，维度编辑保存到 `template_rule` 的 `STRUCTURE_FORMATTING_OVERRIDE` 规则。
+- P10B 当前切片已让 `TemplateProfileParser` 输出 `structures`，每个结构包含结构类型、原文片段、位置、来源和字体、字号、加粗、颜色、对齐、首行缩进、行距、段前段后等维度；模板解析弹窗主展示改为“结构与维度”，维度编辑保存到 `template_rule` 的 `STRUCTURE_FORMATTING_OVERRIDE` 规则。
 - effective formatting 现在是预览、基础质检和 `.docx` 导出的共享合同：后端会把 `TemplateProfile.structures` 默认格式和保存的 override 合并为标题、主送、正文、落款、日期等语义槽位的最终格式，避免三处各自推断。
 - 参考范文类模板的结构语义识别已补强：即使段落样式都叫 `GongwenBody`，解析和工作台派生层也要把标题后的首个冒号短句识别为主送，把 `附件：` 开头识别为附件，把右对齐落款和右对齐中文日期识别为落款/日期，不再把这些内容污染进正文节点。
 - 正文 effective formatting 不再盲取第一个 `BODY` 结构；当首个 body-like 段落实际是主送或未缩进段时，应优先选择带首行缩进的正文段作为正文格式样本，避免导出正文丢首行缩进和段落节奏。
+- 无占位符参考范文导出不再从空白 `XWPFDocument` 生成；`WordExportService` 会把 `TemplateProfile` 传给导出渲染器，保留原模板 DOCX 的 section、页边距、页脚和 styles 外壳，重建发文机关/文号/标题/主送/正文/附件/落款/日期等结构槽位；导出前会清洗旧草稿正文块里混入的主送、附件、落款和日期，避免重复输出。
 - 当前已稳定复现的关键规则是标题居中、正文首行缩进与段落间距、落款右对齐、日期右对齐；后续 richer style inheritance 和 unsupported OOXML 风险显式提示仍属于 P10B 增强项。
 - P10C 当前前端切片新增 `WorkbenchNode` 派生模型：工作台会从 `DraftDetail + TemplateProfile + formattingOverrides` 派生正文结构节点，正文小标题和正文内容在左栏目录、中间纸张和右栏选中上下文中分开呈现；底层仍兼容 `DraftBlock`，后续需要新增后端 `draft_node` 持久化、AI/质检 `nodeId` 绑定和导出复现。
 - 当前 T1/P10 底座已提供 `GET /api/templates`、`POST /api/templates`、`DELETE /api/templates/{templateId}`、`POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。

@@ -173,7 +173,8 @@ public class TemplateProfileParser {
                 positiveOrNull(paragraph.getIndentationFirstLine()),
                 spacingBetween(paragraph),
                 positiveOrNull(paragraph.getSpacingBefore()),
-                positiveOrNull(paragraph.getSpacingAfter())
+                positiveOrNull(paragraph.getSpacingAfter()),
+                run == null ? null : run.getColor()
         );
     }
 
