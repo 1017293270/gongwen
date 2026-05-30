@@ -64,10 +64,11 @@
 - P10D T14 导出消费结构节点后端：草稿 Word 导出会要求模板版本已有已发布结构映射，优先读取 `DraftNode` 正文并在缺失时回退旧 `DraftBlock`；导出格式按草稿节点覆盖 > 结构映射/模板覆盖 > 原 DOCX effective formatting 合并，导出记录新增结构 profile、映射 profile、格式和节点快照 JSONB 追溯字段。
 - P10D T15 工作台预览刷新与导出状态前端：右栏新增真实预览状态面板，覆盖当前、待刷新、生成中、失败和未选择模板；正文/格式/AI 采纳等修改会标记真实预览待刷新，刷新会调用模板版本 render-preview API；后端导出阻断消息继续在工作台导出状态和 Toast 中展示。
 - P10D T16 轻量 QA 与文档收口：新增 DOCX fixture 覆盖清单，动态样本覆盖占位符模板、样式模板、参考范文、手册/指南、复杂表格、页眉页脚和缺字体；focused 回归覆盖手册阻断、中文字体、节点 AI、草稿局部格式覆盖、导出追溯、工作台节点和预览刷新。
+- P10D T17 集成关闭：已核对工作区状态、迁移号 V1-V16、前后端 API 路由、focused 后端/前端验证和文档进度板；全量后端/前端测试与浏览器自动化因轻量测试方向和工具不可用留作后续人工/CI 验证。
 
 当前推荐下一阶段：
 
-- P10D DOCX 原貌预览与结构化工作台：T0-T16 已完成，按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 继续执行；下一步优先派集成 Agent 做 T17，核对最终 diff、迁移顺序、focused 验证结果和未跑全量/浏览器验证的风险记录。
+- P10D DOCX 原貌预览与结构化工作台：T0-T17 已完成。下一步优先做前端工作台拆分，把 `frontend/src/App.tsx` 中的 workbench/template/export 表面拆到 feature components，再继续 P11/P9 这类 UI-heavy 切片。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
 - P9 权限继续收口，补材料/导出文件下载鉴权、模板管理员细粒度授权、审计日志和权限不足 UI。
 - P10D 结构节点链路继续下沉：AI 和导出已开始消费 `DraftNode` / `nodeId`，后续重点是质检、样本回归和最终集成验证继续减少对兼容 `DraftBlock` 的依赖。
@@ -867,7 +868,7 @@
 
 ## 当前开发队列
 
-1. P10D DOCX 原貌预览与结构化工作台，专项计划：`docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`。
+1. 前端工作台拆分：把 `frontend/src/App.tsx` 中的 workbench/template/export 表面拆到 feature components，先降低后续 UI 迭代风险。
 2. P11 导出体验增强。
 3. P10B 结构维度配置持久化。
 4. P10 模板管理员后台后续增强：字段映射、启停、版本详情。
@@ -895,7 +896,7 @@ T0 已由集成 Agent 冻结接口契约；后续并行建议：
 - Agent P10D-D 后端映射：T6 已完成，负责结构映射保存/发布，使用冻结迁移 `V14`。
 - Agent P10D-E 前端模板：T5 已完成；后续执行 T7，负责映射编辑和发布。
 - Agent P10D-F 草稿/AI/格式/导出：T8-T15 已完成；后续只协助 QA/集成核对节点、格式、预览和导出状态合同。
-- Agent P10D-QA 文档：T16 已完成；后续由集成 Agent 执行 T17，负责最终验证、进度关闭和风险说明。
+- Agent P10D-QA 文档：T16/T17 已完成；后续转入普通迭代，优先安排前端拆分 Agent。
 - Agent A 后端 P11：读取或触发最新质检结果，`exportBlocked=true` 时阻断导出；补导出记录模板版本追溯和稳定错误 shape。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检、导出中、导出失败和成功下载状态。
 - Agent C P10B：把结构维度编辑落库，并让质检和导出复用同一套生效维度；不要再回到能力矩阵主展示。
