@@ -1,5 +1,6 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
@@ -7,6 +8,7 @@ import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -19,6 +21,7 @@ import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -28,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(TemplateController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class TemplateUploadControllerTest {
     @Autowired
     private MockMvc mockMvc;
@@ -50,8 +54,13 @@ class TemplateUploadControllerTest {
     @MockBean
     private TemplateRepository templateRepository;
 
+    @MockBean
+    private CurrentUserProvider currentUserProvider;
+
     @Test
     void uploadsTemplateVersion() throws Exception {
+        when(templateRepository.findById(eq(1L), isNull()))
+                .thenReturn(Optional.of(new TemplateSummary(1L, "notice", "NOTICE", "ACTIVE")));
         when(uploadService.upload(eq(1L), eq("notice.docx"), any(), any()))
                 .thenReturn(new TemplateUploadResponse(
                         9L,
@@ -142,6 +151,8 @@ class TemplateUploadControllerTest {
 
     @Test
     void normalizesTemplateErrors() throws Exception {
+        when(templateRepository.findById(eq(1L), isNull()))
+                .thenReturn(Optional.of(new TemplateSummary(1L, "notice", "NOTICE", "ACTIVE")));
         when(uploadService.upload(eq(1L), eq("bad.pdf"), any(), any()))
                 .thenThrow(new TemplateException("TEMPLATE_TYPE_NOT_ALLOWED", "Only .docx Word templates are supported"));
         MockMultipartFile file = new MockMultipartFile(

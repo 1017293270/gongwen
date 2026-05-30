@@ -8,7 +8,9 @@ import type {
   AiProviderSettingsUpdate,
   AiProviderStatus,
   ApiResponse,
+  AuthUser,
   CreateDocumentTypeRequest,
+  Department,
   DocumentType,
   DraftBlockUpdate,
   DraftDetail,
@@ -22,18 +24,25 @@ import type {
   TemplateUploadResult,
   TemplateVersionSummary,
   UpdateDocumentTypeRequest,
+  UserAdmin,
 } from './draftTypes';
 
 function apiBaseUrl() {
   return import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 }
 
+let csrfToken: string | null = null;
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...await csrfHeader(path, method),
+    ...init?.headers,
+  };
   const response = await fetch(`${apiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
+    credentials: 'include',
+    headers,
     ...init,
   });
   const payload = (await response.json()) as ApiResponse<T>;
@@ -44,7 +53,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestFormData<T>(path: string, formData: FormData): Promise<T> {
+  const headers = await csrfHeader(path, 'POST');
   const response = await fetch(`${apiBaseUrl()}${path}`, {
+    credentials: 'include',
+    headers,
     method: 'POST',
     body: formData,
   });
@@ -56,8 +68,11 @@ async function requestFormData<T>(path: string, formData: FormData): Promise<T> 
 }
 
 async function requestBlob(path: string, init?: RequestInit): Promise<{ blob: Blob; fileName: string }> {
+  const method = (init?.method ?? 'GET').toUpperCase();
   const response = await fetch(`${apiBaseUrl()}${path}`, {
+    credentials: 'include',
     headers: {
+      ...await csrfHeader(path, method),
       ...init?.headers,
     },
     ...init,
@@ -70,6 +85,23 @@ async function requestBlob(path: string, init?: RequestInit): Promise<{ blob: Bl
     blob: await response.blob(),
     fileName: parseFileName(response.headers.get('content-disposition')) ?? '公文导出.docx',
   };
+}
+
+async function csrfHeader(path: string, method: string): Promise<Record<string, string>> {
+  if (!['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) || path === '/api/auth/csrf') {
+    return {};
+  }
+  if (!csrfToken) {
+    const response = await fetch(`${apiBaseUrl()}/api/auth/csrf`, {
+      credentials: 'include',
+    });
+    const payload = (await response.json()) as ApiResponse<{ token: string }>;
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.message ?? 'CSRF 初始化失败');
+    }
+    csrfToken = payload.data.token;
+  }
+  return { 'X-XSRF-TOKEN': csrfToken };
 }
 
 function parseFileName(contentDisposition: string | null) {
@@ -85,6 +117,94 @@ function parseFileName(contentDisposition: string | null) {
 
 export function listDocumentTypes() {
   return requestJson<DocumentType[]>('/api/document-types');
+}
+
+export function getCurrentUser() {
+  return requestJson<AuthUser>('/api/auth/me');
+}
+
+export function login(username: string, password: string) {
+  return requestJson<AuthUser>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function logout() {
+  return requestJson<void>('/api/auth/logout', {
+    method: 'POST',
+  }).finally(() => {
+    csrfToken = null;
+  });
+}
+
+export function listDepartments() {
+  return requestJson<Department[]>('/api/departments');
+}
+
+export function createDepartment(request: { parentId: number | null; name: string; sortOrder: number }) {
+  return requestJson<Department>('/api/departments', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateDepartment(
+  id: number,
+  request: { parentId: number | null; name: string; sortOrder: number },
+) {
+  return requestJson<Department>(`/api/departments/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteDepartment(id: number) {
+  return requestJson<void>(`/api/departments/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export function listUsers() {
+  return requestJson<UserAdmin[]>('/api/users');
+}
+
+export function createUser(request: {
+  username: string;
+  displayName: string;
+  password: string;
+  departmentId: number | null;
+  roles: string[];
+}) {
+  return requestJson<UserAdmin>('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateUser(id: number, request: {
+  displayName: string;
+  departmentId: number | null;
+  roles: string[];
+  status: string;
+}) {
+  return requestJson<UserAdmin>(`/api/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  });
+}
+
+export function resetUserPassword(id: number, password: string) {
+  return requestJson<void>(`/api/users/${id}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function disableUser(id: number) {
+  return requestJson<void>(`/api/users/${id}`, {
+    method: 'DELETE',
+  });
 }
 
 export function createDocumentType(request: CreateDocumentTypeRequest) {

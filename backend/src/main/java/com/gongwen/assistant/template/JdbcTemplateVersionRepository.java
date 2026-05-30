@@ -1,5 +1,6 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.security.CurrentUser;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -64,6 +65,11 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
 
     @Override
     public List<TemplateVersionSummary> findReadyVersions(String documentTypeCode) {
+        return findReadyVersions(documentTypeCode, null);
+    }
+
+    @Override
+    public List<TemplateVersionSummary> findReadyVersions(String documentTypeCode, CurrentUser currentUser) {
         String safeDocumentTypeCode = documentTypeCode == null ? "" : documentTypeCode.strip();
         return jdbcTemplate.query("""
                         select v.id as template_version_id,
@@ -76,8 +82,9 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
                         join document_template t on t.id = v.template_id
                         where v.parse_status = 'READY'
                           and (? = '' or t.document_type_code is null or t.document_type_code = ?)
+                          %s
                         order by t.template_name asc, v.version_no desc
-                        """,
+                        """.formatted(visibilitySql(currentUser)),
                 (rs, rowNum) -> new TemplateVersionSummary(
                         rs.getLong("template_version_id"),
                         rs.getLong("template_id"),
@@ -86,8 +93,7 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
                         rs.getString("document_type_code"),
                         rs.getString("original_file_name")
                 ),
-                safeDocumentTypeCode,
-                safeDocumentTypeCode);
+                findReadyArgs(safeDocumentTypeCode, currentUser));
     }
 
     @Override
@@ -129,5 +135,19 @@ public class JdbcTemplateVersionRepository implements TemplateVersionRepository 
                 rs.getString("parse_error_message"),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant()
         );
+    }
+
+    private String visibilitySql(CurrentUser currentUser) {
+        if (currentUser == null || currentUser.systemAdmin()) {
+            return "";
+        }
+        return "and (t.created_by is null or t.created_by = ?)";
+    }
+
+    private Object[] findReadyArgs(String documentTypeCode, CurrentUser currentUser) {
+        if (currentUser == null || currentUser.systemAdmin()) {
+            return new Object[]{documentTypeCode, documentTypeCode};
+        }
+        return new Object[]{documentTypeCode, documentTypeCode, currentUser.id()};
     }
 }

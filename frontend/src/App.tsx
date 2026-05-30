@@ -2,50 +2,72 @@ import {
   AlertCircle,
   Archive,
   ArrowLeft,
+  Building2,
   Check,
   CheckCircle2,
+  ChevronRight,
   ClipboardList,
   Eye,
+  FileCog,
   FileDown,
   FileText,
   FolderOpen,
   LayoutDashboard,
   LibraryBig,
+  LogOut,
+  KeyRound,
   Pencil,
   Plus,
   Save,
+  Search,
   Settings,
   Sparkles,
   Trash2,
   Upload,
+  Users,
   X,
 } from 'lucide-react';
-import { ChangeEvent, CSSProperties, MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, CSSProperties, FormEvent, MutableRefObject, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  createDepartment,
   createDraft,
+  createDocumentType,
   createTemplate,
+  createUser,
+  deleteDepartment,
   deleteDraft,
+  deleteDocumentType,
   deleteTemplate,
+  disableUser,
   exportDraftWord,
   getAiProviderSettings,
+  getCurrentUser,
   getTemplateProfile,
   getTemplateStructureFormatting,
   generateDraftOutline,
   generateDraftParagraph,
   generateLocalOperation,
   getDraft,
+  listDepartments,
   listDocumentTypes,
   listDrafts,
   listDraftMaterials,
   listTemplates,
   listTemplateVersions,
+  listUsers,
+  login,
+  logout,
+  resetUserPassword,
   runQualityCheck,
   saveDraftBlocks,
   testAiProviderConnection,
   updateAiProviderSettings,
+  updateDepartment,
+  updateDocumentType,
   updateDraftTitle,
   updateDraftTemplateVersion,
   updateTemplateStructureFormatting,
+  updateUser,
   uploadDraftMaterial,
   uploadTemplateVersion,
 } from './api';
@@ -65,6 +87,8 @@ import type {
   AiOutline,
   AiProviderSettings,
   AiProviderStatus,
+  AuthUser,
+  Department,
   DocumentType,
   DraftBlock,
   DraftBlockUpdate,
@@ -79,6 +103,7 @@ import type {
   TemplateSummary,
   TemplateUploadResult,
   TemplateVersionSummary,
+  UserAdmin,
   WorkbenchNode,
 } from './draftTypes';
 import { estimateAiProgress } from './progress';
@@ -111,10 +136,21 @@ type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
 type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
 type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
-type AppView = 'overview' | 'workbench' | 'drafts' | 'templates' | 'materials' | 'exports' | 'ai-tasks' | 'settings';
+type AppView =
+  | 'overview'
+  | 'workbench'
+  | 'drafts'
+  | 'templates'
+  | 'document-types'
+  | 'materials'
+  | 'exports'
+  | 'ai-tasks'
+  | 'settings';
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
 type DraftListStatus = 'idle' | 'loading' | 'creating' | 'error';
+type AdminPageStatus = 'idle' | 'loading' | 'saving' | 'error';
 type DraftListPageMode = 'folders' | 'list';
+type SettingsTab = 'ai' | 'accounts' | 'departments';
 type AiDialog = 'outline' | 'quality' | 'local' | null;
 type TemplateStructureOverride = Partial<TemplateStructureFormatting>;
 type TemplateStructureOverrideMap = TemplateStructureFormattingOverrides;
@@ -168,21 +204,75 @@ const NAV_ITEMS: Array<{
   { view: 'workbench', label: '工作台', description: '起草与 AI 生成', icon: FileText },
   { view: 'drafts', label: '草稿列表', description: '待补列表接口', icon: FolderOpen },
   { view: 'templates', label: '模板管理', description: 'P10 管理后台', icon: LibraryBig },
+  { view: 'document-types', label: '文种管理', description: '文种 CRUD', icon: FileCog },
   { view: 'materials', label: '材料库', description: '材料归集入口', icon: Archive },
   { view: 'exports', label: '导出记录', description: 'Word 导出追踪', icon: FileDown },
   { view: 'ai-tasks', label: 'AI 任务', description: '生成与质检队列', icon: Sparkles },
-  { view: 'settings', label: '系统设置', description: '权限与配置预留', icon: Settings },
+  { view: 'settings', label: '系统设置', description: 'AI、账号与组织', icon: Settings },
 ];
 
 export function App() {
   return (
     <ToastProvider>
-      <Workbench />
+      <AuthenticatedApp />
     </ToastProvider>
   );
 }
 
-function Workbench() {
+function AuthenticatedApp() {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authStatus, setAuthStatus] = useState<'loading' | 'login' | 'ready'>('loading');
+  const [authMessage, setAuthMessage] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentUser()
+      .then((user) => {
+        if (cancelled) {
+          return;
+        }
+        setCurrentUser(user);
+        setAuthStatus('ready');
+        setAuthMessage('');
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setCurrentUser(null);
+        setAuthStatus('login');
+        setAuthMessage('请先登录后继续使用公文工作台。');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleLogin(username: string, password: string) {
+    const user = await login(username, password);
+    setCurrentUser(user);
+    setAuthStatus('ready');
+    setAuthMessage('');
+  }
+
+  function handleLogoutComplete() {
+    setCurrentUser(null);
+    setAuthStatus('login');
+    setAuthMessage('已退出登录。');
+  }
+
+  if (authStatus === 'loading') {
+    return <AuthLoadingPage />;
+  }
+
+  if (authStatus === 'login' || !currentUser) {
+    return <LoginPage message={authMessage} onLogin={handleLogin} />;
+  }
+
+  return <Workbench currentUser={currentUser} onLogout={handleLogoutComplete} />;
+}
+
+function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout: () => void }) {
   const { showToast } = useToast();
   const [activeView, setActiveView] = useState<AppView>('overview');
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
@@ -554,6 +644,7 @@ function Workbench() {
       ?? bodyBlocks.find((block) => block.sortOrder === selectedBodyNode.sortOrder)
       ?? null
     : null;
+  const visibleNavItems = useMemo(() => NAV_ITEMS.filter((item) => canAccessView(currentUser, item.view)), [currentUser]);
   const titlePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'TITLE');
   const recipientPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'RECIPIENT');
   const bodyPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'BODY');
@@ -1219,7 +1310,7 @@ function Workbench() {
             </div>
           </div>
           <nav className="sidebar-nav" aria-label="主导航">
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -1258,6 +1349,23 @@ function Workbench() {
             </div>
           </div>
           <div className="header-actions">
+            <div className="user-chip" aria-label="当前账号">
+              <span className="user-chip-name">{currentUser.displayName}</span>
+              <span className="user-chip-meta">
+                {currentUser.departmentName ?? '未分配部门'} · {roleLabel(currentUser.roles[0])}
+              </span>
+            </div>
+            <Button
+              icon={<LogOut aria-hidden="true" />}
+              onClick={() => {
+                void logout()
+                  .catch(() => undefined)
+                  .finally(onLogout);
+              }}
+              variant="ghost"
+            >
+              退出
+            </Button>
             {activeView === 'overview' && (
               <Button icon={<FileText aria-hidden="true" />} onClick={() => setActiveView('workbench')}>
                 进入工作台
@@ -1688,8 +1796,9 @@ function Workbench() {
 
         {activeView !== 'overview' && activeView !== 'workbench' && (
           activeView === 'settings' ? (
-            <AiSettingsPage
+            <SystemSettingsPage
               apiKey={aiSettingsApiKey}
+              currentUser={currentUser}
               message={aiSettingsMessage}
               onApiKeyChange={setAiSettingsApiKey}
               onSave={() => void handleSaveAiSettings()}
@@ -1744,6 +1853,11 @@ function Workbench() {
                   setTemplateVersions(await listTemplateVersions(draft.documentTypeCode));
                 }
               }}
+            />
+          ) : activeView === 'document-types' ? (
+            <DocumentTypeManagementPage
+              documentTypes={documentTypes}
+              onDocumentTypesChange={setDocumentTypes}
             />
           ) : (
             <PlaceholderPage view={activeView} />
@@ -2741,6 +2855,1478 @@ function TemplateStructureEditor({
   );
 }
 
+function AuthLoadingPage() {
+  return (
+    <main className="auth-page" aria-busy="true" aria-label="登录状态检查">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <div className="sidebar-mark">文</div>
+          <div>
+            <h1>公文助手</h1>
+            <p>正在恢复登录状态</p>
+          </div>
+        </div>
+        <StatusMessage title="正在连接账号服务" tone="info" />
+      </section>
+    </main>
+  );
+}
+
+function LoginPage({ message, onLogin }: { message: string; onLogin: (username: string, password: string) => Promise<void> }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [error, setError] = useState('');
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!username.trim() || !password) {
+      setStatus('error');
+      setError('请输入账号和密码。');
+      return;
+    }
+    try {
+      setStatus('loading');
+      setError('');
+      await onLogin(username.trim(), password);
+      setPassword('');
+      setStatus('idle');
+    } catch (loginError) {
+      setStatus('error');
+      setError(loginError instanceof Error ? loginError.message : '登录失败，请检查账号密码。');
+    }
+  }
+
+  return (
+    <main className="auth-page" aria-label="登录">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <div className="sidebar-mark">文</div>
+          <div>
+            <h1>公文助手</h1>
+            <p>账号、部门、草稿和模板统一归属到当前登录身份。</p>
+          </div>
+        </div>
+        {message && <StatusMessage title={message} tone="info" />}
+        {error && <StatusMessage title={error} tone="warning" />}
+        <form className="auth-form" onSubmit={(event) => void handleSubmit(event)}>
+          <TextField
+            autoComplete="username"
+            disabled={status === 'loading'}
+            label="账号"
+            onChange={(event) => setUsername(event.target.value)}
+            required
+            value={username}
+          />
+          <TextField
+            autoComplete="current-password"
+            disabled={status === 'loading'}
+            label="密码"
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            type="password"
+            value={password}
+          />
+          <Button isLoading={status === 'loading'} loadingLabel="正在登录" type="submit">
+            登录
+          </Button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function SystemSettingsPage({
+  apiKey,
+  currentUser,
+  message,
+  onApiKeyChange,
+  onSave,
+  onSettingsChange,
+  onTest,
+  providerStatus,
+  settings,
+  status,
+}: {
+  apiKey: string;
+  currentUser: AuthUser;
+  message: string;
+  onApiKeyChange: (value: string) => void;
+  onSave: () => void;
+  onSettingsChange: (patch: Partial<AiProviderSettings>) => void;
+  onTest: () => void;
+  providerStatus: AiProviderStatus | null;
+  settings: AiProviderSettings;
+  status: AiSettingsStatus;
+}) {
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>(
+    currentUser.roles.includes('SYSTEM_ADMIN') ? 'accounts' : 'ai',
+  );
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departmentStatus, setDepartmentStatus] = useState<AdminPageStatus>('loading');
+  const [departmentMessage, setDepartmentMessage] = useState('');
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<number | null>(null);
+  const canManageOrganization = currentUser.roles.includes('SYSTEM_ADMIN');
+  const selectedDepartment = useMemo(
+    () => (selectedDepartmentId ? findDepartmentById(departments, selectedDepartmentId) : null),
+    [departments, selectedDepartmentId],
+  );
+  const visibleTabs = useMemo(() => {
+    const tabs: Array<{ id: SettingsTab; label: string }> = [{ id: 'ai', label: 'AI 配置' }];
+    if (canManageOrganization) {
+      tabs.push({ id: 'accounts', label: '人员管理' }, { id: 'departments', label: '部门管理' });
+    }
+    return tabs;
+  }, [canManageOrganization]);
+
+  useEffect(() => {
+    if (!canManageOrganization) {
+      return;
+    }
+    void refreshSystemDepartments();
+  }, [canManageOrganization]);
+
+  useEffect(() => {
+    if (!canManageOrganization && activeSettingsTab !== 'ai') {
+      setActiveSettingsTab('ai');
+    }
+  }, [activeSettingsTab, canManageOrganization]);
+
+  useEffect(() => {
+    if (selectedDepartmentId && !findDepartmentById(departments, selectedDepartmentId)) {
+      setSelectedDepartmentId(null);
+    }
+  }, [departments, selectedDepartmentId]);
+
+  async function refreshSystemDepartments() {
+    try {
+      setDepartmentStatus('loading');
+      setDepartmentMessage('正在加载部门树');
+      setDepartments(await listDepartments());
+      setDepartmentStatus('idle');
+      setDepartmentMessage('');
+    } catch (error) {
+      setDepartmentStatus('error');
+      setDepartmentMessage(error instanceof Error ? error.message : '部门加载失败');
+    }
+  }
+
+  return (
+    <main className="settings-page system-settings-page" aria-label="系统设置">
+      <section className="settings-panel system-settings-panel">
+        {canManageOrganization && departmentMessage && (
+          <StatusMessage title={departmentMessage} tone={departmentStatus === 'error' ? 'warning' : 'success'} />
+        )}
+
+        <div className={`system-settings-workspace ${canManageOrganization ? '' : 'single-pane'}`}>
+          {canManageOrganization && (
+            <DepartmentTreePane
+              departments={departments}
+              onSelectDepartment={setSelectedDepartmentId}
+              selectedDepartmentId={selectedDepartmentId}
+              status={departmentStatus}
+            />
+          )}
+
+          <section className="system-settings-main" aria-label="系统设置详情">
+            <div className="system-settings-tabs" role="tablist" aria-label="系统设置分类">
+              {visibleTabs.map((tab) => (
+                <button
+                  aria-selected={activeSettingsTab === tab.id}
+                  className={`system-settings-tab ${activeSettingsTab === tab.id ? 'active' : ''}`}
+                  key={tab.id}
+                  onClick={() => setActiveSettingsTab(tab.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="system-settings-content">
+              {activeSettingsTab === 'ai' ? (
+                <AiSettingsPage
+                  apiKey={apiKey}
+                  embedded
+                  message={message}
+                  onApiKeyChange={onApiKeyChange}
+                  onSave={onSave}
+                  onSettingsChange={onSettingsChange}
+                  onTest={onTest}
+                  providerStatus={providerStatus}
+                  settings={settings}
+                  status={status}
+                />
+              ) : activeSettingsTab === 'accounts' ? (
+                <AccountManagementPage
+                  embedded
+                  selectedDepartment={selectedDepartment}
+                  selectedDepartmentId={selectedDepartmentId}
+                  sharedDepartments={departments}
+                />
+              ) : (
+                <DepartmentManagementPage
+                  embedded
+                  onDepartmentsChange={setDepartments}
+                  onSelectedDepartmentChange={setSelectedDepartmentId}
+                  selectedDepartmentId={selectedDepartmentId}
+                  sharedDepartmentStatus={departmentStatus}
+                  sharedDepartments={departments}
+                />
+              )}
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+type ManagementTableColumn<T> = {
+  key: string;
+  header: string;
+  width: string;
+  align?: 'start' | 'center' | 'end';
+  render: (item: T) => ReactNode;
+};
+
+function ManagementTable<T>({
+  ariaLabel,
+  columns,
+  emptyDescription,
+  emptyIcon,
+  emptyTitle,
+  getKey,
+  items,
+  minWidth = '720px',
+  skeletonRows = 2,
+  status,
+}: {
+  ariaLabel: string;
+  columns: Array<ManagementTableColumn<T>>;
+  emptyDescription: string;
+  emptyIcon: ReactNode;
+  emptyTitle: string;
+  getKey: (item: T) => string | number;
+  items: T[];
+  minWidth?: string;
+  skeletonRows?: number;
+  status: AdminPageStatus;
+}) {
+  const tableStyle = {
+    '--management-table-columns': columns.map((column) => column.width).join(' '),
+    '--management-table-min-width': minWidth,
+  } as CSSProperties;
+
+  return (
+    <div className="management-table" role="table" aria-label={ariaLabel} style={tableStyle}>
+      <div className="management-table-row management-table-head" role="row">
+        {columns.map((column) => (
+          <span className="management-table-cell" data-align={column.align ?? 'start'} key={column.key} role="columnheader">
+            {column.header}
+          </span>
+        ))}
+      </div>
+      {status === 'loading' && Array.from({ length: skeletonRows }).map((_, index) => (
+        <div className="management-table-row management-table-skeleton" key={`skeleton-${index}`} role="row">
+          {columns.map((column) => (
+            <span className="management-table-cell" data-align={column.align ?? 'start'} key={column.key} role="cell">
+              <span className="management-table-skeleton-bar" />
+            </span>
+          ))}
+        </div>
+      ))}
+      {status !== 'loading' && items.length === 0 && (
+        <div className="template-empty-panel management-table-empty">
+          {emptyIcon}
+          <div>
+            <strong>{emptyTitle}</strong>
+            <span>{emptyDescription}</span>
+          </div>
+        </div>
+      )}
+      {status !== 'loading' && items.map((item) => (
+        <article className="management-table-row" key={getKey(item)} role="row">
+          {columns.map((column) => (
+            <div className="management-table-cell" data-align={column.align ?? 'start'} key={column.key} role="cell">
+              {column.render(item)}
+            </div>
+          ))}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DepartmentTreePane({
+  departments,
+  onSelectDepartment,
+  selectedDepartmentId,
+  status,
+}: {
+  departments: Department[];
+  onSelectDepartment: (departmentId: number | null) => void;
+  selectedDepartmentId: number | null;
+  status: AdminPageStatus;
+}) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedDepartmentIds, setExpandedDepartmentIds] = useState<Set<number>>(() => new Set());
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+  const filteredDepartments = useMemo(
+    () => filterDepartmentTree(departments, searchTerm),
+    [departments, searchTerm],
+  );
+  const isSearching = searchTerm.trim().length > 0;
+
+  useEffect(() => {
+    if (!selectedDepartmentId) {
+      return;
+    }
+    const selectedPath = getDepartmentPath(departments, selectedDepartmentId);
+    if (selectedPath.length < 2) {
+      return;
+    }
+    setExpandedDepartmentIds((current) => {
+      const next = new Set(current);
+      selectedPath.slice(0, -1).forEach((department) => next.add(department.id));
+      return next;
+    });
+  }, [departments, selectedDepartmentId]);
+
+  function toggleDepartment(departmentId: number) {
+    setExpandedDepartmentIds((current) => {
+      const next = new Set(current);
+      if (next.has(departmentId)) {
+        next.delete(departmentId);
+      } else {
+        next.add(departmentId);
+      }
+      return next;
+    });
+  }
+
+  function renderDepartmentTree(nodes: Department[], depth = 0) {
+    return sortDepartments(nodes).map((department) => {
+      const hasChildren = Boolean(department.children?.length);
+      const isExpanded = isSearching || expandedDepartmentIds.has(department.id);
+      return (
+        <div className="department-tree-branch" key={department.id}>
+          <div
+            className={`department-tree-node ${selectedDepartmentId === department.id ? 'active' : ''}`}
+            style={{ '--department-tree-depth': depth } as CSSProperties}
+          >
+            {hasChildren ? (
+              <button
+                aria-expanded={isExpanded}
+                aria-label={`${isExpanded ? '收起' : '展开'}部门：${department.name}`}
+                className="department-tree-toggle"
+                onClick={() => toggleDepartment(department.id)}
+                type="button"
+              >
+                <ChevronRight aria-hidden="true" className={isExpanded ? 'expanded' : ''} />
+              </button>
+            ) : (
+              <span className="department-tree-spacer" aria-hidden="true" />
+            )}
+            <button
+              aria-current={selectedDepartmentId === department.id ? 'true' : undefined}
+              className="department-tree-select"
+              onClick={() => onSelectDepartment(department.id)}
+              type="button"
+            >
+              <Building2 aria-hidden="true" />
+              <span className="department-tree-copy">
+                <span className="department-tree-name">{department.name}</span>
+              </span>
+            </button>
+            <span className="department-tree-count">{countDepartmentDescendants(department)}</span>
+          </div>
+          {hasChildren && isExpanded ? (
+            <div className="department-tree-children" role="group">
+              {renderDepartmentTree(department.children ?? [], depth + 1)}
+            </div>
+          ) : null}
+        </div>
+      );
+    });
+  }
+
+  return (
+    <aside className="department-tree-pane" aria-label="部门树">
+      <div className="department-tree-header">
+        <div>
+          <strong>部门列表</strong>
+          <span>{status === 'loading' ? '加载中' : `${flatDepartments.length} 个节点`}</span>
+        </div>
+      </div>
+      <label className="department-tree-search">
+        <Search aria-hidden="true" />
+        <span className="ui-visually-hidden">搜索部门</span>
+        <input
+          aria-label="搜索部门"
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="搜索"
+          type="search"
+          value={searchTerm}
+        />
+      </label>
+      {status === 'loading' ? (
+        <div className="department-tree-loading" aria-live="polite">
+          <div className="department-tree-node skeleton-row" />
+          <div className="department-tree-node skeleton-row" />
+          <div className="department-tree-node skeleton-row" />
+        </div>
+      ) : (
+        <>
+          <div
+            className={`department-tree-node department-tree-root ${selectedDepartmentId === null ? 'active' : ''}`}
+            style={{ '--department-tree-depth': 0 } as CSSProperties}
+          >
+            <span className="department-tree-spacer" aria-hidden="true" />
+            <button
+              aria-current={selectedDepartmentId === null ? 'true' : undefined}
+              className="department-tree-select"
+              onClick={() => onSelectDepartment(null)}
+              type="button"
+            >
+              <Building2 aria-hidden="true" />
+              <span className="department-tree-copy">
+                <span className="department-tree-name">全部部门</span>
+              </span>
+            </button>
+            <span className="department-tree-count">{flatDepartments.length}</span>
+          </div>
+          {filteredDepartments.length === 0 ? (
+            <div className="template-empty-panel department-tree-empty">
+              <Building2 aria-hidden="true" />
+              <div>
+                <strong>{departments.length === 0 ? '暂无部门' : '无匹配部门'}</strong>
+                <span>{departments.length === 0 ? '先创建根级部门，再为账号分配部门。' : '换一个关键词再试。'}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="department-tree-list">{renderDepartmentTree(filteredDepartments)}</div>
+          )}
+        </>
+      )}
+    </aside>
+  );
+}
+
+function DepartmentManagementPage({
+  embedded = false,
+  onDepartmentsChange,
+  onSelectedDepartmentChange,
+  selectedDepartmentId: controlledSelectedDepartmentId,
+  sharedDepartmentStatus,
+  sharedDepartments,
+}: {
+  embedded?: boolean;
+  onDepartmentsChange?: (departments: Department[]) => void;
+  onSelectedDepartmentChange?: (departmentId: number | null) => void;
+  selectedDepartmentId?: number | null;
+  sharedDepartmentStatus?: AdminPageStatus;
+  sharedDepartments?: Department[];
+} = {}) {
+  const { showToast } = useToast();
+  const [localDepartments, setLocalDepartments] = useState<Department[]>([]);
+  const [status, setStatus] = useState<AdminPageStatus>(sharedDepartments ? 'idle' : 'loading');
+  const [message, setMessage] = useState('');
+  const [form, setForm] = useState({ parentId: '', name: '', sortOrder: '10' });
+  const [localSelectedDepartmentId, setLocalSelectedDepartmentId] = useState<number | null>(null);
+  const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
+  const [departmentDialogOpen, setDepartmentDialogOpen] = useState(false);
+  const [departmentToDelete, setDepartmentToDelete] = useState<Department | null>(null);
+  const departments = sharedDepartments ?? localDepartments;
+  const selectedDepartmentId = controlledSelectedDepartmentId !== undefined ? controlledSelectedDepartmentId : localSelectedDepartmentId;
+  const displayStatus = sharedDepartmentStatus === 'loading' ? 'loading' : status;
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+  const selectedDepartment = useMemo(
+    () => (selectedDepartmentId ? findDepartmentById(departments, selectedDepartmentId) : null),
+    [departments, selectedDepartmentId],
+  );
+  const selectedDepartmentPath = useMemo(
+    () => (selectedDepartmentId ? getDepartmentPath(departments, selectedDepartmentId) : []),
+    [departments, selectedDepartmentId],
+  );
+  const visibleDepartments = useMemo(
+    () => sortDepartments(selectedDepartment ? selectedDepartment.children ?? [] : departments),
+    [departments, selectedDepartment],
+  );
+  const parentOptions = useMemo(
+    () => flatDepartments.filter(({ department }) => !editingDepartment || !isDepartmentInSubtree(editingDepartment, department.id)),
+    [editingDepartment, flatDepartments],
+  );
+
+  useEffect(() => {
+    if (!sharedDepartments) {
+      void refreshDepartments();
+    }
+  }, [sharedDepartments]);
+
+  useEffect(() => {
+    if (selectedDepartmentId && !findDepartmentById(departments, selectedDepartmentId)) {
+      selectDepartment(null);
+    }
+  }, [departments, selectedDepartmentId]);
+
+  useEffect(() => {
+    if (!editingDepartment) {
+      setForm((current) => ({
+        ...current,
+        parentId: selectedDepartmentId ? String(selectedDepartmentId) : '',
+      }));
+    }
+  }, [editingDepartment, selectedDepartmentId]);
+
+  function selectDepartment(departmentId: number | null) {
+    if (controlledSelectedDepartmentId !== undefined) {
+      onSelectedDepartmentChange?.(departmentId);
+    } else {
+      setLocalSelectedDepartmentId(departmentId);
+    }
+  }
+
+  function updateDepartmentTree(nextDepartments: Department[]) {
+    if (sharedDepartments) {
+      onDepartmentsChange?.(nextDepartments);
+    } else {
+      setLocalDepartments(nextDepartments);
+    }
+  }
+
+  async function refreshDepartments() {
+    try {
+      setStatus('loading');
+      setMessage('正在加载部门树');
+      updateDepartmentTree(await listDepartments());
+      setStatus('idle');
+      setMessage('');
+    } catch (error) {
+      setStatus('error');
+      setMessage(error instanceof Error ? error.message : '部门加载失败');
+    }
+  }
+
+  function startCreateDepartment() {
+    setEditingDepartment(null);
+    setForm({
+      parentId: selectedDepartmentId ? String(selectedDepartmentId) : '',
+      name: '',
+      sortOrder: '10',
+    });
+    setDepartmentDialogOpen(true);
+  }
+
+  function startEditDepartment(department: Department) {
+    setEditingDepartment(department);
+    setForm({
+      parentId: department.parentId ? String(department.parentId) : '',
+      name: department.name,
+      sortOrder: String(department.sortOrder),
+    });
+    setDepartmentDialogOpen(true);
+  }
+
+  function resetDepartmentForm() {
+    setEditingDepartment(null);
+    setForm({ parentId: selectedDepartmentId ? String(selectedDepartmentId) : '', name: '', sortOrder: '10' });
+    setDepartmentDialogOpen(false);
+  }
+
+  async function handleSaveDepartment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.name.trim()) {
+      setStatus('error');
+      setMessage('请填写部门名称。');
+      return;
+    }
+    try {
+      setStatus('saving');
+      const payload = {
+        parentId: form.parentId ? Number(form.parentId) : null,
+        name: form.name.trim(),
+        sortOrder: Number(form.sortOrder || 0),
+      };
+      if (editingDepartment) {
+        await updateDepartment(editingDepartment.id, payload);
+      } else {
+        await createDepartment(payload);
+      }
+      updateDepartmentTree(await listDepartments());
+      resetDepartmentForm();
+      setStatus('idle');
+      setMessage(editingDepartment ? '部门已更新' : '部门已创建');
+      showToast({ title: editingDepartment ? '部门已更新' : '部门已创建', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '部门保存失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  async function handleDeleteDepartment() {
+    if (!departmentToDelete) {
+      return;
+    }
+    try {
+      setStatus('saving');
+      await deleteDepartment(departmentToDelete.id);
+      updateDepartmentTree(await listDepartments());
+      if (selectedDepartmentId === departmentToDelete.id) {
+        selectDepartment(departmentToDelete.parentId ?? null);
+      }
+      setDepartmentToDelete(null);
+      setStatus('idle');
+      setMessage('部门已停用');
+      showToast({ title: '部门已停用', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '部门停用失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  const departmentColumns: Array<ManagementTableColumn<Department>> = [
+    {
+      key: 'department',
+      header: '部门',
+      width: 'minmax(220px, 1.4fr)',
+      render: (department) => (
+        <button className="management-table-primary" onClick={() => selectDepartment(department.id)} type="button">
+          <Building2 aria-hidden="true" />
+          <span>{department.name}</span>
+        </button>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      width: 'minmax(92px, 0.5fr)',
+      render: (department) => <span className="management-table-text">{department.status}</span>,
+    },
+    {
+      key: 'children',
+      header: '下级',
+      width: 'minmax(72px, 0.4fr)',
+      align: 'center',
+      render: (department) => <span className="management-table-text">{countDepartmentDescendants(department)}</span>,
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      width: 'minmax(112px, max-content)',
+      align: 'end',
+      render: (department) => (
+        <div className="management-table-actions">
+          <Button
+            aria-label={`编辑部门：${department.name}`}
+            icon={<Pencil aria-hidden="true" />}
+            iconOnly
+            onClick={() => startEditDepartment(department)}
+            title="编辑部门"
+            variant="secondary"
+          >
+            编辑
+          </Button>
+          <Button
+            aria-label={`停用部门：${department.name}`}
+            icon={<Trash2 aria-hidden="true" />}
+            iconOnly
+            onClick={() => setDepartmentToDelete(department)}
+            title="停用部门"
+            variant="danger"
+          >
+            停用
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  const departmentHeader = (
+    <div className="settings-header">
+      <div>
+        <div className="eyebrow">Organization</div>
+        <h2>部门管理</h2>
+        <p>维护树级部门结构，账号、草稿、模板和文种会挂到对应部门边界下。</p>
+      </div>
+      <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+        {displayStatus === 'loading' ? '加载中' : `${flatDepartments.length} 个部门`}
+      </span>
+    </div>
+  );
+
+  const departmentDetail = (
+    <div className="department-detail-pane">
+      <div className="department-detail-header">
+        <div>
+          <div className="eyebrow">Selected Branch</div>
+          <h3>{selectedDepartment?.name ?? '全部部门'}</h3>
+          <p>
+            {selectedDepartmentPath.length > 0
+              ? selectedDepartmentPath.map((department) => department.name).join(' / ')
+              : '根级部门视图'}
+          </p>
+        </div>
+      </div>
+
+      <div className="management-list-toolbar">
+        <div>
+          <strong>{selectedDepartment ? '下级部门' : '根级部门'}</strong>
+          <span>{selectedDepartment ? `维护“${selectedDepartment.name}”的直属下级部门。` : '维护组织树的根级部门。'}</span>
+        </div>
+        <Button disabled={status === 'saving'} icon={<Plus aria-hidden="true" />} onClick={startCreateDepartment} variant="secondary">
+          新增部门
+        </Button>
+      </div>
+
+      <ManagementTable
+        ariaLabel={selectedDepartment ? `${selectedDepartment.name}下级部门` : '根级部门'}
+        columns={departmentColumns}
+        emptyDescription={selectedDepartment ? '可以直接新增该部门的下级节点。' : '先创建根级部门，再继续补充组织树。'}
+        emptyIcon={<Building2 aria-hidden="true" />}
+        emptyTitle={selectedDepartment ? '暂无下级部门' : '暂无根级部门'}
+        getKey={(department) => department.id}
+        items={visibleDepartments}
+        minWidth="640px"
+        status={displayStatus}
+      />
+    </div>
+  );
+
+  return (
+    <>
+      {embedded ? (
+        <section className="settings-tab-content department-management-panel" aria-busy={displayStatus === 'loading' || status === 'saving'} aria-label="部门管理">
+          {departmentHeader}
+          {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />}
+          {departmentDetail}
+        </section>
+      ) : (
+        <main className="settings-page admin-page" aria-busy={displayStatus === 'loading' || status === 'saving'} aria-label="部门管理">
+          <section className="settings-panel admin-panel department-management-panel">
+            {departmentHeader}
+            {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />}
+            <div className="department-layout">
+              <DepartmentTreePane
+                departments={departments}
+                onSelectDepartment={selectDepartment}
+                selectedDepartmentId={selectedDepartmentId}
+                status={displayStatus}
+              />
+              {departmentDetail}
+            </div>
+          </section>
+        </main>
+      )}
+      <ConfirmDialog
+        cancelLabel="取消"
+        confirmLabel="停用部门"
+        description={departmentToDelete ? `将停用“${departmentToDelete.name}”。若存在子部门或账号，后端会阻断本次操作。` : undefined}
+        isConfirming={status === 'saving'}
+        onCancel={() => setDepartmentToDelete(null)}
+        onConfirm={() => void handleDeleteDepartment()}
+        open={Boolean(departmentToDelete)}
+        title="停用部门？"
+      />
+      <Dialog
+        actions={(
+          <>
+            <Button disabled={status === 'saving'} onClick={resetDepartmentForm} variant="secondary">
+              取消
+            </Button>
+            <Button
+              form="department-management-form"
+              icon={<Save aria-hidden="true" />}
+              isLoading={status === 'saving'}
+              loadingLabel="正在保存"
+              type="submit"
+            >
+              {editingDepartment ? '保存部门' : '创建部门'}
+            </Button>
+          </>
+        )}
+        description={editingDepartment ? `正在编辑“${editingDepartment.name}”的部门信息。` : selectedDepartment ? `新部门默认创建在“${selectedDepartment.name}”下。` : '新部门默认创建为根级部门。'}
+        onClose={resetDepartmentForm}
+        open={departmentDialogOpen}
+        title={editingDepartment ? '编辑部门' : '新增部门'}
+      >
+        <form className="settings-grid management-dialog-form" id="department-management-form" onSubmit={(event) => void handleSaveDepartment(event)}>
+          <SelectField
+            disabled={status === 'saving'}
+            label="上级部门"
+            onChange={(event) => setForm((current) => ({ ...current, parentId: event.target.value }))}
+            value={form.parentId}
+          >
+            <option value="">根级部门</option>
+            {parentOptions.map(({ department, depth }) => (
+              <option key={department.id} value={department.id}>
+                {`${'　'.repeat(depth)}${department.name}`}
+              </option>
+            ))}
+          </SelectField>
+          <TextField
+            disabled={status === 'saving'}
+            label="部门名称"
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="综合管理部"
+            value={form.name}
+          />
+          <TextField
+            disabled={status === 'saving'}
+            label="排序"
+            onChange={(event) => setForm((current) => ({ ...current, sortOrder: event.target.value }))}
+            type="number"
+            value={form.sortOrder}
+          />
+        </form>
+      </Dialog>
+    </>
+  );
+}
+
+function AccountManagementPage({
+  embedded = false,
+  selectedDepartment,
+  selectedDepartmentId = null,
+  sharedDepartments,
+}: {
+  embedded?: boolean;
+  selectedDepartment?: Department | null;
+  selectedDepartmentId?: number | null;
+  sharedDepartments?: Department[];
+} = {}) {
+  const { showToast } = useToast();
+  const [users, setUsers] = useState<UserAdmin[]>([]);
+  const [localDepartments, setLocalDepartments] = useState<Department[]>([]);
+  const [status, setStatus] = useState<AdminPageStatus>('loading');
+  const [message, setMessage] = useState('');
+  const [form, setForm] = useState({
+    username: '',
+    displayName: '',
+    password: '',
+    departmentId: '',
+    role: 'DRAFTER',
+  });
+  const [userDialogOpen, setUserDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserAdmin | null>(null);
+  const [resetTarget, setResetTarget] = useState<UserAdmin | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [userToDisable, setUserToDisable] = useState<UserAdmin | null>(null);
+  const departments = sharedDepartments ?? localDepartments;
+  const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
+  const selectedDepartmentIds = useMemo(() => {
+    const root = selectedDepartmentId ? findDepartmentById(departments, selectedDepartmentId) : null;
+    return root ? collectDepartmentIds(root) : null;
+  }, [departments, selectedDepartmentId]);
+  const visibleUsers = useMemo(
+    () => (selectedDepartmentIds ? users.filter((user) => user.departmentId !== null && selectedDepartmentIds.has(user.departmentId)) : users),
+    [selectedDepartmentIds, users],
+  );
+
+  useEffect(() => {
+    void refreshUsersAndDepartments();
+  }, [sharedDepartments]);
+
+  useEffect(() => {
+    if (!editingUser && selectedDepartmentId) {
+      setForm((current) => ({ ...current, departmentId: String(selectedDepartmentId) }));
+    }
+  }, [editingUser, selectedDepartmentId]);
+
+  async function refreshUsersAndDepartments() {
+    try {
+      setStatus('loading');
+      setMessage('正在加载账号与部门');
+      const [loadedUsers, loadedDepartments] = await Promise.all([
+        listUsers(),
+        sharedDepartments ? Promise.resolve(sharedDepartments) : listDepartments(),
+      ]);
+      setUsers(loadedUsers);
+      if (!sharedDepartments) {
+        setLocalDepartments(loadedDepartments);
+      }
+      setStatus('idle');
+      setMessage('');
+    } catch (error) {
+      setStatus('error');
+      setMessage(error instanceof Error ? error.message : '账号加载失败');
+    }
+  }
+
+  function startEditUser(user: UserAdmin) {
+    setEditingUser(user);
+    setForm({
+      username: user.username,
+      displayName: user.displayName,
+      password: '',
+      departmentId: user.departmentId ? String(user.departmentId) : '',
+      role: user.roles[0] ?? 'DRAFTER',
+    });
+    setUserDialogOpen(true);
+  }
+
+  function startCreateUser() {
+    setEditingUser(null);
+    setForm({
+      username: '',
+      displayName: '',
+      password: '',
+      departmentId: selectedDepartmentId ? String(selectedDepartmentId) : '',
+      role: 'DRAFTER',
+    });
+    setUserDialogOpen(true);
+  }
+
+  function resetUserForm() {
+    setEditingUser(null);
+    setForm({ username: '', displayName: '', password: '', departmentId: '', role: 'DRAFTER' });
+    setUserDialogOpen(false);
+  }
+
+  async function handleSaveUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.displayName.trim() || (!editingUser && (!form.username.trim() || !form.password))) {
+      setStatus('error');
+      setMessage('请补齐账号、姓名和初始密码。');
+      return;
+    }
+    try {
+      setStatus('saving');
+      if (editingUser) {
+        await updateUser(editingUser.id, {
+          displayName: form.displayName.trim(),
+          departmentId: form.departmentId ? Number(form.departmentId) : null,
+          roles: [form.role],
+          status: editingUser.status,
+        });
+      } else {
+        await createUser({
+          username: form.username.trim(),
+          displayName: form.displayName.trim(),
+          password: form.password,
+          departmentId: form.departmentId ? Number(form.departmentId) : null,
+          roles: [form.role],
+        });
+      }
+      setUsers(await listUsers());
+      resetUserForm();
+      setStatus('idle');
+      setMessage(editingUser ? '账号已更新' : '账号已创建');
+      showToast({ title: editingUser ? '账号已更新' : '账号已创建', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '账号保存失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  async function handleResetPassword() {
+    if (!resetTarget || !resetPasswordValue) {
+      return;
+    }
+    try {
+      setStatus('saving');
+      await resetUserPassword(resetTarget.id, resetPasswordValue);
+      setResetTarget(null);
+      setResetPasswordValue('');
+      setStatus('idle');
+      setMessage('密码已重置');
+      showToast({ title: '密码已重置', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '密码重置失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  async function handleDisableUser() {
+    if (!userToDisable) {
+      return;
+    }
+    try {
+      setStatus('saving');
+      await disableUser(userToDisable.id);
+      setUsers(await listUsers());
+      setUserToDisable(null);
+      setStatus('idle');
+      setMessage('账号已停用');
+      showToast({ title: '账号已停用', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '账号停用失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  const userColumns: Array<ManagementTableColumn<UserAdmin>> = [
+    {
+      key: 'username',
+      header: '账号',
+      width: 'minmax(130px, 0.9fr)',
+      render: (user) => <span className="management-table-title">{user.username}</span>,
+    },
+    {
+      key: 'displayName',
+      header: '姓名',
+      width: 'minmax(120px, 0.9fr)',
+      render: (user) => <span className="management-table-text">{user.displayName}</span>,
+    },
+    {
+      key: 'department',
+      header: '所属部门',
+      width: 'minmax(150px, 1fr)',
+      render: (user) => <span className="management-table-text">{user.departmentName ?? '未分配部门'}</span>,
+    },
+    {
+      key: 'roles',
+      header: '角色',
+      width: 'minmax(180px, 1.1fr)',
+      render: (user) => <span className="management-table-text">{user.roles.map(roleLabel).join('、')}</span>,
+    },
+    {
+      key: 'status',
+      header: '状态',
+      width: 'minmax(90px, 0.5fr)',
+      render: (user) => <span className="management-table-text">{user.status}</span>,
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      width: 'minmax(156px, max-content)',
+      align: 'end',
+      render: (user) => (
+        <div className="management-table-actions">
+          <Button
+            aria-label={`编辑账号：${user.displayName}`}
+            icon={<Pencil aria-hidden="true" />}
+            iconOnly
+            onClick={() => startEditUser(user)}
+            title="编辑账号"
+            variant="secondary"
+          >
+            编辑
+          </Button>
+          <Button
+            aria-label={`重置密码：${user.displayName}`}
+            icon={<KeyRound aria-hidden="true" />}
+            iconOnly
+            onClick={() => setResetTarget(user)}
+            title="重置密码"
+            variant="secondary"
+          >
+            重置密码
+          </Button>
+          <Button
+            aria-label={`停用账号：${user.displayName}`}
+            icon={<Trash2 aria-hidden="true" />}
+            iconOnly
+            onClick={() => setUserToDisable(user)}
+            title="停用账号"
+            variant="danger"
+          >
+            停用
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <main className={`settings-page admin-page ${embedded ? 'embedded-settings-page' : ''}`} aria-busy={status === 'loading' || status === 'saving'} aria-label="账号管理">
+        <section className="settings-panel admin-panel">
+          <div className="settings-header">
+            <div>
+              <div className="eyebrow">Accounts</div>
+              <h2>账号管理</h2>
+              <p>{selectedDepartment ? `当前显示“${selectedDepartment.name}”及其下级部门账号。` : '为每个部门配置账号与角色。起草、模板和文种数据会按账号归属过滤。'}</p>
+            </div>
+            <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+              {status === 'loading' ? '加载中' : `${visibleUsers.length} 个账号`}
+            </span>
+          </div>
+
+          {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />}
+
+          <div className="management-list-toolbar">
+            <div>
+              <strong>{selectedDepartment ? '当前部门账号' : '全部账号'}</strong>
+              <span>{selectedDepartment ? `维护“${selectedDepartment.name}”及其下级部门账号。` : '维护系统内起草、模板和系统管理账号。'}</span>
+            </div>
+            <Button disabled={status === 'saving'} icon={<Plus aria-hidden="true" />} onClick={startCreateUser} variant="secondary">
+              新增账号
+            </Button>
+          </div>
+
+          <ManagementTable
+            ariaLabel="账号列表"
+            columns={userColumns}
+            emptyDescription={selectedDepartment ? '可以新增账号并分配到当前部门。' : '先创建起草人或模板管理员账号。'}
+            emptyIcon={<Users aria-hidden="true" />}
+            emptyTitle={selectedDepartment ? '当前部门暂无账号' : '暂无账号'}
+            getKey={(user) => user.id}
+            items={visibleUsers}
+            minWidth="880px"
+            status={status}
+          />
+        </section>
+      </main>
+      <Dialog
+        actions={(
+          <>
+            <Button disabled={status === 'saving'} onClick={resetUserForm} variant="secondary">
+              取消
+            </Button>
+            <Button
+              form="account-management-form"
+              icon={<Save aria-hidden="true" />}
+              isLoading={status === 'saving'}
+              loadingLabel="正在保存"
+              type="submit"
+            >
+              {editingUser ? '保存账号' : '创建账号'}
+            </Button>
+          </>
+        )}
+        description={editingUser ? `正在编辑“${editingUser.displayName}”的账号信息。` : selectedDepartment ? `新账号默认分配到“${selectedDepartment.name}”。` : '新账号可选择所属部门与角色。'}
+        onClose={resetUserForm}
+        open={userDialogOpen}
+        title={editingUser ? '编辑账号' : '新增账号'}
+      >
+        <form className="settings-grid management-dialog-form" id="account-management-form" onSubmit={(event) => void handleSaveUser(event)}>
+          <TextField
+            disabled={status === 'saving' || Boolean(editingUser)}
+            label="账号"
+            onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
+            placeholder="zhangsan"
+            value={form.username}
+          />
+          <TextField
+            disabled={status === 'saving'}
+            label="姓名"
+            onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))}
+            placeholder="张三"
+            value={form.displayName}
+          />
+          {!editingUser && (
+            <TextField
+              autoComplete="new-password"
+              disabled={status === 'saving'}
+              label="初始密码"
+              onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+              type="password"
+              value={form.password}
+            />
+          )}
+          <SelectField
+            disabled={status === 'saving'}
+            label="所属部门"
+            onChange={(event) => setForm((current) => ({ ...current, departmentId: event.target.value }))}
+            value={form.departmentId}
+          >
+            <option value="">暂不分配</option>
+            {flatDepartments.map(({ department, depth }) => (
+              <option key={department.id} value={department.id}>
+                {`${'　'.repeat(depth)}${department.name}`}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField
+            disabled={status === 'saving'}
+            label="角色"
+            onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
+            value={form.role}
+          >
+            <option value="DRAFTER">起草人</option>
+            <option value="TEMPLATE_ADMIN">模板管理员</option>
+            <option value="SYSTEM_ADMIN">系统管理员</option>
+          </SelectField>
+        </form>
+      </Dialog>
+      <Dialog
+        actions={(
+          <>
+            <Button disabled={status === 'saving'} onClick={() => setResetTarget(null)} variant="secondary">
+              取消
+            </Button>
+            <Button
+              disabled={!resetPasswordValue}
+              isLoading={status === 'saving'}
+              loadingLabel="正在重置"
+              onClick={() => void handleResetPassword()}
+            >
+              确认重置
+            </Button>
+          </>
+        )}
+        description={resetTarget ? `为“${resetTarget.displayName}”设置新的登录密码。` : undefined}
+        onClose={() => setResetTarget(null)}
+        open={Boolean(resetTarget)}
+        title="重置账号密码"
+      >
+        <TextField
+          autoComplete="new-password"
+          disabled={status === 'saving'}
+          label="新密码"
+          onChange={(event) => setResetPasswordValue(event.target.value)}
+          type="password"
+          value={resetPasswordValue}
+        />
+      </Dialog>
+      <ConfirmDialog
+        cancelLabel="取消"
+        confirmLabel="停用账号"
+        description={userToDisable ? `停用“${userToDisable.displayName}”后，该账号将无法登录。` : undefined}
+        isConfirming={status === 'saving'}
+        onCancel={() => setUserToDisable(null)}
+        onConfirm={() => void handleDisableUser()}
+        open={Boolean(userToDisable)}
+        title="停用账号？"
+      />
+    </>
+  );
+}
+
+function DocumentTypeManagementPage({
+  documentTypes,
+  onDocumentTypesChange,
+}: {
+  documentTypes: DocumentType[];
+  onDocumentTypesChange: (documentTypes: DocumentType[]) => void;
+}) {
+  const { showToast } = useToast();
+  const [status, setStatus] = useState<AdminPageStatus>('idle');
+  const [message, setMessage] = useState('');
+  const [form, setForm] = useState({ code: '', name: '', sortOrder: '10' });
+  const [editingType, setEditingType] = useState<DocumentType | null>(null);
+  const [typeToDelete, setTypeToDelete] = useState<DocumentType | null>(null);
+  const [typeDialogOpen, setTypeDialogOpen] = useState(false);
+
+  function startCreateType() {
+    setEditingType(null);
+    setForm({ code: '', name: '', sortOrder: '10' });
+    setMessage('');
+    setTypeDialogOpen(true);
+  }
+
+  function startEditType(type: DocumentType) {
+    setEditingType(type);
+    setForm({ code: type.code, name: type.name, sortOrder: String(type.sortOrder) });
+    setMessage('');
+    setTypeDialogOpen(true);
+  }
+
+  function resetTypeForm() {
+    setEditingType(null);
+    setForm({ code: '', name: '', sortOrder: '10' });
+    setTypeDialogOpen(false);
+  }
+
+  async function reloadDocumentTypes() {
+    onDocumentTypesChange(await listDocumentTypes());
+  }
+
+  async function handleSaveDocumentType(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!form.code.trim() || !form.name.trim()) {
+      setStatus('error');
+      setMessage('请填写文种编码和名称。');
+      return;
+    }
+    try {
+      setStatus('saving');
+      const payload = {
+        code: form.code.trim().toUpperCase(),
+        name: form.name.trim(),
+        sortOrder: Number(form.sortOrder || 0),
+      };
+      if (editingType) {
+        await updateDocumentType(editingType.code, {
+          name: payload.name,
+          sortOrder: payload.sortOrder,
+        });
+      } else {
+        await createDocumentType(payload);
+      }
+      await reloadDocumentTypes();
+      resetTypeForm();
+      setStatus('idle');
+      setMessage(editingType ? '文种已更新' : '文种已创建');
+      showToast({ title: editingType ? '文种已更新' : '文种已创建', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '文种保存失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  async function handleDeleteDocumentType() {
+    if (!typeToDelete) {
+      return;
+    }
+    try {
+      setStatus('saving');
+      await deleteDocumentType(typeToDelete.code);
+      await reloadDocumentTypes();
+      setTypeToDelete(null);
+      setStatus('idle');
+      setMessage('文种已停用');
+      showToast({ title: '文种已停用', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '文种停用失败';
+      setStatus('error');
+      setMessage(nextMessage);
+      showToast({ title: nextMessage, tone: 'error' });
+    }
+  }
+
+  return (
+    <>
+      <main className="settings-page" aria-busy={status === 'saving'} aria-label="文种管理">
+        <section className="settings-panel template-admin-panel">
+          <div className="settings-header">
+            <div>
+              <div className="eyebrow">Document Types</div>
+              <h2>文种管理</h2>
+              <p>维护通知、请示、报告等文种。这里和草稿、模板保持同一套文种卡片层级。</p>
+            </div>
+            <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+              {documentTypes.length} 个文种
+            </span>
+          </div>
+
+          <div className="template-list-toolbar">
+            <div className="template-toolbar-context">
+              <FileCog aria-hidden="true" className="row-icon" />
+              <div>
+                <strong>文种配置</strong>
+                <span className="template-card-meta">新增文种后会进入草稿列表和模板管理的文种入口。</span>
+              </div>
+            </div>
+            <Button icon={<Plus aria-hidden="true" />} onClick={startCreateType}>
+              新增文种
+            </Button>
+          </div>
+
+          {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />}
+
+          {documentTypes.length === 0 ? (
+            <div className="template-empty-panel">
+              <FileCog aria-hidden="true" />
+              <div>
+                <strong>暂无文种</strong>
+                <span>创建第一个文种后，可以继续配置模板、草稿和导出。</span>
+              </div>
+            </div>
+          ) : (
+            <div className="template-card-grid" aria-label="文种列表">
+              {documentTypes.map((type) => (
+                <article className="template-card" key={type.code}>
+                  <div className="template-card-controls">
+                    <button
+                      aria-label={`编辑文种：${type.name}`}
+                      className="template-card-icon-button"
+                      disabled={status === 'saving'}
+                      onClick={() => startEditType(type)}
+                      title="编辑文种"
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" />
+                    </button>
+                    <button
+                      aria-label={`停用文种：${type.name}`}
+                      className="template-card-icon-button danger"
+                      disabled={status === 'saving'}
+                      onClick={() => setTypeToDelete(type)}
+                      title="停用文种"
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="template-card-title">
+                    <FileCog aria-hidden="true" />
+                    <div>
+                      <h3>{type.name}</h3>
+                      <span className="template-card-meta">{type.code} · {type.status}</span>
+                    </div>
+                  </div>
+                  <p className="template-card-file">排序 {type.sortOrder}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
+      <Dialog
+        actions={(
+          <>
+            <Button disabled={status === 'saving'} onClick={resetTypeForm} variant="secondary">
+              取消
+            </Button>
+            <Button
+              form="document-type-management-form"
+              icon={<Save aria-hidden="true" />}
+              isLoading={status === 'saving'}
+              loadingLabel="正在保存"
+              type="submit"
+            >
+              {editingType ? '保存文种' : '创建文种'}
+            </Button>
+          </>
+        )}
+        description={editingType ? `正在编辑“${editingType.name}”的文种名称和排序。` : '新增文种后会出现在草稿列表和模板管理的文种入口中。'}
+        onClose={resetTypeForm}
+        open={typeDialogOpen}
+        title={editingType ? '编辑文种' : '新增文种'}
+      >
+        <form className="settings-grid management-dialog-form" id="document-type-management-form" onSubmit={(event) => void handleSaveDocumentType(event)}>
+          <TextField
+            disabled={status === 'saving' || Boolean(editingType)}
+            label="文种编码"
+            onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
+            placeholder="NOTICE"
+            value={form.code}
+          />
+          <TextField
+            disabled={status === 'saving'}
+            label="文种名称"
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="通知"
+            value={form.name}
+          />
+          <TextField
+            disabled={status === 'saving'}
+            label="排序"
+            onChange={(event) => setForm((current) => ({ ...current, sortOrder: event.target.value }))}
+            type="number"
+            value={form.sortOrder}
+          />
+        </form>
+      </Dialog>
+      <ConfirmDialog
+        cancelLabel="取消"
+        confirmLabel="停用文种"
+        description={typeToDelete ? `将停用“${typeToDelete.name}”。若已有草稿或模板依赖该文种，后端会按当前规则处理或阻断。` : undefined}
+        isConfirming={status === 'saving'}
+        onCancel={() => setTypeToDelete(null)}
+        onConfirm={() => void handleDeleteDocumentType()}
+        open={Boolean(typeToDelete)}
+        title="停用文种？"
+      />
+    </>
+  );
+}
+
 function PlaceholderPage({ view }: { view: AppView }) {
   return (
     <main className="placeholder-page">
@@ -3012,6 +4598,7 @@ function DraftListPage({
 
 function AiSettingsPage({
   apiKey,
+  embedded = false,
   message,
   onApiKeyChange,
   onSave,
@@ -3022,6 +4609,7 @@ function AiSettingsPage({
   status,
 }: {
   apiKey: string;
+  embedded?: boolean;
   message: string;
   onApiKeyChange: (value: string) => void;
   onSave: () => void;
@@ -3035,7 +4623,7 @@ function AiSettingsPage({
   const deepSeekActive = settings.provider === 'deepseek' && settings.deepSeekEnabled;
 
   return (
-    <main className="settings-page" aria-label="系统设置">
+    <main className={`settings-page ${embedded ? 'embedded-settings-page' : ''}`} aria-label="AI 配置">
       <section className="settings-panel">
         <div className="settings-header">
           <div>
@@ -3153,6 +4741,91 @@ function viewTitle(view: AppView) {
 
 function viewSubtitle(view: AppView) {
   return NAV_ITEMS.find((item) => item.view === view)?.description ?? '近期工作与状态';
+}
+
+function canAccessView(user: AuthUser, view: AppView) {
+  if (view === 'settings') {
+    return user.roles.includes('SYSTEM_ADMIN') || user.roles.includes('TEMPLATE_ADMIN');
+  }
+  return true;
+}
+
+function roleLabel(role?: string) {
+  switch (role) {
+    case 'SYSTEM_ADMIN':
+      return '系统管理员';
+    case 'TEMPLATE_ADMIN':
+      return '模板管理员';
+    case 'DRAFTER':
+      return '起草人';
+    default:
+      return role ?? '未分配角色';
+  }
+}
+
+function sortDepartments(departments: Department[]) {
+  return [...departments].sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
+}
+
+function flattenDepartments(departments: Department[], depth = 0): Array<{ department: Department; depth: number }> {
+  return sortDepartments(departments).flatMap((department) => [
+    { department, depth },
+    ...flattenDepartments(department.children ?? [], depth + 1),
+  ]);
+}
+
+function filterDepartmentTree(departments: Department[], query: string): Department[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return sortDepartments(departments);
+  }
+  return sortDepartments(departments).flatMap((department) => {
+    const filteredChildren = filterDepartmentTree(department.children ?? [], query);
+    const matches = department.name.toLowerCase().includes(normalizedQuery);
+    return matches || filteredChildren.length > 0 ? [{ ...department, children: filteredChildren }] : [];
+  });
+}
+
+function findDepartmentById(departments: Department[], id: number): Department | null {
+  for (const department of departments) {
+    if (department.id === id) {
+      return department;
+    }
+    const childMatch = findDepartmentById(department.children ?? [], id);
+    if (childMatch) {
+      return childMatch;
+    }
+  }
+  return null;
+}
+
+function getDepartmentPath(departments: Department[], id: number): Department[] {
+  for (const department of departments) {
+    if (department.id === id) {
+      return [department];
+    }
+    const childPath = getDepartmentPath(department.children ?? [], id);
+    if (childPath.length > 0) {
+      return [department, ...childPath];
+    }
+  }
+  return [];
+}
+
+function isDepartmentInSubtree(root: Department, id: number): boolean {
+  return root.id === id || (root.children ?? []).some((child) => isDepartmentInSubtree(child, id));
+}
+
+function countDepartmentDescendants(department: Department): number {
+  return (department.children ?? []).reduce((count, child) => count + 1 + countDepartmentDescendants(child), 0);
+}
+
+function collectDepartmentIds(department: Department): Set<number> {
+  const ids = new Set<number>([department.id]);
+  (department.children ?? []).forEach((child) => {
+    collectDepartmentIds(child).forEach((id) => ids.add(id));
+  });
+  return ids;
 }
 
 function QualityCheckItemView({ item }: { item: QualityCheckItem }) {

@@ -1,6 +1,8 @@
 package com.gongwen.assistant.template;
 
 import com.gongwen.assistant.common.api.ApiResponse;
+import com.gongwen.assistant.security.CurrentUser;
+import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
@@ -35,6 +37,7 @@ public class TemplateController {
     private final TemplateStructureFormattingRepository structureFormattingRepository;
     private final TemplateVersionRepository versionRepository;
     private final TemplateRepository templateRepository;
+    private final CurrentUserProvider currentUserProvider;
 
     public TemplateController(
             DocxPlaceholderParser parser,
@@ -42,7 +45,8 @@ public class TemplateController {
             TemplateProfileRepository profileRepository,
             TemplateStructureFormattingRepository structureFormattingRepository,
             TemplateVersionRepository versionRepository,
-            TemplateRepository templateRepository
+            TemplateRepository templateRepository,
+            CurrentUserProvider currentUserProvider
     ) {
         this.parser = parser;
         this.uploadService = uploadService;
@@ -50,6 +54,7 @@ public class TemplateController {
         this.structureFormattingRepository = structureFormattingRepository;
         this.versionRepository = versionRepository;
         this.templateRepository = templateRepository;
+        this.currentUserProvider = currentUserProvider;
     }
 
     @PostMapping("/parse")
@@ -59,17 +64,17 @@ public class TemplateController {
 
     @GetMapping
     public ApiResponse<List<TemplateSummary>> listTemplates(@RequestParam(required = false) String documentTypeCode) {
-        return ApiResponse.ok(templateRepository.findAll(documentTypeCode));
+        return ApiResponse.ok(templateRepository.findAll(documentTypeCode, currentUser()));
     }
 
     @PostMapping
     public ApiResponse<TemplateSummary> createTemplate(@org.springframework.web.bind.annotation.RequestBody CreateTemplateRequest request) {
-        return ApiResponse.ok(templateRepository.create(request.templateName(), request.documentTypeCode()));
+        return ApiResponse.ok(templateRepository.create(request.templateName(), request.documentTypeCode(), currentUser()));
     }
 
     @DeleteMapping("/{templateId}")
     public ApiResponse<Void> deleteTemplate(@PathVariable long templateId) {
-        templateRepository.deleteById(templateId);
+        templateRepository.deleteById(templateId, currentUser());
         return ApiResponse.ok(null);
     }
 
@@ -78,6 +83,8 @@ public class TemplateController {
             @PathVariable long templateId,
             @RequestPart("file") MultipartFile file
     ) throws IOException {
+        templateRepository.findById(templateId, currentUser())
+                .orElseThrow(() -> new TemplateException("TEMPLATE_NOT_FOUND", "Template not found"));
         return ApiResponse.ok(uploadService.upload(
                 templateId,
                 file.getOriginalFilename(),
@@ -111,7 +118,11 @@ public class TemplateController {
     public ApiResponse<List<TemplateVersionSummary>> listReadyVersions(
             @RequestParam(required = false) String documentTypeCode
     ) {
-        return ApiResponse.ok(versionRepository.findReadyVersions(documentTypeCode));
+        return ApiResponse.ok(versionRepository.findReadyVersions(documentTypeCode, currentUser()));
+    }
+
+    private CurrentUser currentUser() {
+        return currentUserProvider.currentUser();
     }
 
     @ExceptionHandler(TemplateException.class)

@@ -1,11 +1,13 @@
 package com.gongwen.assistant.template;
 
 import com.gongwen.assistant.support.DocxTestFactory;
+import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -19,6 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(TemplateController.class)
+@AutoConfigureMockMvc(addFilters = false)
 @Import(DocxPlaceholderParser.class)
 class TemplateControllerTest {
     @Autowired
@@ -38,6 +41,9 @@ class TemplateControllerTest {
 
     @MockBean
     private TemplateRepository templateRepository;
+
+    @MockBean
+    private CurrentUserProvider currentUserProvider;
 
     @Test
     void parsesUploadedTemplatePlaceholders() throws Exception {
@@ -62,6 +68,6 @@ class TemplateControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        verify(templateRepository).deleteById(7L);
+        verify(templateRepository).deleteById(7L, null);
     }
 }

@@ -12,6 +12,35 @@ export type DocumentType = {
   sortOrder: number;
 };
 
+export type AuthUser = {
+  id: number;
+  username: string;
+  displayName: string;
+  departmentId: number | null;
+  departmentName: string | null;
+  roles: string[];
+};
+
+export type Department = {
+  id: number;
+  parentId: number | null;
+  code: string;
+  name: string;
+  status: string;
+  sortOrder: number;
+  children: Department[];
+};
+
+export type UserAdmin = {
+  id: number;
+  username: string;
+  displayName: string;
+  departmentId: number | null;
+  departmentName: string | null;
+  status: string;
+  roles: string[];
+};
+
 export type CreateDocumentTypeRequest = {
   code: string;
   name: string;

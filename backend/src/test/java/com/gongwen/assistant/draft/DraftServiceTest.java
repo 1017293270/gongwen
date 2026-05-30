@@ -1,5 +1,7 @@
 package com.gongwen.assistant.draft;
 
+import com.gongwen.assistant.security.CurrentUser;
+import com.gongwen.assistant.security.CurrentUserProvider;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -10,6 +12,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DraftServiceTest {
     private final InMemoryDraftRepository repository = new InMemoryDraftRepository();
@@ -93,15 +97,47 @@ class DraftServiceTest {
                 .isInstanceOf(DraftNotFoundException.class);
     }
 
+    @Test
+    void createsAndListsDraftsForCurrentUserWhenAuthenticationIsAvailable() {
+        InMemoryDraftRepository repository = new InMemoryDraftRepository();
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CurrentUser currentUser = new CurrentUser(
+                7L,
+                "drafter",
+                "Drafter",
+                3L,
+                "General Office",
+                List.of("DRAFTER"));
+        when(currentUserProvider.currentUser()).thenReturn(currentUser);
+        DraftService authenticatedService = new DraftService(
+                repository,
+                currentUserProvider,
+                Clock.fixed(Instant.parse("2026-05-30T00:00:00Z"), ZoneId.of("UTC")));
+
+        authenticatedService.createDraft(new CreateDraftRequest("NOTICE", "账号草稿"));
+        authenticatedService.listDrafts("NOTICE");
+
+        assertThat(repository.lastCreateUser).isEqualTo(currentUser);
+        assertThat(repository.lastListUser).isEqualTo(currentUser);
+    }
+
     private static final class InMemoryDraftRepository implements DraftRepository {
         private final List<DraftDetailDto> drafts = new ArrayList<>();
         private long nextDraftId = 1L;
+        private CurrentUser lastCreateUser;
+        private CurrentUser lastListUser;
 
         @Override
         public DraftDetailDto createDraft(String documentTypeCode, String title, List<DraftBlockUpdateRequest> blocks) {
             DraftDetailDto draft = new DraftDetailDto(nextDraftId++, documentTypeCode, title, "DRAFT", toDtos(blocks));
             drafts.add(draft);
             return draft;
+        }
+
+        @Override
+        public DraftDetailDto createDraft(String documentTypeCode, String title, List<DraftBlockUpdateRequest> blocks, CurrentUser currentUser) {
+            lastCreateUser = currentUser;
+            return createDraft(documentTypeCode, title, blocks);
         }
 
         @Override
@@ -114,6 +150,12 @@ class DraftServiceTest {
 
         @Override
         public List<DraftSummaryDto> listByDocumentType(String documentTypeCode) {
+            return listByDocumentType(documentTypeCode, null);
+        }
+
+        @Override
+        public List<DraftSummaryDto> listByDocumentType(String documentTypeCode, CurrentUser currentUser) {
+            lastListUser = currentUser;
             return drafts.stream()
                     .filter(draft -> draft.documentTypeCode().equals(documentTypeCode))
                     .map(draft -> new DraftSummaryDto(

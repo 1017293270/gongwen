@@ -84,10 +84,11 @@ MVP 不包含：
 
 ## 5. 角色与权限
 
-MVP 只暴露两个角色：
+MVP 当前暴露三个角色：
 
 - 起草人
 - 模板管理员
+- 系统管理员
 
 权限规则：
 
@@ -95,6 +96,7 @@ MVP 只暴露两个角色：
 - 起草人可以调用生成、质检和导出。
 - 模板管理员可以上传、配置、启用、停用模板。
 - 模板管理员可以配置文种字段和结构。
+- 系统管理员可以维护部门树、账号、角色分配和系统级配置。
 - 模板、材料、导出文件下载必须校验权限。
 
 数据模型应预留 RBAC、tenant_id、department_id、审核状态和版本字段。
@@ -182,6 +184,7 @@ UI 使用 Anthropic-inspired 风格：
 核心实体：
 
 - User
+- Department
 - Role
 - Permission
 - DocumentType
@@ -352,11 +355,24 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已先落地草稿绑定模板后的 Word 导出入口。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v9。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已先落地草稿绑定模板后的 Word 导出入口。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v10。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
 - `GET /api/health`
+- `GET /api/auth/csrf`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+- `GET /api/departments`
+- `POST /api/departments`
+- `PUT /api/departments/{id}`
+- `DELETE /api/departments/{id}`
+- `GET /api/users`
+- `POST /api/users`
+- `PUT /api/users/{id}`
+- `PUT /api/users/{id}/password`
+- `DELETE /api/users/{id}`
 - `POST /api/templates/parse`
 - `GET /api/templates`
 - `POST /api/templates`
@@ -367,6 +383,9 @@ Agent: 后端
 - `POST /api/exports/word`
 - `POST /api/exports/drafts/{draftId}/word`
 - `GET /api/document-types`
+- `POST /api/document-types`
+- `PUT /api/document-types/{code}`
+- `DELETE /api/document-types/{code}`
 - `POST /api/drafts`
 - `GET /api/drafts?documentTypeCode={code}`
 - `GET /api/drafts/{id}`
@@ -384,6 +403,17 @@ Agent: 后端
 - `GET /api/ai/settings`
 - `PUT /api/ai/settings`
 - `POST /api/ai/settings/test`
+
+账号与组织权限当前约定：
+
+- 已接入 Spring Security 会话登录和 CSRF cookie 令牌；前端 API client 默认 `credentials: include`，`POST/PUT/DELETE/PATCH` 会先获取 `/api/auth/csrf` 并发送 `X-XSRF-TOKEN`。
+- 首次无用户启动时，`BootstrapAdminInitializer` 会创建系统管理员 `admin`；生产部署必须通过 `GONGWEN_BOOTSTRAP_ADMIN_PASSWORD` 提供初始密码，未配置时仅作为本地开发生成一次性密码并写入日志。
+- `department` 为树级部门表；`app_user`、`app_role`、`app_user_role` 为账号和角色表。当前角色为 `SYSTEM_ADMIN`、`TEMPLATE_ADMIN`、`DRAFTER`。
+- 系统管理员通过“系统设置”进入组织与账号管理；系统设置采用左侧部门树、右侧页签结构，当前页签包含 AI 配置、人员管理和部门管理，部门和账号新增/编辑均使用全局弹窗，列表统一使用带列分隔的管理列表组件。
+- 部门编号为内部自动生成字段，不在管理弹窗、部门树和部门列表中暴露；新增部门按层级生成 `A01`、`A01A01`、`A01A01A01` 格式编码，编辑部门保留原编码。
+- 文种管理已从预留能力升级为 CRUD 页面；文种、草稿、模板和导出记录已带 `created_by` / `department_id` 归属字段或索引预留。
+- 当前后端已对草稿读取、保存、删除、模板列表/上传/删除、模板版本查询、文种列表/创建/更新/删除接入当前用户过滤：系统管理员可看全部，普通用户优先只看系统内置或自己创建的数据。
+- 文件下载、材料下载、导出记录列表和更细粒度模板管理员授权仍需要后续继续补齐；涉及权限变更、删除和批量操作必须保留二次确认和审计预留。
 
 AI 模型配置当前约定：
 
@@ -506,7 +536,7 @@ P8 基础质检当前约定：
 - 工作台左栏“套版模板”下拉默认只展示每个模板的最新版本，避免把同一模板的历史版本全部堆进选择器。
 - 草稿列表已复用模板管理的文种文件夹 -> 文种内卡片列表层级，接入草稿卡片、空状态、加载/错误状态、文种内新建草稿和从草稿卡片进入工作台；草稿进入工作台后再选择同文种套版模板。材料库、导出记录和 AI 任务当前仍是预留入口，后续阶段接入真实列表、权限和操作；模板管理已接入文种卡片、模板卡片、新增模板、上传新版本和版本解析结果首版。
 - 文种、草稿和模板卡片列表共用固定槽位卡片网格：默认按约 300px 最小列宽自动计算当前容器可容纳列数，使用 `auto-fill` 保留空列；当一行卡片不足时必须从左侧开始排列，不能把单张或少量卡片拉满整行。
-- 系统设置当前已有真实 AI 配置页面；后续再扩展权限、账号、部署和审计配置时，不要覆盖现有 AI 配置能力。
+- 系统设置当前已整合 AI 配置、人员管理和部门管理：左侧部门树作为组织上下文，右侧页签承载具体配置；后续再扩展权限、部署和审计配置时，不要覆盖现有 AI 配置、账号管理和部门树能力。
 - 总览页展示当前草稿、正文段落、READY 材料和阶段提醒，必须区分加载、空、错误和可操作状态。
 
 本地 Vite 联调时，如果后端容器因本机 8080 被占用而映射到 18080，需要用 `VITE_API_BASE_URL=http://127.0.0.1:18080` 启动前端。后端已允许本地 Vite 端口跨域访问 `/api/**`。

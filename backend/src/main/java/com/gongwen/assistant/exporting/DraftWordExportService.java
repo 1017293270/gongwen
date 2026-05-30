@@ -3,6 +3,8 @@ package com.gongwen.assistant.exporting;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftRepository;
+import com.gongwen.assistant.security.CurrentUser;
+import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import com.gongwen.assistant.template.TemplateRepository;
 import com.gongwen.assistant.template.TemplateSummary;
@@ -13,6 +15,7 @@ import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -43,6 +46,7 @@ public class DraftWordExportService {
     private final TemplateStructureFormattingRepository templateStructureFormattingRepository;
     private final TemplateEffectiveFormattingService templateEffectiveFormattingService;
     private final WordExportService wordExportService;
+    private final CurrentUserProvider currentUserProvider;
 
     public DraftWordExportService(
             DraftRepository draftRepository,
@@ -53,6 +57,29 @@ public class DraftWordExportService {
             TemplateEffectiveFormattingService templateEffectiveFormattingService,
             WordExportService wordExportService
     ) {
+        this(
+                draftRepository,
+                templateVersionRepository,
+                templateRepository,
+                templateProfileRepository,
+                templateStructureFormattingRepository,
+                templateEffectiveFormattingService,
+                wordExportService,
+                null
+        );
+    }
+
+    @Autowired
+    public DraftWordExportService(
+            DraftRepository draftRepository,
+            TemplateVersionRepository templateVersionRepository,
+            TemplateRepository templateRepository,
+            TemplateProfileRepository templateProfileRepository,
+            TemplateStructureFormattingRepository templateStructureFormattingRepository,
+            TemplateEffectiveFormattingService templateEffectiveFormattingService,
+            WordExportService wordExportService,
+            CurrentUserProvider currentUserProvider
+    ) {
         this.draftRepository = draftRepository;
         this.templateVersionRepository = templateVersionRepository;
         this.templateRepository = templateRepository;
@@ -60,10 +87,11 @@ public class DraftWordExportService {
         this.templateStructureFormattingRepository = templateStructureFormattingRepository;
         this.templateEffectiveFormattingService = templateEffectiveFormattingService;
         this.wordExportService = wordExportService;
+        this.currentUserProvider = currentUserProvider;
     }
 
     public WordExportResult exportDraft(long draftId) {
-        DraftDetailDto draft = draftRepository.findById(draftId);
+        DraftDetailDto draft = draftRepository.findById(draftId, currentUserOrNull());
         Long templateVersionId = draft.templateVersionId();
         if (templateVersionId == null) {
             throw new WordExportException(
@@ -99,6 +127,10 @@ public class DraftWordExportService {
                 exportFormattingContext(templateVersionId, profile),
                 profile
         ));
+    }
+
+    private CurrentUser currentUserOrNull() {
+        return currentUserProvider == null ? null : currentUserProvider.currentUser();
     }
 
     private TemplateProfile templateProfile(long templateVersionId) {

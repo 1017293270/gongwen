@@ -1,7 +1,10 @@
 package com.gongwen.assistant.document;
 
+import com.gongwen.assistant.security.CurrentUser;
+import com.gongwen.assistant.security.CurrentUserProvider;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,5 +73,28 @@ class DocumentTypeServiceTest {
         service.delete("meeting");
 
         verify(repository).delete("MEETING");
+    }
+
+    @Test
+    void createsAndListsDocumentTypesForCurrentUserWhenAuthenticationIsAvailable() {
+        CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
+        CurrentUser currentUser = new CurrentUser(
+                7L,
+                "template-admin",
+                "Template Admin",
+                3L,
+                "General Office",
+                List.of("TEMPLATE_ADMIN"));
+        when(currentUserProvider.currentUser()).thenReturn(currentUser);
+        DocumentTypeService authenticatedService = new DocumentTypeService(repository, currentUserProvider);
+        when(repository.create("MEETING", "会议纪要", 4, currentUser))
+                .thenReturn(new DocumentTypeDto("MEETING", "会议纪要", "ACTIVE", 4));
+        when(repository.findVisible(currentUser)).thenReturn(List.of(new DocumentTypeDto("MEETING", "会议纪要", "ACTIVE", 4)));
+
+        authenticatedService.create(new CreateDocumentTypeRequest("meeting", "会议纪要", 4));
+        authenticatedService.findActive();
+
+        verify(repository).create("MEETING", "会议纪要", 4, currentUser);
+        verify(repository).findVisible(currentUser);
     }
 }

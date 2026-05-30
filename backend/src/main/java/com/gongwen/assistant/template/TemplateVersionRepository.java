@@ -1,5 +1,7 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.security.CurrentUser;
+
 import java.util.Optional;
 import java.util.List;
 
@@ -12,6 +14,10 @@ public interface TemplateVersionRepository {
 
     default List<TemplateVersionSummary> findReadyVersions(String documentTypeCode) {
         return List.of();
+    }
+
+    default List<TemplateVersionSummary> findReadyVersions(String documentTypeCode, CurrentUser currentUser) {
+        return findReadyVersions(documentTypeCode);
     }
 
     void markParsed(long id, String profileHash);

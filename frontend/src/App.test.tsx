@@ -2,7 +2,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { DraftBlock } from './draftTypes';
+import type { Department, DraftBlock } from './draftTypes';
 
 describe('App', () => {
   const originalTextareaScrollHeight = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight');
@@ -206,7 +206,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -252,7 +252,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -288,7 +288,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const { container } = render(<App />);
 
@@ -807,7 +807,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -860,12 +860,160 @@ describe('App', () => {
     expect(screen.getByLabelText('主导航')).toBeInTheDocument();
     expect(screen.getByText('最近草稿')).toBeInTheDocument();
     expect(screen.getByText('总览草稿')).toBeInTheDocument();
+    const navLabels = within(screen.getByLabelText('主导航')).getAllByRole('button').map((button) => button.getAttribute('aria-label'));
+    expect(navLabels).toContain('系统设置');
+    expect(navLabels).not.toContain('部门管理');
+    expect(navLabels).not.toContain('账号管理');
 
     await userEvent.click(screen.getByRole('button', { name: '工作台' }));
 
     expect(await screen.findByDisplayValue('总览草稿')).toBeInTheDocument();
     expect(container.querySelector('.app-shell')).toHaveClass('app-shell--workbench-focus');
     expect(screen.getByRole('button', { name: '回到目录' })).toBeInTheDocument();
+  });
+
+  it('creates a document type from the new management page', async () => {
+    let documentTypes = [
+      { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+    ];
+    const createCalls: unknown[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types') && init?.method === 'POST') {
+        createCalls.push(JSON.parse(String(init.body)));
+        documentTypes = [
+          ...documentTypes,
+          { code: 'ANNOUNCEMENT', name: '公告', status: 'ACTIVE', sortOrder: 4 },
+        ];
+        return Promise.resolve(jsonResponse(documentTypes[1]));
+      }
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse(documentTypes));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('文种管理草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '文种管理' }));
+    await userEvent.click(screen.getByRole('button', { name: '新增文种' }));
+    await userEvent.type(screen.getByLabelText('文种编码'), 'ANNOUNCEMENT');
+    await userEvent.type(screen.getByLabelText('文种名称'), '公告');
+    await userEvent.clear(screen.getByLabelText('排序'));
+    await userEvent.type(screen.getByLabelText('排序'), '4');
+    await userEvent.click(screen.getByRole('button', { name: '创建文种' }));
+
+    expect((await screen.findAllByText('文种已创建')).length).toBeGreaterThan(0);
+    expect(createCalls).toEqual([{ code: 'ANNOUNCEMENT', name: '公告', sortOrder: 4 }]);
+    expect(screen.getByText('公告')).toBeInTheDocument();
+  });
+
+  it('creates a department and an account from admin pages', async () => {
+    let departments: Department[] = [
+      { id: 1, parentId: null, code: 'ROOT', name: '总部', status: 'ACTIVE', sortOrder: 1, children: [] },
+    ];
+    let users: Array<{
+      id: number;
+      username: string;
+      displayName: string;
+      departmentId: number | null;
+      departmentName: string | null;
+      status: string;
+      roles: string[];
+    }> = [];
+    const departmentCreateCalls: unknown[] = [];
+    const userCreateCalls: unknown[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('账号管理草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/departments') && init?.method === 'POST') {
+        departmentCreateCalls.push(JSON.parse(String(init.body)));
+        const createdDepartment = { id: 2, parentId: 1, code: 'A01A01', name: '综合管理部', status: 'ACTIVE', sortOrder: 10, children: [] };
+        departments = [
+          {
+            ...departments[0],
+            children: [createdDepartment],
+          },
+        ];
+        return Promise.resolve(jsonResponse(createdDepartment));
+      }
+      if (url.endsWith('/api/departments')) {
+        return Promise.resolve(jsonResponse(departments));
+      }
+      if (url.endsWith('/api/users') && init?.method === 'POST') {
+        userCreateCalls.push(JSON.parse(String(init.body)));
+        users = [
+          { id: 9, username: 'zhangsan', displayName: '张三', departmentId: 2, departmentName: '综合管理部', status: 'ACTIVE', roles: ['DRAFTER'] },
+        ];
+        return Promise.resolve(jsonResponse(users[0]));
+      }
+      if (url.endsWith('/api/users')) {
+        return Promise.resolve(jsonResponse(users));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '系统设置' }));
+    await userEvent.click(await screen.findByRole('tab', { name: '部门管理' }));
+    const departmentTree = await screen.findByLabelText('部门树');
+    expect(within(departmentTree).getByRole('button', { name: /全部部门/ })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '根级部门' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '新增部门' }));
+    await userEvent.selectOptions(await screen.findByLabelText('上级部门'), '1');
+    expect(screen.queryByLabelText('部门编码')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('部门名称'), '综合管理部');
+    await userEvent.click(screen.getByRole('button', { name: '创建部门' }));
+
+    expect((await screen.findAllByText('部门已创建')).length).toBeGreaterThan(0);
+    expect(departmentCreateCalls).toEqual([{ parentId: 1, name: '综合管理部', sortOrder: 10 }]);
+    expect(within(departmentTree).queryByRole('button', { name: /^综合管理部/ })).not.toBeInTheDocument();
+    await userEvent.click(within(departmentTree).getByRole('button', { name: '展开部门：总部' }));
+    expect(within(departmentTree).getByRole('button', { name: /^综合管理部/ })).toBeInTheDocument();
+    await userEvent.click(within(departmentTree).getByRole('button', { name: '收起部门：总部' }));
+    expect(within(departmentTree).queryByRole('button', { name: /^综合管理部/ })).not.toBeInTheDocument();
+
+    await userEvent.click(within(departmentTree).getByRole('button', { name: /^总部/ }));
+    expect(screen.getByRole('table', { name: '总部下级部门' })).toBeInTheDocument();
+    expect(within(screen.getByRole('table', { name: '总部下级部门' })).getByText('综合管理部')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: '人员管理' }));
+    expect(screen.queryByLabelText('账号')).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: '新增账号' }));
+    const accountDialog = await screen.findByRole('dialog', { name: '新增账号' });
+    await userEvent.type(within(accountDialog).getByLabelText('账号'), 'zhangsan');
+    await userEvent.type(within(accountDialog).getByLabelText('姓名'), '张三');
+    await userEvent.type(within(accountDialog).getByLabelText('初始密码'), 'StrongPass123');
+    await userEvent.selectOptions(within(accountDialog).getByLabelText('所属部门'), '2');
+    await userEvent.click(within(accountDialog).getByRole('button', { name: '创建账号' }));
+
+    expect((await screen.findAllByText('账号已创建')).length).toBeGreaterThan(0);
+    expect(userCreateCalls).toEqual([{
+      username: 'zhangsan',
+      displayName: '张三',
+      password: 'StrongPass123',
+      departmentId: 2,
+      roles: ['DRAFTER'],
+    }]);
+    expect(screen.getByText('张三')).toBeInTheDocument();
   });
 
   it('enters a focused workbench mode that hides the global sidebar and shows a back-to-directory action', async () => {
@@ -879,6 +1027,7 @@ describe('App', () => {
 
     const { container } = render(<App />);
 
+    await screen.findByRole('heading', { name: '总览' });
     expect(container.querySelector('.app-sidebar')).toBeInTheDocument();
 
     await openWorkbench();
@@ -994,7 +1143,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -1033,7 +1182,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -1106,7 +1255,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -1184,7 +1333,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const { container } = render(<App />);
 
@@ -1266,7 +1415,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -1322,7 +1471,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -1383,7 +1532,7 @@ describe('App', () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     render(<App />);
 
@@ -1401,39 +1550,46 @@ describe('App', () => {
   });
 
   it('configures DeepSeek from system settings', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse([
-        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
-      ]))
-      .mockResolvedValueOnce(jsonResponse(sampleDraft('AI 配置草稿')))
-      .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(jsonResponse(sampleAiSettings()))
-      .mockResolvedValueOnce(jsonResponse({
-        ...sampleAiSettings(),
-        provider: 'deepseek',
-        deepSeekEnabled: true,
-        deepSeekApiKeyConfigured: true,
-        maskedDeepSeekApiKey: 'sk-1...7890',
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        ...sampleAiSettings(),
-        provider: 'deepseek',
-        deepSeekEnabled: true,
-        deepSeekApiKeyConfigured: true,
-        maskedDeepSeekApiKey: 'sk-1...7890',
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        provider: 'deepseek',
-        model: 'deepseek-v4-flash',
-        available: true,
-        message: 'DeepSeek 连接正常',
-        latencyMs: 88,
-      }));
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('AI 配置草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.endsWith('/api/departments') || url.endsWith('/api/users')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/ai/settings') && init?.method === 'PUT') {
+        return Promise.resolve(jsonResponse({
+          ...sampleAiSettings(),
+          provider: 'deepseek',
+          deepSeekEnabled: true,
+          deepSeekApiKeyConfigured: true,
+          maskedDeepSeekApiKey: 'sk-1...7890',
+        }));
+      }
+      if (url.endsWith('/api/ai/settings/test')) {
+        return Promise.resolve(jsonResponse({
+          provider: 'deepseek',
+          model: 'deepseek-v4-flash',
+          available: true,
+          message: 'DeepSeek 连接正常',
+          latencyMs: 88,
+        }));
+      }
+      if (url.endsWith('/api/ai/settings')) {
+        return Promise.resolve(jsonResponse(sampleAiSettings()));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
     stubFetch(fetchMock);
 
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '系统设置' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'AI 配置' }));
     expect(await screen.findByRole('heading', { name: 'AI 配置' })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText('AI 供应商'), 'deepseek');
     await userEvent.click(screen.getByLabelText('启用 DeepSeek'));
@@ -1493,11 +1649,29 @@ function docxResponse(fileName: string) {
 
 function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
   vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('/api/templates/versions')) {
+    const url = String(input);
+    if (url.endsWith('/api/auth/me')) {
+      return Promise.resolve(jsonResponse(sampleAuthUser()));
+    }
+    if (url.endsWith('/api/auth/csrf')) {
+      return Promise.resolve(jsonResponse({ token: 'test-csrf-token' }));
+    }
+    if (!fetchMock.getMockImplementation() && url.includes('/api/templates/versions')) {
       return Promise.resolve(jsonResponse([]));
     }
     return fetchMock(input, init);
   });
+}
+
+function sampleAuthUser() {
+  return {
+    id: 1,
+    username: 'admin',
+    displayName: '系统管理员',
+    departmentId: 1,
+    departmentName: '总部',
+    roles: ['SYSTEM_ADMIN'],
+  };
 }
 
 function createStorageMock() {
