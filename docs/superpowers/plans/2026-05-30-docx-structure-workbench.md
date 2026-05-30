@@ -64,8 +64,8 @@ Completion evidence format:
 | T11 | 已完成 | Frontend AI Agent | T9, T10 | right panel context follows selected node | 未提交（T11 实现） | `npm test -- src/App.test.tsx`; `npm run build` | browser screenshot not captured because Browser/node_repl tooling unavailable; focused tests cover node action switching and node-metadata request routing |
 | T12 | 已完成 | Backend Format Agent | T8 | draft node format override backend | `b9928c0` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"` | export/preview consumers still deferred to T14/T15; frontend format panel deferred to T13 |
 | T13 | 已完成 | Frontend Format Agent | T9, T12 | node-level font and format panel | `b6f2394` | `npm test -- src/App.test.tsx`; `npm run build` | Browser screenshot not captured because Browser/node_repl tooling unavailable; true DOCX render regeneration remains deferred to T15 |
-| T14 | 已完成 | Backend Export Agent | T6, T8, T12 | export consumes mapping, nodes, and format merge | 未提交（T14 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.quality.QualityCheckServiceTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest" --tests "com.gongwen.assistant.exporting.WordExportServiceTest"` | plan script still bypassed because local `.tools\gradle-8.10.2` is absent; wrapper/JDK 21 focused tests passed |
-| T15 | 未开始 | Frontend Export Agent | T11, T13, T14 | preview refresh and export status flow |  |  |  |
+| T14 | 已完成 | Backend Export Agent | T6, T8, T12 | export consumes mapping, nodes, and format merge | `e73814a` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.quality.QualityCheckServiceTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest" --tests "com.gongwen.assistant.exporting.WordExportServiceTest"` | plan script still bypassed because local `.tools\gradle-8.10.2` is absent; wrapper/JDK 21 focused tests passed |
+| T15 | 已完成 | Frontend Export Agent | T11, T13, T14 | preview refresh and export status flow | 未提交（T15 实现） | `npm test -- src/App.test.tsx`; `npm run build` | Browser verification not captured because the in-app Browser tool was not exposed and node_repl failed to initialize; App tests cover preview outdated refresh and backend export blocker display |
 | T16 | 未开始 | QA Agent | T1-T15 | fixture suite, regression tests, and docs sync |  |  |  |
 | T17 | 未开始 | Integration Agent | T1-T16 | final integration verification and progress closure |  |  |  |
 
@@ -88,7 +88,8 @@ Completion evidence format:
 | 2026-05-31 | T11 | Codex Frontend AI Agent | 未提交（T11 实现） | `npm test -- src/App.test.tsx`; `npm run build` | pass; right-panel AI context now follows the selected workbench node, local operation requests send `nodeId/nodeRole/nodeTitle/nodeContext` for persisted nodes, and legacy `targetBlockId` paragraph fallback remains compatible | visual browser screenshot not captured because Browser/node_repl tooling was unavailable; full frontend suite beyond `App.test.tsx` skipped per lightweight-test instruction |
 | 2026-05-31 | T12 | Codex Backend Format Agent | `b9928c0` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"` | pass; draft nodes can save and clear local format overrides, endpoints enforce draft access through `DraftService`, and formatting merge priority is covered in `TemplateEffectiveFormattingServiceTest` | first RED run failed on missing service/merge/repository methods as expected; full backend suite skipped per lightweight-test instruction |
 | 2026-05-31 | T13 | Codex Frontend Format Agent | `b6f2394` | `npm test -- src/App.test.tsx`; `npm run build` | pass; right panel now has a node format panel, saves T12 format overrides, merges saved formatting into the structured editor immediately, and marks true preview as outdated | first frontend RED run failed on missing `中文字体` control as expected; full frontend suite beyond `App.test.tsx` skipped per lightweight-test instruction |
-| 2026-05-31 | T14 | Codex Backend Export Agent | 未提交（T14 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.quality.QualityCheckServiceTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest" --tests "com.gongwen.assistant.exporting.WordExportServiceTest"` | pass; export now requires published structure mapping, consumes `DraftNode` content before legacy blocks, merges draft-local format overrides into export formatting, and stores trace snapshots on export records | first RED run failed on missing T14 constructor/request trace contracts as expected; full backend suite skipped per lightweight-test instruction |
+| 2026-05-31 | T14 | Codex Backend Export Agent | `e73814a` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.quality.QualityCheckServiceTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest" --tests "com.gongwen.assistant.exporting.WordExportServiceTest"` | pass; export now requires published structure mapping, consumes `DraftNode` content before legacy blocks, merges draft-local format overrides into export formatting, and stores trace snapshots on export records | first RED run failed on missing T14 constructor/request trace contracts as expected; full backend suite skipped per lightweight-test instruction |
+| 2026-05-31 | T15 | Codex Frontend Export Agent | 未提交（T15 实现） | `npm test -- src/App.test.tsx`; `npm run build` | pass; workbench right panel now shows true preview states, refreshes render preview, marks edits/format changes stale, and surfaces backend export blocker messages | browser verification not captured because the in-app Browser tool was not exposed and node_repl failed to initialize; visual states covered by focused App tests |
 
 ## Agent File Boundaries
 
@@ -1041,14 +1042,14 @@ T14 completion note:
 
 **Dependencies:** T11, T13, T14
 
-- [ ] Show true preview status in the workbench: current, outdated, rendering, failed, unavailable.
-- [ ] Add refresh preview action that requests backend render preview regeneration when available.
-- [ ] Show export blockers with node labels when backend returns node-targeted errors.
-- [ ] Keep successful export download and history behavior from P11.
-- [ ] Ensure editing content or format marks preview outdated.
-- [ ] Add tests for outdated preview after edit and blocked export node message.
-- [ ] Run frontend tests and build.
-- [ ] Update Progress Board row T15 and Progress Log.
+- [x] Show true preview status in the workbench: current, outdated, rendering, failed, unavailable.
+- [x] Add refresh preview action that requests backend render preview regeneration when available.
+- [x] Show export blockers with node labels when backend returns node-targeted errors.
+- [x] Keep successful export download and history behavior from P11.
+- [x] Ensure editing content or format marks preview outdated.
+- [x] Add tests for outdated preview after edit and blocked export node message.
+- [x] Run frontend tests and build.
+- [x] Update Progress Board row T15 and Progress Log.
 
 **Verification:**
 
@@ -1059,6 +1060,13 @@ npm run build
 ```
 
 **Completion note required:** include browser verification for export blocked and preview outdated states.
+
+**T15 completion notes (2026-05-31):**
+
+- Workbench right panel now has a dedicated true preview status panel for current, outdated, rendering, failed, and unavailable states.
+- Content edits, AI paragraph generation, AI local-operation adoption, template changes, and node format saves/restores mark the true preview as outdated; refresh calls `POST /api/templates/versions/{versionId}/render-preview`.
+- Backend export blocker messages continue through the existing export status surface, including slot/node-targeted blocker copy such as required `BODY` content being empty.
+- Browser verification was not captured because the in-app Browser tool was not exposed in this session and node_repl returned `failed to write kernel assets`; `App.test.tsx` covers preview outdated refresh and export blocked message states, and `npm run build` verifies the frontend bundle.
 
 ## Task T16: Fixture Suite, Regression Tests, And Docs Sync
 

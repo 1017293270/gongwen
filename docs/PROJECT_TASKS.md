@@ -62,13 +62,14 @@
 - P10D T12 `DraftNode` 格式覆盖后端：新增保存和恢复草稿节点格式覆盖 API，覆盖字段包含中西文字体、字号、加粗、对齐、首行缩进、行距、段前段后；保存会标记 `FORMAT_OVERRIDDEN`，恢复会清空 `formatOverride`。格式合并顺序已固化为草稿节点覆盖 > 结构映射/模板覆盖 > 原 DOCX effective formatting > 文种默认 > 系统默认。
 - P10D T13 节点级格式面板前端：右栏新增独立 `NodeFormatPanel`，可编辑中文字体、西文字体、字号、加粗、对齐、行距、首行缩进、段前段后；保存/恢复会调用 T12 API，立即把 CSS 近似效果合并到中间结构化编辑区，并提示真实预览待刷新。
 - P10D T14 导出消费结构节点后端：草稿 Word 导出会要求模板版本已有已发布结构映射，优先读取 `DraftNode` 正文并在缺失时回退旧 `DraftBlock`；导出格式按草稿节点覆盖 > 结构映射/模板覆盖 > 原 DOCX effective formatting 合并，导出记录新增结构 profile、映射 profile、格式和节点快照 JSONB 追溯字段。
+- P10D T15 工作台预览刷新与导出状态前端：右栏新增真实预览状态面板，覆盖当前、待刷新、生成中、失败和未选择模板；正文/格式/AI 采纳等修改会标记真实预览待刷新，刷新会调用模板版本 render-preview API；后端导出阻断消息继续在工作台导出状态和 Toast 中展示。
 
 当前推荐下一阶段：
 
-- P10D DOCX 原貌预览与结构化工作台：T0-T14 已完成，按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 继续执行；下一步优先派前端导出 Agent 做 T15，让工作台展示真实预览刷新状态和后端导出阻断原因。
+- P10D DOCX 原貌预览与结构化工作台：T0-T15 已完成，按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 继续执行；下一步优先派 QA/集成 Agent 做 T16/T17，补样本回归、最终验证和文档收口。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
 - P9 权限继续收口，补材料/导出文件下载鉴权、模板管理员细粒度授权、审计日志和权限不足 UI。
-- P10D 结构节点链路继续下沉，把 AI、质检和导出从兼容 `DraftBlock` 逐步迁到 `DraftNode` / `nodeId`。
+- P10D 结构节点链路继续下沉：AI 和导出已开始消费 `DraftNode` / `nodeId`，后续重点是质检、样本回归和最终集成验证继续减少对兼容 `DraftBlock` 的依赖。
 - P10B 后续增强，继续补 richer style inheritance 和 unsupported OOXML 结构显式提示。
 - P10 模板管理员后台后续增强，继续做字段映射、启停和版本详情。
 
@@ -892,7 +893,7 @@ T0 已由集成 Agent 冻结接口契约；后续并行建议：
 - Agent P10D-C 后端渲染：执行 T4，负责 LibreOffice 真预览、存储、状态和预览 API，使用冻结迁移 `V13`。
 - Agent P10D-D 后端映射：T6 已完成，负责结构映射保存/发布，使用冻结迁移 `V14`。
 - Agent P10D-E 前端模板：T5 已完成；后续执行 T7，负责映射编辑和发布。
-- Agent P10D-F 草稿/AI/格式/导出：T8-T14 已完成；后续执行 T15，每个任务完成后都要回写专项计划进度。
+- Agent P10D-F 草稿/AI/格式/导出：T8-T15 已完成；后续只协助 QA/集成核对节点、格式、预览和导出状态合同。
 - Agent P10D-QA 文档：执行 T16-T17，负责样本库、回归测试、最终验证和文档同步。
 - Agent A 后端 P11：读取或触发最新质检结果，`exportBlocked=true` 时阻断导出；补导出记录模板版本追溯和稳定错误 shape。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检、导出中、导出失败和成功下载状态。
@@ -915,7 +916,7 @@ T0 已由集成 Agent 冻结接口契约；后续并行建议：
 
 - 当前分支和 `git status --short --branch`。
 - `AGENTS.md` 与本文件是否反映当前代码。
-- 最近提交：`1013a3b docs: add docx structure workbench task plan`。如果工作区还有未提交改动，必须先阅读 diff，不要覆盖。
+- 最近提交以 `git log --oneline -5` 为准；如果工作区还有未提交改动，必须先阅读 diff，不要覆盖。
 - 当前阶段是否已有 `docs/superpowers/plans/*` 实施计划。
 - 是否存在未提交用户改动，不能随意覆盖。
 - 当前本机已有 JDK 21、本地 Gradle 8.10.2 和脚本，后端优先用 `scripts/backend-test-focused.ps1` 或 `scripts/backend-test.ps1`，不必默认启 Docker Gradle 冷环境。

@@ -2323,6 +2323,22 @@ textarea.field {
   padding-top: var(--space-3);
 }
 
+.workbench-preview-panel {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workbench-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.workbench-preview-header .ui-button {
+  flex-shrink: 0;
+}
+
 .quality-check-header {
   display: flex;
   align-items: flex-start;

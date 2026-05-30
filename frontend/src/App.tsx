@@ -100,6 +100,7 @@ import {
   TextField,
 } from './components/ui';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
+import { WorkbenchPreviewPanel, type WorkbenchPreviewState } from './components/workbench/WorkbenchPreviewPanel';
 import type {
   AiLocalOperation,
   AiLocalOperationType,
@@ -362,6 +363,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [nodeFormatStatus, setNodeFormatStatus] = useState<NodeFormatPanelStatus>('idle');
   const [nodeFormatError, setNodeFormatError] = useState('');
   const [renderPreviewOutdated, setRenderPreviewOutdated] = useState(false);
+  const [workbenchRenderPreview, setWorkbenchRenderPreview] = useState<DocumentRenderPreview | null>(null);
+  const [workbenchRenderPreviewStatus, setWorkbenchRenderPreviewStatus] = useState<'idle' | 'requesting' | 'error'>('idle');
+  const [workbenchRenderPreviewMessage, setWorkbenchRenderPreviewMessage] = useState('');
   const [qualityCheck, setQualityCheck] = useState<QualityCheckResult | null>(null);
   const [qualityCheckStatus, setQualityCheckStatus] = useState<QualityCheckStatus>('idle');
   const [qualityCheckError, setQualityCheckError] = useState('');
@@ -603,6 +607,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setMaterials(loadedMaterials);
     setTemplateVersions(loadedTemplateVersions);
     setSelectedTemplateProfile(loadedTemplateProfile);
+    setWorkbenchRenderPreview(null);
+    setWorkbenchRenderPreviewStatus('idle');
+    setWorkbenchRenderPreviewMessage('');
+    setRenderPreviewOutdated(false);
     setSelectedNodeId(null);
     setOutline(null);
     setQualityCheck(null);
@@ -775,6 +783,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const selectedNodeFormatLabel = selectedNode
     ? selectedNode.label || workbenchNodeRoleLabel(selectedNode.nodeType)
     : '未选择';
+  const workbenchPreviewState = workbenchPreviewStateFor(
+    draft?.templateVersionId ?? null,
+    renderPreviewOutdated,
+    workbenchRenderPreview,
+    workbenchRenderPreviewStatus,
+  );
+  const workbenchPreviewMessage = workbenchPreviewMessageFor(
+    workbenchPreviewState,
+    workbenchRenderPreview,
+    workbenchRenderPreviewMessage,
+  );
   const selectedNodeAiContext = aiNodeContextForWorkbenchNode(selectedNode);
   const selectedNodeActionKind = aiActionKindForWorkbenchNode(selectedNode);
   const selectedLocalOperationOptions = useMemo(
@@ -906,6 +925,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   function markDraftContentDirty() {
     setStatus('idle');
     setStatusMessage('草稿有未保存修改，质检和真预览需刷新');
+    setRenderPreviewOutdated(true);
     setQualityCheck(null);
     setQualityCheckStatus('idle');
     setQualityCheckError('');
@@ -1254,6 +1274,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setDraft({ ...updatedDraft, nodes: updatedDraftNodes });
       setBlocks(updatedDraft.blocks);
       setDraftNodes(updatedDraftNodes);
+      setWorkbenchRenderPreview(null);
+      setWorkbenchRenderPreviewStatus('idle');
+      setWorkbenchRenderPreviewMessage('');
+      setRenderPreviewOutdated(Boolean(templateVersionId));
       setDirtyDraftNodeIds(new Set());
       setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(updatedDraft.id, updatedDraft.templateVersionId)));
       setSelectedTemplateProfile(updatedProfile);
@@ -1325,6 +1349,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setDraft(generated.draft);
       setBlocks(generated.draft.blocks);
       syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
+      setRenderPreviewOutdated(true);
       setParagraphStatuses((current) => ({ ...current, [key]: 'success' }));
       setStatus('saved');
       setStatusMessage('正文已生成并保存');
@@ -1357,6 +1382,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         setDraft(generated.draft);
         setBlocks(generated.draft.blocks);
         syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
+        setRenderPreviewOutdated(true);
         setParagraphStatuses((current) => ({ ...current, [section.heading]: 'success' }));
       }
       setAllParagraphStatus('success');
@@ -1580,6 +1606,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         }
         setLocalOperationSuggestion(null);
         setLocalOperationStatus('saved');
+        setRenderPreviewOutdated(true);
         setStatus('saved');
         setStatusMessage('节点建议已采纳并保存');
         showToast({ title: '建议已采纳', tone: 'success' });
@@ -1602,6 +1629,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       }
       setLocalOperationSuggestion(null);
       setLocalOperationStatus('saved');
+      setRenderPreviewOutdated(true);
       setStatus('saved');
       setStatusMessage('局部建议已采纳并保存');
       showToast({ title: '建议已采纳', tone: 'success' });
@@ -1657,6 +1685,38 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       const message = error instanceof Error ? error.message : '恢复模板默认格式失败';
       setNodeFormatStatus('error');
       setNodeFormatError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleRefreshWorkbenchPreview() {
+    if (!draft?.templateVersionId) {
+      setWorkbenchRenderPreviewStatus('error');
+      setWorkbenchRenderPreviewMessage('请先选择套版模板');
+      return;
+    }
+    try {
+      setWorkbenchRenderPreviewStatus('requesting');
+      setWorkbenchRenderPreviewMessage('正在刷新真实预览');
+      const preview = await requestRenderPreview(draft.templateVersionId);
+      const resultMessage = renderPreviewResultMessage(preview);
+      setWorkbenchRenderPreview(preview);
+      setRenderPreviewOutdated(false);
+      setWorkbenchRenderPreviewStatus('idle');
+      setWorkbenchRenderPreviewMessage(resultMessage);
+      showToast({
+        title: preview.status === 'READY'
+          ? '真实预览已刷新'
+          : preview.status === 'FAILED' || preview.status === 'UNSUPPORTED'
+            ? '真实预览不可用'
+            : '预览任务已提交',
+        description: resultMessage,
+        tone: preview.status === 'READY' ? 'success' : preview.status === 'FAILED' || preview.status === 'UNSUPPORTED' ? 'error' : 'info',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '真实预览刷新失败';
+      setWorkbenchRenderPreviewStatus('error');
+      setWorkbenchRenderPreviewMessage(message);
       showToast({ title: message, tone: 'error' });
     }
   }
@@ -2240,6 +2300,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               </div>
             )}
             <div className="export-action" aria-label="Word 导出">
+              <WorkbenchPreviewPanel
+                canRefresh={Boolean(draft?.templateVersionId)}
+                isRefreshing={workbenchRenderPreviewStatus === 'requesting'}
+                message={workbenchPreviewMessage}
+                onRefresh={() => void handleRefreshWorkbenchPreview()}
+                state={workbenchPreviewState}
+              />
               <div>
                 <div className="outline-title">Word 导出</div>
                 <div className="panel-kicker">
@@ -2266,7 +2333,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               nodeLabel={selectedNodeFormatLabel}
               onRestore={() => void handleRestoreNodeFormatOverride()}
               onSave={(formatOverride) => void handleSaveNodeFormatOverride(formatOverride)}
-              previewOutdated={renderPreviewOutdated}
+              previewOutdated={false}
               status={nodeFormatStatus}
             />
             </div>
@@ -6093,6 +6160,66 @@ function useEstimatedProgress(isActive: boolean) {
   }, [isActive]);
 
   return progress;
+}
+
+function workbenchPreviewStateFor(
+  templateVersionId: number | null,
+  isOutdated: boolean,
+  preview: DocumentRenderPreview | null,
+  requestStatus: 'idle' | 'requesting' | 'error',
+): WorkbenchPreviewState {
+  if (!templateVersionId) {
+    return 'unavailable';
+  }
+  if (requestStatus === 'requesting') {
+    return 'rendering';
+  }
+  if (isOutdated) {
+    return 'outdated';
+  }
+  if (requestStatus === 'error') {
+    return 'failed';
+  }
+  if (preview?.status === 'FAILED' || preview?.status === 'UNSUPPORTED') {
+    return 'failed';
+  }
+  if (preview?.status === 'PENDING' || preview?.status === 'RENDERING') {
+    return 'rendering';
+  }
+  return 'current';
+}
+
+function workbenchPreviewMessageFor(
+  state: WorkbenchPreviewState,
+  preview: DocumentRenderPreview | null,
+  message: string,
+) {
+  if (message) {
+    return message;
+  }
+  if (state === 'current') {
+    return preview?.updatedAt ? `最后刷新：${new Date(preview.updatedAt).toLocaleString('zh-CN')}` : '当前草稿未发现待刷新的格式或正文修改';
+  }
+  if (state === 'outdated') {
+    return '正文或格式已变化，建议刷新真实预览后再导出对比。';
+  }
+  if (state === 'rendering') {
+    return '预览任务已提交，稍后可再次刷新状态。';
+  }
+  if (state === 'failed') {
+    return preview?.errorMessage ?? '渲染预览暂不可用。';
+  }
+  return '选择套版模板后可刷新真实预览。';
+}
+
+function renderPreviewResultMessage(preview: DocumentRenderPreview) {
+  if (preview.status === 'READY') {
+    return '真实预览已生成';
+  }
+  if (preview.status === 'FAILED' || preview.status === 'UNSUPPORTED') {
+    return preview.errorMessage ?? '真实预览生成失败';
+  }
+  return '真实预览任务已提交';
 }
 
 function qualitySummary(result: QualityCheckResult) {

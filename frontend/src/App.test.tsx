@@ -1077,6 +1077,76 @@ describe('App', () => {
     expect((await screen.findAllByText(/导出已阻断/)).length).toBeGreaterThan(0);
   });
 
+  it('marks true preview outdated after editing and refreshes it from the workbench', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const draft = { ...sampleDraft('预览刷新草稿'), templateVersionId: 9 };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1') && !init?.method) {
+        return Promise.resolve(jsonResponse(draft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/drafts/1/nodes') || url.endsWith('/api/drafts/1/nodes/initialize')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/templates/versions/9/render-preview') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ...renderPreviewFixture('READY'), templateVersionId: 9 }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    const titleInput = await screen.findByLabelText('标题');
+    await userEvent.clear(titleInput);
+    await userEvent.type(titleInput, '预览刷新后的标题');
+
+    expect(await screen.findByText('真实预览待刷新')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '刷新预览' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/templates/versions/9/render-preview', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(await screen.findByText('真实预览已是当前版本')).toBeInTheDocument();
+  });
+
+  it('shows backend export blocker messages in the workbench export panel', async () => {
+    const exportDraft = { ...sampleDraft('导出后端阻断草稿'), templateVersionId: 9 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(exportDraft))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(exportDraft))
+      .mockResolvedValueOnce(jsonResponse(qualityCheckPass()))
+      .mockResolvedValueOnce(errorResponse('EXPORT_REQUIRED_SLOT_EMPTY', '导出必填结构槽位为空：BODY（正文）'));
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: '导出 Word' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect((await screen.findAllByText('导出必填结构槽位为空：BODY（正文）')).length).toBeGreaterThan(0);
+  });
+
   it('materializes template-derived body sections before exporting Word', async () => {
     Object.defineProperty(window.URL, 'createObjectURL', {
       configurable: true,
