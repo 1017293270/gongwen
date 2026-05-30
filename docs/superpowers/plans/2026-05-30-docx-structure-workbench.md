@@ -62,7 +62,7 @@ Completion evidence format:
 | T9 | 已完成 | Frontend Workbench Agent | T8 | left structure tree and center structured editor bind to nodes | 未提交（T9 实现） | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | first pass keeps legacy `DraftBlock` materialization for AI/quality/export compatibility; node-aware AI/export deferred to T10/T14 |
 | T10 | 已完成 | Backend AI Agent | T8 | node-aware AI operations | 未提交（T10 实现） | `.\gradlew.bat --no-daemon --console=plain compileTestJava`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.ai.PromptBuilderTest" --tests "com.gongwen.assistant.ai.AiOutlineServiceTest" --tests "com.gongwen.assistant.ai.AiParagraphServiceTest" --tests "com.gongwen.assistant.ai.AiLocalOperationServiceTest"` | full backend test skipped per lightweight-test instruction; frontend routing still deferred to T11 |
 | T11 | 已完成 | Frontend AI Agent | T9, T10 | right panel context follows selected node | 未提交（T11 实现） | `npm test -- src/App.test.tsx`; `npm run build` | browser screenshot not captured because Browser/node_repl tooling unavailable; focused tests cover node action switching and node-metadata request routing |
-| T12 | 未开始 | Backend Format Agent | T8 | draft node format override backend |  |  |  |
+| T12 | 已完成 | Backend Format Agent | T8 | draft node format override backend | 未提交（T12 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"` | export/preview consumers still deferred to T14/T15; frontend format panel deferred to T13 |
 | T13 | 未开始 | Frontend Format Agent | T9, T12 | node-level font and format panel |  |  |  |
 | T14 | 未开始 | Backend Export Agent | T6, T8, T12 | export consumes mapping, nodes, and format merge |  |  |  |
 | T15 | 未开始 | Frontend Export Agent | T11, T13, T14 | preview refresh and export status flow |  |  |  |
@@ -86,6 +86,7 @@ Completion evidence format:
 | 2026-05-30 | T9 | Codex Frontend Workbench Agent | 未提交（T9 实现） | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | pass; workbench now loads/initializes draft nodes, prefers backend `DraftNode` records in `WorkbenchNode`, shows a left structure tree with status badges, edits selected node content in the center pane, and saves dirty nodes before legacy blocks | initial command `npm test -- --run src/workbenchNodes.test.ts src/App.test.tsx` failed because the script already includes `--run`; corrected command passed; browser screenshot not captured because Browser tool was unavailable |
 | 2026-05-31 | T10 | Codex Backend AI Agent | 未提交（T10 实现） | `.\gradlew.bat --no-daemon --console=plain compileTestJava`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.ai.PromptBuilderTest" --tests "com.gongwen.assistant.ai.AiOutlineServiceTest" --tests "com.gongwen.assistant.ai.AiParagraphServiceTest" --tests "com.gongwen.assistant.ai.AiLocalOperationServiceTest"` | pass; AI requests now accept optional node metadata, outline returns node-level suggestions without applying changes, paragraph generation can write a target `DraftNode`, and local operation targets nodes before legacy blocks | first focused run exposed a null-node compatibility bug in old paragraph requests; fixed and reran passing; full backend test skipped per lightweight-test instruction |
 | 2026-05-31 | T11 | Codex Frontend AI Agent | 未提交（T11 实现） | `npm test -- src/App.test.tsx`; `npm run build` | pass; right-panel AI context now follows the selected workbench node, local operation requests send `nodeId/nodeRole/nodeTitle/nodeContext` for persisted nodes, and legacy `targetBlockId` paragraph fallback remains compatible | visual browser screenshot not captured because Browser/node_repl tooling was unavailable; full frontend suite beyond `App.test.tsx` skipped per lightweight-test instruction |
+| 2026-05-31 | T12 | Codex Backend Format Agent | 未提交（T12 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"` | pass; draft nodes can save and clear local format overrides, endpoints enforce draft access through `DraftService`, and formatting merge priority is covered in `TemplateEffectiveFormattingServiceTest` | first RED run failed on missing service/merge/repository methods as expected; full backend suite skipped per lightweight-test instruction |
 
 ## Agent File Boundaries
 
@@ -909,24 +910,32 @@ T11 completion note:
 
 **Dependencies:** T8
 
-- [ ] Add save format override endpoint for a draft node.
-- [ ] Support eastAsia font, latin font, size, bold, alignment, indent, line spacing, before/after spacing.
-- [ ] Add restore-template-default endpoint that clears draft node override.
-- [ ] Implement formatting merge priority exactly as defined in this plan.
-- [ ] Enforce draft access permissions.
-- [ ] Add tests for merge priority and restore default.
-- [ ] Run focused format tests.
-- [ ] Update Progress Board row T12 and Progress Log.
+- [x] Add save format override endpoint for a draft node.
+- [x] Support eastAsia font, latin font, size, bold, alignment, indent, line spacing, before/after spacing.
+- [x] Add restore-template-default endpoint that clears draft node override.
+- [x] Implement formatting merge priority exactly as defined in this plan.
+- [x] Enforce draft access permissions.
+- [x] Add tests for merge priority and restore default.
+- [x] Run focused format tests.
+- [x] Update Progress Board row T12 and Progress Log.
 
 **Verification:**
 
 ```powershell
 cd E:\gongwen
-powershell -ExecutionPolicy Bypass -File .\scripts\backend-test-focused.ps1 "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest"
-powershell -ExecutionPolicy Bypass -File .\scripts\backend-test-focused.ps1 "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"
+cd backend
+.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"
 ```
 
 **Completion note required:** include the exact merge order verified by tests.
+
+T12 completion note:
+
+- Added `PUT /api/drafts/{draftId}/nodes/{nodeId}/format-override` to save draft-local node formatting.
+- Added `DELETE /api/drafts/{draftId}/nodes/{nodeId}/format-override` to clear the draft-local override and restore template/default formatting for that node.
+- Supported override fields: `eastAsiaFont`, `latinFont`, `fontSizePt`, `bold`, `alignment`, `firstLineIndentTwip`, `lineSpacingRule`, `lineSpacingTwip`, `spacingBeforeTwip`, and `spacingAfterTwip`.
+- Exact merge order verified by tests: `DraftNodeFormatOverride` > structure mapping/template override > original DOCX effective formatting > document type default formatting > system default formatting.
+- Saving override marks the node `FORMAT_OVERRIDDEN`; restoring clears `formatOverride` and returns to `USER_FILLED` or `EMPTY` based on node content while preserving `LOCKED`.
 
 ## Task T13: Node-Level Font And Format Panel UI
 

@@ -1,5 +1,6 @@
 package com.gongwen.assistant.template.profile;
 
+import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import org.junit.jupiter.api.Test;
 
@@ -174,6 +175,46 @@ class TemplateEffectiveFormattingServiceTest {
         assertThat(context.body().latinFontFamily()).isEqualTo("Times New Roman");
         assertThat(context.body().lineSpacing()).isEqualTo(overrideLineSpacing);
         assertThat(context.body().spacingBetween()).isEqualTo(150);
+    }
+
+    @Test
+    void resolvesDraftNodeFormattingUsingDraftThenMappingThenOriginalThenDocumentThenSystemDefaults() {
+        TemplateStructureFormattingProfile systemDefault = formatting("SystemSong", null, null, 26, false, "LEFT", 0, null, 0, 0, null);
+        TemplateStructureFormattingProfile documentDefault = formatting(null, "DocFangSong", null, 28, null, null, null, null, null, 80, null);
+        TemplateStructureFormattingProfile originalEffective = formatting(null, null, "Times New Roman", 30, null, "BOTH", 420, null, 40, null, new TemplateLineSpacingProfile("EXACT", 520, null));
+        TemplateStructureFormattingProfile mappingOverride = formatting("MappingKai", null, null, null, true, "CENTER", null, 150, null, 160, null);
+        DraftNodeFormatOverride draftOverride = new DraftNodeFormatOverride(
+                "DraftHei",
+                null,
+                17.0,
+                null,
+                null,
+                560,
+                "AUTO",
+                180,
+                200,
+                null
+        );
+
+        TemplateStructureFormattingProfile resolved = service.resolveDraftNodeFormatting(
+                systemDefault,
+                documentDefault,
+                originalEffective,
+                mappingOverride,
+                draftOverride
+        );
+
+        assertThat(resolved.fontFamily()).isEqualTo("DraftHei");
+        assertThat(resolved.eastAsiaFontFamily()).isEqualTo("DraftHei");
+        assertThat(resolved.latinFontFamily()).isEqualTo("Times New Roman");
+        assertThat(resolved.fontSizeHalfPoints()).isEqualTo(34);
+        assertThat(resolved.bold()).isTrue();
+        assertThat(resolved.alignment()).isEqualTo("CENTER");
+        assertThat(resolved.indentationFirstLine()).isEqualTo(560);
+        assertThat(resolved.spacingBetween()).isEqualTo(180);
+        assertThat(resolved.spacingBefore()).isEqualTo(200);
+        assertThat(resolved.spacingAfter()).isEqualTo(160);
+        assertThat(resolved.lineSpacing()).isEqualTo(new TemplateLineSpacingProfile("AUTO", null, 180));
     }
 
     @Test

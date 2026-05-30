@@ -33,6 +33,8 @@ public class DraftNodeService {
             "LOCKED"
     );
     private static final Set<String> SKIPPED_ROLES = Set.of("UNKNOWN", "IGNORE");
+    private static final Set<String> ALLOWED_ALIGNMENTS = Set.of("LEFT", "CENTER", "RIGHT", "BOTH", "JUSTIFY");
+    private static final Set<String> ALLOWED_LINE_SPACING_RULES = Set.of("AUTO", "EXACT", "AT_LEAST");
 
     private final DraftService draftService;
     private final DraftNodeRepository draftNodeRepository;
@@ -86,6 +88,29 @@ public class DraftNodeService {
         String status = normalizeStatus(request == null ? null : request.status());
         String content = request == null || request.content() == null ? "" : request.content();
         DraftNode updated = draftNodeRepository.updateContent(draftId, nodeId, content, status)
+                .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
+        return DraftNodeDto.from(updated);
+    }
+
+    public DraftNodeDto saveFormatOverride(long draftId, long nodeId, DraftNodeFormatOverride request) {
+        draftService.getDraft(draftId);
+        DraftNodeFormatOverride override = normalizeFormatOverride(request);
+        DraftNode updated = draftNodeRepository.updateFormatOverride(draftId, nodeId, override, "FORMAT_OVERRIDDEN")
+                .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
+        return DraftNodeDto.from(updated);
+    }
+
+    public DraftNodeDto restoreTemplateDefaultFormatting(long draftId, long nodeId) {
+        draftService.getDraft(draftId);
+        DraftNode existing = draftNodeRepository.findByDraftId(draftId).stream()
+                .filter(node -> node.id() == nodeId)
+                .findFirst()
+                .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
+        DraftNode updated = draftNodeRepository.updateFormatOverride(
+                        draftId,
+                        nodeId,
+                        DraftNodeFormatOverride.empty(),
+                        statusAfterFormatRestore(existing))
                 .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
         return DraftNodeDto.from(updated);
     }
@@ -194,6 +219,27 @@ public class DraftNodeService {
             throw new DraftNodeException("DRAFT_NODE_STATUS_INVALID", "Draft node status is invalid: " + status);
         }
         return normalized;
+    }
+
+    private DraftNodeFormatOverride normalizeFormatOverride(DraftNodeFormatOverride request) {
+        DraftNodeFormatOverride override = request == null ? DraftNodeFormatOverride.empty() : request;
+        if (override.fontSizePt() != null && (override.fontSizePt() <= 0 || override.fontSizePt() > 200)) {
+            throw new DraftNodeException("DRAFT_NODE_FORMAT_INVALID", "Draft node font size is invalid");
+        }
+        if (override.alignment() != null && !ALLOWED_ALIGNMENTS.contains(override.alignment())) {
+            throw new DraftNodeException("DRAFT_NODE_FORMAT_INVALID", "Draft node alignment is invalid: " + override.alignment());
+        }
+        if (override.lineSpacingRule() != null && !ALLOWED_LINE_SPACING_RULES.contains(override.lineSpacingRule())) {
+            throw new DraftNodeException("DRAFT_NODE_FORMAT_INVALID", "Draft node line spacing rule is invalid: " + override.lineSpacingRule());
+        }
+        return override;
+    }
+
+    private String statusAfterFormatRestore(DraftNode node) {
+        if ("LOCKED".equals(node.status())) {
+            return "LOCKED";
+        }
+        return node.content().isBlank() ? "EMPTY" : "USER_FILLED";
     }
 
     private String slotKeyFor(String role) {

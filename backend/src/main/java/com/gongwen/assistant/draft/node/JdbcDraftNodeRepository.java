@@ -107,6 +107,32 @@ public class JdbcDraftNodeRepository implements DraftNodeRepository {
                 .findFirst();
     }
 
+    @Override
+    public Optional<DraftNode> updateFormatOverride(long draftId, long nodeId, DraftNodeFormatOverride override, String status) {
+        int updated = jdbcTemplate.update("""
+                update draft_node
+                set format_override_json = cast(? as jsonb),
+                    status = ?,
+                    updated_at = now()
+                where draft_id = ?
+                  and id = ?
+                """, toJson(override), status, draftId, nodeId);
+        if (updated == 0) {
+            return Optional.empty();
+        }
+        return jdbcTemplate.query("""
+                        select *
+                        from draft_node
+                        where draft_id = ?
+                          and id = ?
+                        """,
+                        this::mapRow,
+                        draftId,
+                        nodeId)
+                .stream()
+                .findFirst();
+    }
+
     private DraftNode mapRow(ResultSet rs, int rowNum) throws SQLException {
         return new DraftNode(
                 rs.getLong("id"),

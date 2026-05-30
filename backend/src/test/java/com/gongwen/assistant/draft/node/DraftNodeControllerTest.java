@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -74,6 +75,57 @@ class DraftNodeControllerTest {
     }
 
     @Test
+    void updatesNodeFormatOverride() throws Exception {
+        when(service.saveFormatOverride(eq(5L), eq(12L), any(DraftNodeFormatOverride.class)))
+                .thenReturn(sampleNode("BODY", "正文", new DraftNodeFormatOverride(
+                        "KaiTi",
+                        "Times New Roman",
+                        16.0,
+                        true,
+                        "CENTER",
+                        560,
+                        "EXACT",
+                        590,
+                        120,
+                        240
+                ), "FORMAT_OVERRIDDEN"));
+
+        mockMvc.perform(put("/api/drafts/5/nodes/12/format-override")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new DraftNodeFormatOverride(
+                                "KaiTi",
+                                "Times New Roman",
+                                16.0,
+                                true,
+                                "CENTER",
+                                560,
+                                "EXACT",
+                                590,
+                                120,
+                                240
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FORMAT_OVERRIDDEN"))
+                .andExpect(jsonPath("$.data.formatOverride.eastAsiaFont").value("KaiTi"))
+                .andExpect(jsonPath("$.data.formatOverride.lineSpacingTwip").value(590));
+
+        verify(service).saveFormatOverride(eq(5L), eq(12L), any(DraftNodeFormatOverride.class));
+    }
+
+    @Test
+    void restoresNodeTemplateDefaultFormatting() throws Exception {
+        when(service.restoreTemplateDefaultFormatting(5L, 12L))
+                .thenReturn(sampleNode("BODY", "正文"));
+
+        mockMvc.perform(delete("/api/drafts/5/nodes/12/format-override"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.formatOverride.eastAsiaFont").doesNotExist())
+                .andExpect(jsonPath("$.data.status").value("USER_FILLED"));
+
+        verify(service).restoreTemplateDefaultFormatting(5L, 12L);
+    }
+
+    @Test
     void returnsUnprocessableWhenMappingIsMissing() throws Exception {
         when(service.initializeNodes(5L)).thenThrow(new DraftNodeException(
                 "STRUCTURE_MAPPING_REQUIRED",
@@ -96,6 +148,10 @@ class DraftNodeControllerTest {
     }
 
     private DraftNodeDto sampleNode(String role, String content) {
+        return sampleNode(role, content, DraftNodeFormatOverride.empty(), "USER_FILLED");
+    }
+
+    private DraftNodeDto sampleNode(String role, String content, DraftNodeFormatOverride formatOverride, String status) {
         return new DraftNodeDto(
                 12L,
                 5L,
@@ -108,8 +164,8 @@ class DraftNodeControllerTest {
                 "BODY".equals(role) ? "正文" : "标题",
                 content,
                 10,
-                "USER_FILLED",
-                DraftNodeFormatOverride.empty(),
+                status,
+                formatOverride,
                 Instant.parse("2026-05-30T00:00:00Z"),
                 Instant.parse("2026-05-30T00:00:00Z")
         );

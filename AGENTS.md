@@ -327,8 +327,8 @@ Agent: 后端
 
 当前下一轮并行建议：
 
-- Agent P10D-F 后端格式 T12：给 `DraftNode` 格式覆盖补后端 API、DTO、服务校验和 focused tests；如需迁移只能使用冻结的 `V16`。
-- Agent P10D-G 前端格式 T13：在 T12 契约稳定后做节点级字体/字号/对齐/缩进/行距面板，文件边界优先 `frontend/src/**`。
+- Agent P10D-F 后端格式 T12：已完成；后续只负责协助前端/导出消费已冻结的 `DraftNode` 格式覆盖合同。
+- Agent P10D-G 前端格式 T13：基于 T12 契约做节点级字体/字号/对齐/缩进/行距面板，文件边界优先 `frontend/src/**`。
 - Agent P10D-H 导出 T14/T15：等 T12/T13 后，让导出和预览消费结构映射、节点正文和格式合并结果。
 - Agent A 后端 P11：在导出服务前读取或触发最新质检结果，`exportBlocked=true` 时阻断导出并返回稳定错误；确保导出记录绑定具体模板版本。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检和导出失败反馈；后续导出记录页只做列表入口，不扩大成完整审计后台。
@@ -358,7 +358,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表、导出详情、失败重试和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、导出记录页、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表、导出详情、失败重试和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、DraftNode 格式覆盖后端合同、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、导出记录页、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
 
 P10D DOCX 原貌预览与结构化工作台已完成 T0 契约冻结。冻结内容见 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`：下一迁移号从 `V12` 开始，后续 T3/T4/T6/T8/T14 分别预留 `V12`/`V13`/`V14`/`V15`/`V16`；共享枚举、API 边界、Agent 文件边界和进度更新规则已固定；本机 `18081` 只视为手动联调后端，不作为自动测试前置条件。
 
@@ -383,6 +383,8 @@ P10D T9 工作台结构树与节点编辑 UI 已落地：前端进入工作台�
 P10D T10 节点感知 AI 后端已落地：`AiOutlineRequest`、`AiParagraphRequest` 和 `AiLocalOperationRequest` 均支持可选 `nodeId`、`nodeRole`、`nodeTitle`、`nodeContext`。提纲生成仍只返回建议，不自动写草稿，并新增 `nodeSuggestions` 表达节点级创建/更新建议；段落生成在目标为正文 `DraftNode` 时会写回该节点并标记 `AI_GENERATED`，同时继续写兼容 `BODY_PARAGRAPH` 块；局部操作优先读取目标 `DraftNode`，返回 `targetNodeId` 和建议文本但不自动保存。AI trace 只记录节点 id、角色、字符数和摘要统计，不记录完整节点正文、完整材料文本或完整建议文本。
 
 P10D T11 右栏节点 AI 前端已落地：工作台右栏 AI 动作会随选中 `WorkbenchNode` 切换；持久化节点的局部操作请求发送 `nodeId`、`nodeRole`、`nodeTitle` 和 `nodeContext`，旧正文段落继续使用 `targetBlockId` fallback。标题和正文节点显示生成建议入口，落款和日期节点转为质检确认，固定文本、页眉页脚、锁定或不支持节点禁用节点级 AI；右栏原有基础质检和 Word 导出入口保持可见。
+
+P10D T12 `DraftNode` 格式覆盖后端已落地：`PUT /api/drafts/{draftId}/nodes/{nodeId}/format-override` 保存当前草稿节点格式覆盖，`DELETE` 同一路径恢复模板默认格式。覆盖字段为 `eastAsiaFont`、`latinFont`、`fontSizePt`、`bold`、`alignment`、`firstLineIndentTwip`、`lineSpacingRule`、`lineSpacingTwip`、`spacingBeforeTwip`、`spacingAfterTwip`；保存会标记 `FORMAT_OVERRIDDEN`，恢复会清空覆盖并按内容回到 `USER_FILLED` 或 `EMPTY`。格式合并优先级已由测试固定为：草稿节点覆盖 > 结构映射/模板覆盖 > 原 DOCX effective formatting > 文种默认 > 系统默认。
 
 当前核心 API：
 
@@ -435,6 +437,8 @@ P10D T11 右栏节点 AI 前端已落地：工作台右栏 AI 动作会随选中
 - `POST /api/drafts/{draftId}/nodes/initialize`
 - `GET /api/drafts/{draftId}/nodes`
 - `PUT /api/drafts/{draftId}/nodes/{nodeId}`
+- `PUT /api/drafts/{draftId}/nodes/{nodeId}/format-override`
+- `DELETE /api/drafts/{draftId}/nodes/{nodeId}/format-override`
 - `GET /api/drafts/{draftId}/materials`
 - `POST /api/drafts/{draftId}/materials`
 - `POST /api/drafts/{draftId}/ai/outline`
@@ -626,7 +630,7 @@ P11 导出体验当前约定：
 下一步建议：
 
 1. 推进 P11 导出体验增强：补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
-2. 推进 P10D T12/T13：先做 `DraftNode` 格式覆盖后端，再接前端节点级格式面板，同时继续保留旧 `DraftBlock` fallback。
+2. 推进 P10D T13：接前端节点级格式面板，调用 T12 的保存/恢复格式覆盖 API，同时继续保留旧 `DraftBlock` fallback。
 3. P10 模板管理员后台继续扩展字段映射、模板启停、版本详情和模板列表操作；不要重复实现文种文件夹、模板卡片、上传解析首版。
 4. P8/P11 后续围绕模板版本 `TemplateProfile` 做导出前阻断和导出记录追溯；P10B 的格式复现合同已落地，不要再把这部分回滚成 P11 前置依赖。
 5. P9 登录与基础权限仍是 MVP 闭环的关键后续，尤其是草稿、材料、模板、导出文件访问控制。

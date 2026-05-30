@@ -11,4 +11,8 @@ public interface DraftNodeRepository {
     List<DraftNode> replaceForDraft(long draftId, List<DraftNode> nodes);
 
     Optional<DraftNode> updateContent(long draftId, long nodeId, String content, String status);
+
+    default Optional<DraftNode> updateFormatOverride(long draftId, long nodeId, DraftNodeFormatOverride override, String status) {
+        throw new UnsupportedOperationException("updateFormatOverride is not implemented");
+    }
 }

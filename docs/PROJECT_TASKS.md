@@ -59,10 +59,11 @@
 - P10D T9 工作台结构树与节点编辑 UI：前端已接入 `DraftNode` 初始化、读取和保存 API，`WorkbenchNode` 优先使用后端节点记录，左栏展示结构节点树和状态标记，中间编辑区可编辑选中节点内容；节点缺失或接口不可用时仍回退到模板结构与旧 `DraftBlock` 数据，保存时继续物化兼容块供现有 AI、质检和导出使用。
 - P10D T10 节点感知 AI 后端：提纲、段落生成和局部操作请求已支持可选 `nodeId`、`nodeRole`、`nodeTitle`、`nodeContext`；提纲返回节点级创建/更新建议但不自动写草稿，段落生成可写入目标正文 `DraftNode` 并保留兼容 `BODY_PARAGRAPH` fallback，局部操作优先目标节点并继续只返回建议文本。
 - P10D T11 右栏节点 AI 前端：右栏 AI 动作会随选中 `WorkbenchNode` 切换；持久化节点的局部操作请求发送 `nodeId`、`nodeRole`、`nodeTitle` 和 `nodeContext`，旧正文段落继续保留 `targetBlockId` fallback；标题/正文显示生成建议入口，落款/日期转为质检确认，锁定或不支持节点禁用节点级 AI。
+- P10D T12 `DraftNode` 格式覆盖后端：新增保存和恢复草稿节点格式覆盖 API，覆盖字段包含中西文字体、字号、加粗、对齐、首行缩进、行距、段前段后；保存会标记 `FORMAT_OVERRIDDEN`，恢复会清空 `formatOverride`。格式合并顺序已固化为草稿节点覆盖 > 结构映射/模板覆盖 > 原 DOCX effective formatting > 文种默认 > 系统默认。
 
 当前推荐下一阶段：
 
-- P10D DOCX 原貌预览与结构化工作台：T0-T11 已完成，按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 继续执行；下一步优先派后端格式 Agent 做 T12，再派前端格式 Agent 做 T13，让节点级格式覆盖进入编辑闭环。
+- P10D DOCX 原貌预览与结构化工作台：T0-T12 已完成，按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 继续执行；下一步优先派前端格式 Agent 做 T13，让节点级格式覆盖进入编辑闭环。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
 - P9 权限继续收口，补材料/导出文件下载鉴权、模板管理员细粒度授权、审计日志和权限不足 UI。
 - P10D 结构节点链路继续下沉，把 AI、质检和导出从兼容 `DraftBlock` 逐步迁到 `DraftNode` / `nodeId`。
@@ -889,7 +890,7 @@ T0 已由集成 Agent 冻结接口契约；后续并行建议：
 - Agent P10D-C 后端渲染：执行 T4，负责 LibreOffice 真预览、存储、状态和预览 API，使用冻结迁移 `V13`。
 - Agent P10D-D 后端映射：T6 已完成，负责结构映射保存/发布，使用冻结迁移 `V14`。
 - Agent P10D-E 前端模板：T5 已完成；后续执行 T7，负责映射编辑和发布。
-- Agent P10D-F 草稿/AI/格式/导出：T8-T11 已完成；后续按顺序执行 T12-T15，每个任务完成后都要回写专项计划进度。
+- Agent P10D-F 草稿/AI/格式/导出：T8-T12 已完成；后续按顺序执行 T13-T15，每个任务完成后都要回写专项计划进度。
 - Agent P10D-QA 文档：执行 T16-T17，负责样本库、回归测试、最终验证和文档同步。
 - Agent A 后端 P11：读取或触发最新质检结果，`exportBlocked=true` 时阻断导出；补导出记录模板版本追溯和稳定错误 shape。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检、导出中、导出失败和成功下载状态。

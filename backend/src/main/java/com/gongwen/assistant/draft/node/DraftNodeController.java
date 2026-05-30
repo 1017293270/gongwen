@@ -5,6 +5,7 @@ import com.gongwen.assistant.draft.DraftNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,6 +43,23 @@ public class DraftNodeController {
             @RequestBody(required = false) UpdateDraftNodeRequest request
     ) {
         return ApiResponse.ok(service.updateNode(draftId, nodeId, request));
+    }
+
+    @PutMapping("/{nodeId}/format-override")
+    public ApiResponse<DraftNodeDto> updateFormatOverride(
+            @PathVariable long draftId,
+            @PathVariable long nodeId,
+            @RequestBody(required = false) DraftNodeFormatOverride request
+    ) {
+        return ApiResponse.ok(service.saveFormatOverride(draftId, nodeId, request));
+    }
+
+    @DeleteMapping("/{nodeId}/format-override")
+    public ApiResponse<DraftNodeDto> restoreTemplateDefaultFormatting(
+            @PathVariable long draftId,
+            @PathVariable long nodeId
+    ) {
+        return ApiResponse.ok(service.restoreTemplateDefaultFormatting(draftId, nodeId));
     }
 
     @ExceptionHandler(DraftNodeException.class)

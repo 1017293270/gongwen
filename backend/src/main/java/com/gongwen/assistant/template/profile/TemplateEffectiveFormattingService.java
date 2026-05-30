@@ -1,5 +1,6 @@
 package com.gongwen.assistant.template.profile;
 
+import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import org.springframework.stereotype.Service;
 
@@ -39,6 +40,20 @@ public final class TemplateEffectiveFormattingService {
                 resolveFirst(profile, safeOverrides, SIGNATURE_TYPES),
                 resolveFirst(profile, safeOverrides, DATE_TYPES)
         );
+    }
+
+    public TemplateStructureFormattingProfile resolveDraftNodeFormatting(
+            TemplateStructureFormattingProfile systemDefault,
+            TemplateStructureFormattingProfile documentTypeDefault,
+            TemplateStructureFormattingProfile originalEffectiveFormatting,
+            TemplateStructureFormattingProfile structureMappingOverride,
+            DraftNodeFormatOverride draftNodeOverride
+    ) {
+        TemplateStructureFormattingProfile resolved = systemDefault;
+        resolved = mergeNullable(resolved, documentTypeDefault);
+        resolved = mergeNullable(resolved, originalEffectiveFormatting);
+        resolved = mergeNullable(resolved, structureMappingOverride);
+        return mergeNullable(resolved, draftNodeOverrideToFormatting(draftNodeOverride));
     }
 
     private TemplateStructureFormattingProfile resolveFirst(
@@ -90,5 +105,52 @@ public final class TemplateEffectiveFormattingService {
             return overrideFormatting;
         }
         return profileFormatting.mergeOverride(overrideFormatting);
+    }
+
+    private TemplateStructureFormattingProfile mergeNullable(
+            TemplateStructureFormattingProfile baseFormatting,
+            TemplateStructureFormattingProfile overrideFormatting
+    ) {
+        if (baseFormatting == null) {
+            return overrideFormatting;
+        }
+        return baseFormatting.mergeOverride(overrideFormatting);
+    }
+
+    private TemplateStructureFormattingProfile draftNodeOverrideToFormatting(DraftNodeFormatOverride override) {
+        if (override == null || override.isEmpty()) {
+            return null;
+        }
+        String fontFamily = override.eastAsiaFont() == null ? override.latinFont() : override.eastAsiaFont();
+        Integer fontSizeHalfPoints = override.fontSizePt() == null
+                ? null
+                : (int) Math.round(override.fontSizePt() * 2);
+        TemplateLineSpacingProfile lineSpacing = lineSpacingProfile(override.lineSpacingRule(), override.lineSpacingTwip());
+        Integer spacingBetween = "AUTO".equals(override.lineSpacingRule()) ? override.lineSpacingTwip() : null;
+        return new TemplateStructureFormattingProfile(
+                fontFamily,
+                fontSizeHalfPoints,
+                override.bold(),
+                override.alignment(),
+                override.firstLineIndentTwip(),
+                spacingBetween,
+                override.spacingBeforeTwip(),
+                override.spacingAfterTwip(),
+                null,
+                override.eastAsiaFont(),
+                override.latinFont(),
+                lineSpacing
+        );
+    }
+
+    private TemplateLineSpacingProfile lineSpacingProfile(String rule, Integer value) {
+        if (rule == null && value == null) {
+            return null;
+        }
+        String mode = rule == null ? "AUTO" : rule;
+        if ("AUTO".equals(mode)) {
+            return new TemplateLineSpacingProfile("AUTO", null, value);
+        }
+        return new TemplateLineSpacingProfile(mode, value, null);
     }
 }
