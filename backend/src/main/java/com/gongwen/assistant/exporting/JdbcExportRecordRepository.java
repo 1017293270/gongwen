@@ -85,6 +85,7 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
                         rs.getString("error_code"),
                         rs.getString("error_message"),
                         "SUCCESS".equals(rs.getString("status")) && rs.getString("file_path") != null,
+                        "FAILED".equals(rs.getString("status")) && rs.getObject("draft_id") != null,
                         rs.getObject("created_at", OffsetDateTime.class).toInstant()),
                 visibilityArgs(currentUser));
     }
@@ -102,6 +103,48 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
                         rs.getLong("id"),
                         rs.getString("file_name"),
                         rs.getString("file_path")),
+                queryArgs(recordId, currentUser));
+        return records.stream().findFirst();
+    }
+
+    @Override
+    public Optional<ExportRecordDetail> findDetailById(long recordId, CurrentUser currentUser) {
+        List<ExportRecordDetail> records = jdbcTemplate.query("""
+                        select er.id,
+                               er.draft_id,
+                               d.title as draft_title,
+                               d.document_type_code,
+                               er.template_id,
+                               er.template_version_id,
+                               er.template_name,
+                               er.template_version,
+                               er.file_name,
+                               er.file_path,
+                               er.status,
+                               er.error_code,
+                               er.error_message,
+                               er.created_at
+                        from export_record er
+                        left join draft d on d.id = er.draft_id
+                        where er.id = ? %s
+                        """.formatted(visibilitySql(currentUser)),
+                (rs, rowNum) -> new ExportRecordDetail(
+                        rs.getLong("id"),
+                        rs.getObject("draft_id") == null ? null : rs.getLong("draft_id"),
+                        rs.getString("draft_title"),
+                        rs.getString("document_type_code"),
+                        rs.getObject("template_id") == null ? null : rs.getLong("template_id"),
+                        rs.getObject("template_version_id") == null ? null : rs.getLong("template_version_id"),
+                        rs.getString("template_name"),
+                        rs.getInt("template_version"),
+                        rs.getString("file_name"),
+                        rs.getString("status"),
+                        rs.getString("error_code"),
+                        rs.getString("error_message"),
+                        "SUCCESS".equals(rs.getString("status")) && rs.getString("file_path") != null,
+                        "FAILED".equals(rs.getString("status")) && rs.getObject("draft_id") != null,
+                        false,
+                        rs.getObject("created_at", OffsetDateTime.class).toInstant()),
                 queryArgs(recordId, currentUser));
         return records.stream().findFirst();
     }

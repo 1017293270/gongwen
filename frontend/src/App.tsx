@@ -18,6 +18,7 @@ import {
   KeyRound,
   Pencil,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Settings,
@@ -41,6 +42,7 @@ import {
   disableUser,
   downloadExportRecord,
   exportDraftWord,
+  getExportRecordDetail,
   getAiProviderSettings,
   getCurrentUser,
   getTemplateProfile,
@@ -60,6 +62,7 @@ import {
   login,
   logout,
   resetUserPassword,
+  retryExportRecord,
   runQualityCheck,
   saveDraftBlocks,
   testAiProviderConnection,
@@ -96,6 +99,7 @@ import type {
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
+  ExportRecordDetail,
   ExportRecordSummary,
   Material,
   QualityCheckItem,
@@ -289,6 +293,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [exportRecordStatus, setExportRecordStatus] = useState<ExportRecordListStatus>('idle');
   const [exportRecordMessage, setExportRecordMessage] = useState('');
   const [downloadingExportRecordId, setDownloadingExportRecordId] = useState<number | null>(null);
+  const [retryingExportRecordId, setRetryingExportRecordId] = useState<number | null>(null);
+  const [exportRecordDetail, setExportRecordDetail] = useState<ExportRecordDetail | null>(null);
+  const [exportRecordDetailStatus, setExportRecordDetailStatus] = useState<ExportRecordListStatus>('idle');
+  const [exportRecordDetailMessage, setExportRecordDetailMessage] = useState('');
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -1275,6 +1283,49 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
+  async function handleOpenExportRecordDetail(record: ExportRecordSummary) {
+    setExportRecordDetail(null);
+    setExportRecordDetailStatus('loading');
+    setExportRecordDetailMessage('正在加载导出详情');
+    try {
+      const detail = await getExportRecordDetail(record.id);
+      setExportRecordDetail(detail);
+      setExportRecordDetailStatus('idle');
+      setExportRecordDetailMessage('导出详情已加载');
+    } catch (error) {
+      setExportRecordDetailStatus('error');
+      setExportRecordDetailMessage(error instanceof Error ? error.message : '导出详情加载失败');
+    }
+  }
+
+  function handleCloseExportRecordDetail() {
+    if (retryingExportRecordId !== null) {
+      return;
+    }
+    setExportRecordDetail(null);
+    setExportRecordDetailStatus('idle');
+    setExportRecordDetailMessage('');
+  }
+
+  async function handleRetryExportRecord(record: ExportRecordSummary | ExportRecordDetail) {
+    if (!record.canRetry) {
+      return;
+    }
+    try {
+      setRetryingExportRecordId(record.id);
+      const result = await retryExportRecord(record.id);
+      downloadBlob(result.blob, result.fileName);
+      setExportRecordDetailMessage('重试导出已完成');
+      showToast({ title: '重试导出已完成', description: result.fileName, tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '重试导出失败';
+      setExportRecordDetailMessage(message);
+      showToast({ title: message, tone: 'error' });
+    } finally {
+      setRetryingExportRecordId(null);
+    }
+  }
+
   async function handleAcceptLocalOperation() {
     if (!draft || !localOperationSuggestion) {
       return;
@@ -1411,6 +1462,27 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               );
             })}
           </nav>
+          <section aria-label="当前账号" className="sidebar-account">
+            <div className="sidebar-account-row">
+              <span className="sidebar-account-name" title={currentUser.displayName}>
+                {currentUser.displayName}
+              </span>
+              <Button
+                aria-label="退出登录"
+                className="sidebar-account-action"
+                icon={<LogOut aria-hidden="true" />}
+                iconOnly
+                onClick={() => {
+                  void logout()
+                    .catch(() => undefined)
+                    .finally(onLogout);
+                }}
+                variant="ghost"
+              >
+                退出登录
+              </Button>
+            </div>
+          </section>
         </aside>
       )}
 
@@ -1430,23 +1502,19 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             </div>
           </div>
           <div className="header-actions">
-            <div className="user-chip" aria-label="当前账号">
-              <span className="user-chip-name">{currentUser.displayName}</span>
-              <span className="user-chip-meta">
-                {currentUser.departmentName ?? '未分配部门'} · {roleLabel(currentUser.roles[0])}
-              </span>
-            </div>
-            <Button
-              icon={<LogOut aria-hidden="true" />}
-              onClick={() => {
-                void logout()
-                  .catch(() => undefined)
-                  .finally(onLogout);
-              }}
-              variant="ghost"
-            >
-              退出
-            </Button>
+            {activeView === 'workbench' && (
+              <Button
+                icon={<LogOut aria-hidden="true" />}
+                onClick={() => {
+                  void logout()
+                    .catch(() => undefined)
+                    .finally(onLogout);
+                }}
+                variant="ghost"
+              >
+                退出
+              </Button>
+            )}
             {activeView === 'overview' && (
               <Button icon={<FileText aria-hidden="true" />} onClick={() => setActiveView('workbench')}>
                 进入工作台
@@ -1945,7 +2013,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               downloadingRecordId={downloadingExportRecordId}
               message={exportRecordMessage}
               onDownload={(record) => void handleDownloadExportRecord(record)}
+              onOpenDetail={(record) => void handleOpenExportRecordDetail(record)}
+              onRetry={(record) => void handleRetryExportRecord(record)}
               records={exportRecords}
+              retryingRecordId={retryingExportRecordId}
               status={exportRecordStatus}
             />
           ) : (
@@ -2132,6 +2203,16 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             )}
           </div>
         </Dialog>
+
+        <ExportRecordDetailDialog
+          detail={exportRecordDetail}
+          isRetrying={retryingExportRecordId === exportRecordDetail?.id}
+          message={exportRecordDetailMessage}
+          onClose={handleCloseExportRecordDetail}
+          onRetry={(record) => void handleRetryExportRecord(record)}
+          open={exportRecordDetailStatus === 'loading' || exportRecordDetail !== null || exportRecordDetailStatus === 'error'}
+          status={exportRecordDetailStatus}
+        />
 
         <ConfirmDialog
           cancelLabel="继续编辑"
@@ -4420,13 +4501,19 @@ function ExportRecordsPage({
   downloadingRecordId,
   message,
   onDownload,
+  onOpenDetail,
+  onRetry,
   records,
+  retryingRecordId,
   status,
 }: {
   downloadingRecordId: number | null;
   message: string;
   onDownload: (record: ExportRecordSummary) => void;
+  onOpenDetail: (record: ExportRecordSummary) => void;
+  onRetry: (record: ExportRecordSummary) => void;
   records: ExportRecordSummary[];
+  retryingRecordId: number | null;
   status: ExportRecordListStatus;
 }) {
   const columns: Array<ManagementTableColumn<ExportRecordSummary>> = [
@@ -4470,21 +4557,42 @@ function ExportRecordsPage({
     {
       key: 'actions',
       header: '操作',
-      width: '0.7fr',
+      width: '1.4fr',
       align: 'end',
       render: (record) => (
         <div className="management-table-actions">
           <Button
-            aria-label={record.canDownload ? `下载导出文件：${record.fileName}` : `导出文件不可下载：${record.fileName}`}
-            disabled={!record.canDownload}
-            icon={<FileDown aria-hidden="true" />}
-            isLoading={downloadingRecordId === record.id}
-            loadingLabel="正在下载"
-            onClick={() => onDownload(record)}
+            aria-label={`查看导出记录：${record.draftTitle ?? record.fileName}`}
+            icon={<Eye aria-hidden="true" />}
+            onClick={() => onOpenDetail(record)}
             variant="secondary"
           >
-            下载
+            详情
           </Button>
+          {record.canRetry && (
+            <Button
+              aria-label={`重试导出记录：${record.draftTitle ?? record.fileName}`}
+              icon={<RotateCcw aria-hidden="true" />}
+              isLoading={retryingRecordId === record.id}
+              loadingLabel="重试中"
+              onClick={() => onRetry(record)}
+              variant="secondary"
+            >
+              重试
+            </Button>
+          )}
+          {record.canDownload && (
+            <Button
+              aria-label={`下载导出文件：${record.fileName}`}
+              icon={<FileDown aria-hidden="true" />}
+              isLoading={downloadingRecordId === record.id}
+              loadingLabel="正在下载"
+              onClick={() => onDownload(record)}
+              variant="secondary"
+            >
+              下载
+            </Button>
+          )}
         </div>
       ),
     },
@@ -4514,11 +4622,106 @@ function ExportRecordsPage({
           emptyTitle="暂无导出记录"
           getKey={(record) => record.id}
           items={records}
-          minWidth="920px"
+          minWidth="1040px"
           status={status}
         />
       </section>
     </main>
+  );
+}
+
+function ExportRecordDetailDialog({
+  detail,
+  isRetrying,
+  message,
+  onClose,
+  onRetry,
+  open,
+  status,
+}: {
+  detail: ExportRecordDetail | null;
+  isRetrying: boolean;
+  message: string;
+  onClose: () => void;
+  onRetry: (record: ExportRecordDetail) => void;
+  open: boolean;
+  status: ExportRecordListStatus;
+}) {
+  return (
+    <Dialog
+      actions={(
+        <>
+          <Button disabled={isRetrying} onClick={onClose} variant="secondary">
+            关闭
+          </Button>
+          {detail?.canRetry && (
+            <Button
+              icon={<RotateCcw aria-hidden="true" />}
+              isLoading={isRetrying}
+              loadingLabel="重试中"
+              onClick={() => onRetry(detail)}
+            >
+              重试导出
+            </Button>
+          )}
+        </>
+      )}
+      description={detail ? `${detail.templateName} v${detail.templateVersion} · ${detail.fileName}` : '正在读取导出记录'}
+      onClose={onClose}
+      open={open}
+      title="导出详情"
+    >
+      {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'info'} />}
+      {detail && (
+        <div className="template-profile-grid">
+          <section className="template-profile-box">
+            <h3>基础信息</h3>
+            <div className="template-profile-item">
+              <strong>草稿</strong>
+              <span>{detail.draftTitle ?? '未绑定草稿'}</span>
+            </div>
+            <div className="template-profile-item">
+              <strong>模板版本</strong>
+              <span>{detail.templateName} v{detail.templateVersion}</span>
+            </div>
+            <div className="template-profile-item">
+              <strong>导出时间</strong>
+              <span>{formatTimestamp(detail.createdAt)}</span>
+            </div>
+          </section>
+          <section className="template-profile-box">
+            <h3>执行状态</h3>
+            <div className="template-profile-item">
+              <strong>状态</strong>
+              <span className={`status-chip ${detail.status === 'SUCCESS' ? 'success' : 'danger'}`}>
+                {exportRecordStatusLabel(detail.status)}
+              </span>
+            </div>
+            <div className="template-profile-item">
+              <strong>错误码</strong>
+              <span>{detail.errorCode ?? '无'}</span>
+            </div>
+            <div className="template-profile-item">
+              <strong>文件状态</strong>
+              <span>{detail.fileAvailable ? '历史文件可下载' : '历史文件不可用'}</span>
+            </div>
+          </section>
+          {detail.errorMessage && (
+            <section className="template-profile-box template-profile-wide">
+              <h3>失败原因</h3>
+              <StatusMessage title={detail.errorMessage} tone="warning" />
+            </section>
+          )}
+          {detail.status === 'SUCCESS' && !detail.fileAvailable && (
+            <section className="template-profile-box template-profile-wide">
+              <StatusMessage title="历史文件不可用" tone="warning">
+                <span>记录仍可追溯模板版本，但本地文件可能已被移动或清理，需要重新导出。</span>
+              </StatusMessage>
+            </section>
+          )}
+        </div>
+      )}
+    </Dialog>
   );
 }
 

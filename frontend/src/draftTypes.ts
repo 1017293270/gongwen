@@ -299,7 +299,12 @@ export type ExportRecordSummary = {
   errorCode: string | null;
   errorMessage: string | null;
   canDownload: boolean;
+  canRetry: boolean;
   createdAt: string;
+};
+
+export type ExportRecordDetail = ExportRecordSummary & {
+  fileAvailable: boolean;
 };
 
 export type AiProviderSettings = {

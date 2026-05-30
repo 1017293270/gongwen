@@ -45,6 +45,11 @@ public class WordExportController {
         return ApiResponse.ok(exportRecordService.listRecords());
     }
 
+    @GetMapping("/{recordId}")
+    public ApiResponse<ExportRecordDetail> getExportRecord(@PathVariable long recordId) {
+        return ApiResponse.ok(exportRecordService.detail(recordId));
+    }
+
     @GetMapping("/{recordId}/download")
     public ResponseEntity<byte[]> downloadExportRecord(@PathVariable long recordId) {
         ExportRecordFile file = exportRecordService.download(recordId);
@@ -55,6 +60,11 @@ public class WordExportController {
                 .contentType(MediaType.parseMediaType(file.contentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .body(file.content());
+    }
+
+    @PostMapping("/{recordId}/retry")
+    public ResponseEntity<byte[]> retryExportRecord(@PathVariable long recordId) {
+        return wordResponse(exportRecordService.retry(recordId));
     }
 
     @PostMapping("/word")

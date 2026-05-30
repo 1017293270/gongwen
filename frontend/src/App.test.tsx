@@ -85,6 +85,47 @@ describe('App', () => {
     }));
   });
 
+  it('renders the current account in the sidebar footer instead of the top header', async () => {
+    vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/auth/me')) {
+        return Promise.resolve(jsonResponse({
+          id: 1,
+          username: 'admin',
+          displayName: 'System Admin',
+          departmentId: 1,
+          departmentName: '总公司',
+          roles: ['DRAFTER'],
+        }));
+      }
+      if (url.endsWith('/api/auth/csrf')) {
+        return Promise.resolve(jsonResponse({ token: 'test-csrf-token' }));
+      }
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([
+          { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+        ]));
+      }
+      if (url.includes('/api/templates/versions')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    const { container } = render(<App />);
+
+    const accountSection = await screen.findByLabelText('当前账号');
+    expect(within(accountSection).getByText('System Admin')).toBeInTheDocument();
+    expect(within(accountSection).queryByText('总公司')).not.toBeInTheDocument();
+    expect(within(accountSection).queryByText('起草人')).not.toBeInTheDocument();
+    expect(within(accountSection).queryByText('当前账号')).not.toBeInTheDocument();
+    expect(within(accountSection).getByRole('button', { name: '退出登录' })).toBeInTheDocument();
+
+    const header = container.querySelector('.app-header');
+    expect(header).not.toBeNull();
+    expect(within(header as HTMLElement).queryByText('System Admin')).not.toBeInTheDocument();
+  });
+
   it('selects a body section node from the paper and updates the right panel context', async () => {
     const sectionDraft = {
       ...sampleDraft('节点选择草稿'),
@@ -938,6 +979,7 @@ describe('App', () => {
           }),
           sampleExportRecord({
             id: 8,
+            draftId: 3,
             draftTitle: '缺字段草稿',
             templateVersionId: 9,
             templateName: '通知模板',
@@ -947,10 +989,33 @@ describe('App', () => {
             errorCode: 'MISSING_TEMPLATE_VALUE',
             errorMessage: '正文不能为空',
             canDownload: false,
+            canRetry: true,
           }),
         ]));
       }
+      if (url.endsWith('/api/exports/8') && init?.method !== 'POST') {
+        return Promise.resolve(jsonResponse({
+          ...sampleExportRecord({
+            id: 8,
+            draftId: 3,
+            draftTitle: '缺字段草稿',
+            templateVersionId: 9,
+            templateName: '通知模板',
+            templateVersion: 4,
+            fileName: '通知模板-v4.docx',
+            status: 'FAILED',
+            errorCode: 'MISSING_TEMPLATE_VALUE',
+            errorMessage: '正文不能为空',
+            canDownload: false,
+            canRetry: true,
+          }),
+          fileAvailable: false,
+        }));
+      }
       if (url.endsWith('/api/exports/7/download')) {
+        return Promise.resolve(docxResponse('通知模板-v4.docx'));
+      }
+      if (url.endsWith('/api/exports/8/retry') && init?.method === 'POST') {
         return Promise.resolve(docxResponse('通知模板-v4.docx'));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
@@ -974,6 +1039,18 @@ describe('App', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/7/download', expect.any(Object));
     expect(clickSpy).toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: '查看导出记录：缺字段草稿' }));
+
+    expect(await screen.findByRole('dialog', { name: '导出详情' })).toBeInTheDocument();
+    expect(screen.getByText('MISSING_TEMPLATE_VALUE')).toBeInTheDocument();
+    expect(screen.getByText('历史文件不可用')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: '重试导出' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/8/retry', expect.objectContaining({
+      method: 'POST',
+    }));
   });
 
   it('creates a document type from the new management page', async () => {
@@ -1799,6 +1876,8 @@ function sampleExportRecord(overrides: Partial<{
   errorCode: string | null;
   errorMessage: string | null;
   canDownload: boolean;
+  canRetry: boolean;
+  fileAvailable: boolean;
   createdAt: string;
 }> = {}) {
   return {
@@ -1815,6 +1894,8 @@ function sampleExportRecord(overrides: Partial<{
     errorCode: null,
     errorMessage: null,
     canDownload: true,
+    canRetry: false,
+    fileAvailable: true,
     createdAt: '2026-05-30T09:30:00Z',
     ...overrides,
   };

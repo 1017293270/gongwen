@@ -16,6 +16,7 @@ public record ExportRecordSummary(
         String errorCode,
         String errorMessage,
         boolean canDownload,
+        boolean canRetry,
         Instant createdAt
 ) {
 }

@@ -355,7 +355,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、导出记录页、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表、导出详情、失败重试和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、导出记录页、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
 
 当前核心 API：
 
@@ -381,9 +381,11 @@ Agent: 后端
 - `POST /api/templates/{templateId}/versions`
 - `GET /api/templates/versions/{versionId}/profile`
 - `GET /api/exports`
+- `GET /api/exports/{recordId}`
 - `POST /api/exports/word`
 - `POST /api/exports/drafts/{draftId}/word`
 - `GET /api/exports/{recordId}/download`
+- `POST /api/exports/{recordId}/retry`
 - `GET /api/document-types`
 - `POST /api/document-types`
 - `PUT /api/document-types/{code}`
@@ -493,8 +495,9 @@ P11 导出体验当前约定：
 - 后端草稿 Word 导出服务会读取最近一次质检结果；未质检返回 `QUALITY_CHECK_REQUIRED`，存在阻断项返回 `QUALITY_CHECK_BLOCKED`，并在稳定错误消息中带首个阻断原因。
 - 导出成功记录会保存 `template_id`、`template_version_id`、`draft_id`、`exported_by`、`department_id` 和本地文件路径，确保历史文件可追溯到具体模板版本。
 - 历史导出文件由 `GONGWEN_EXPORT_STORAGE_DIR` 配置本地存储目录，默认 `storage/exports`；目录内容不提交到仓库。
-- `GET /api/exports` 返回当前用户可访问的导出记录，`GET /api/exports/{recordId}/download` 只允许下载有权限且状态成功的历史文件。
-- 前端导出入口复用现有按钮和 `StatusMessage`，覆盖导出中、质检阻断、失败和成功下载状态；导出记录页复用全局管理表格，展示草稿、模板版本、状态、失败原因和下载操作。
+- `GET /api/exports` 返回当前用户可访问的导出记录，`GET /api/exports/{recordId}` 返回单条详情和历史文件可用性，`GET /api/exports/{recordId}/download` 只允许下载有权限且状态成功的历史文件。
+- 失败记录如果绑定了草稿，可通过 `POST /api/exports/{recordId}/retry` 重新触发草稿 Word 导出；重试仍会走草稿权限、最新质检和模板版本检查。
+- 前端导出入口复用现有按钮和 `StatusMessage`，覆盖导出中、质检阻断、失败和成功下载状态；导出记录页复用全局管理表格，展示草稿、模板版本、状态、失败原因、详情弹窗、历史下载和失败重试操作。
 
 模板引擎当前约定：
 
@@ -583,7 +586,7 @@ P11 导出体验当前约定：
 
 下一步建议：
 
-1. 推进 P11 导出体验增强：补导出记录详情、失败重试策略、更复杂正文块填充和历史文件不可用时的运维提示。
+1. 推进 P11 导出体验增强：补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
 2. 推进 P10C 结构节点持久化：新增后端 `draft_node` 或兼容节点 API，让工作台节点内容和草稿级样式覆盖刷新后不丢失，并逐步接入 AI/质检 `nodeId`。
 3. P10 模板管理员后台继续扩展字段映射、模板启停、版本详情和模板列表操作；不要重复实现文种文件夹、模板卡片、上传解析首版。
 4. P8/P11 后续围绕模板版本 `TemplateProfile` 做导出前阻断和导出记录追溯；P10B 的格式复现合同已落地，不要再把这部分回滚成 P11 前置依赖。

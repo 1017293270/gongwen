@@ -15,4 +15,8 @@ public interface ExportRecordRepository {
     default Optional<ExportRecordFileReference> findFileById(long recordId, CurrentUser currentUser) {
         return Optional.empty();
     }
+
+    default Optional<ExportRecordDetail> findDetailById(long recordId, CurrentUser currentUser) {
+        return Optional.empty();
+    }
 }

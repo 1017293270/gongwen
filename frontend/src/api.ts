@@ -15,6 +15,7 @@ import type {
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
+  ExportRecordDetail,
   ExportRecordSummary,
   Material,
   QualityCheckResult,
@@ -399,8 +400,18 @@ export function listExportRecords() {
   return requestJson<ExportRecordSummary[]>('/api/exports');
 }
 
+export function getExportRecordDetail(recordId: number) {
+  return requestJson<ExportRecordDetail>(`/api/exports/${recordId}`);
+}
+
 export function downloadExportRecord(recordId: number) {
   return requestBlob(`/api/exports/${recordId}/download`);
+}
+
+export function retryExportRecord(recordId: number) {
+  return requestBlob(`/api/exports/${recordId}/retry`, {
+    method: 'POST',
+  });
 }
 
 export function getAiProviderSettings() {
