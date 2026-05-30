@@ -333,7 +333,7 @@ Agent: 后端
 - Agent A 后端 P11：在导出服务前读取或触发最新质检结果，`exportBlocked=true` 时阻断导出并返回稳定错误；确保导出记录绑定具体模板版本。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检和导出失败反馈；后续导出记录页只做列表入口，不扩大成完整审计后台。
 - Agent C 后端/前端 P10：继续模板后台字段映射、模板启停和版本详情；必须复用已存在 `GET/POST /api/templates`、版本上传和 profile API。
-- Agent D QA/文档：补 P10/P11 的成功、空、错误、权限预留和导出阻断场景；同步 `AGENTS.md`、`docs/PROJECT_TASKS.md` 和必要专题文档。
+- Agent D QA/文档：P10D T16 已完成轻量 fixture/regression/docs sync；后续协助 T17 集成收口和风险说明。
 - 集成 Agent：先查 `git status --short --branch`，确认没有覆盖用户未提交改动；对齐 API 字段后跑 focused 后端测试、前端 `npm run build`，必要时再跑更广测试。
 
 ## 13. 文档更新规则
@@ -391,6 +391,8 @@ P10D T13 节点级格式面板前端已落地：右栏新增独立 `NodeFormatPa
 P10D T14 导出消费结构节点后端已落地：草稿 Word 导出会要求模板版本已有 `PUBLISHED` 结构映射，默认阻断手册/制度/普通文档、缺失映射、缺失 `TITLE`/`BODY` 必需槽位、必需槽位空值和最新质检阻断项；导出优先读取 `DraftNode` 正文，节点缺失时才回退旧 `DraftBlock`。导出格式会把草稿节点格式覆盖合并到本次导出的 effective formatting，且不修改模板默认格式；`export_record` 新增 `structure_mapping_profile_id`、`structure_mapping_version`、`structure_profile_snapshot_json`、`mapping_profile_snapshot_json`、`formatting_snapshot_json` 和 `node_snapshot_json` 追溯字段（Flyway `V16__export_node_traceability.sql`）。
 
 P10D T15 预览刷新与导出状态前端已落地：工作台右栏新增真实预览状态面板，状态覆盖当前、待刷新、生成中、失败和未选择模板；正文编辑、段落生成、局部建议采纳、模板切换和节点格式保存/恢复会标记真实预览待刷新，点击刷新会调用 `POST /api/templates/versions/{versionId}/render-preview`。后端导出阻断消息继续通过工作台导出状态和 Toast 展示，成功导出下载与导出记录行为保持 P11 既有路径。
+
+P10D T16 轻量 QA 与文档同步已落地：`backend/src/test/resources/docx-fixtures/README.md` 固化 fixture 类别清单，动态 DOCX 样本覆盖占位符模板、样式模板、参考范文、手册/指南、复杂表格、页眉页脚和缺字体。focused 回归已覆盖手册阻断、中文 eastAsia/latin 字体、节点感知 AI、草稿节点格式覆盖、导出追溯、工作台节点和预览刷新；按用户“减轻测试重量”要求未跑全量后端/前端测试，Browser 自动化仍因工具不可用未执行。
 
 当前核心 API：
 
@@ -636,7 +638,7 @@ P11 导出体验当前约定：
 下一步建议：
 
 1. 推进 P11 导出体验增强：补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
-2. 推进 P10D T16/T17：补 fixture/regression/docs sync 和最终集成验证；浏览器自动化工具不可用时必须明确记录替代验证。
+2. 推进 P10D T17：做最终集成验证与进度关闭；浏览器自动化工具不可用时必须明确记录替代验证。
 3. P10 模板管理员后台继续扩展字段映射、模板启停、版本详情和模板列表操作；不要重复实现文种文件夹、模板卡片、上传解析首版。
 4. P8/P11 后续围绕模板版本 `TemplateProfile` 做导出前阻断和导出记录追溯；P10B 的格式复现合同已落地，不要再把这部分回滚成 P11 前置依赖。
 5. P9 登录与基础权限仍是 MVP 闭环的关键后续，尤其是草稿、材料、模板、导出文件访问控制。

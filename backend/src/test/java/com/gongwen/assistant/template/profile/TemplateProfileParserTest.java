@@ -179,4 +179,30 @@ class TemplateProfileParserTest {
                 .extracting(TemplatePlaceholderProfile::key)
                 .containsExactly("附件");
     }
+
+    @Test
+    void fixtureCoverageIncludesComplexTableHeaderFooterAndMissingFontDocument() {
+        TemplateProfile tableProfile = parser.parse(DocxTestFactory.docxWithComplexTable());
+        assertThat(tableProfile.tables()).hasSize(1);
+        assertThat(tableProfile.tables().getFirst().rowCount()).isEqualTo(2);
+        assertThat(tableProfile.tables().getFirst().columnCount()).isEqualTo(2);
+        assertThat(tableProfile.tables().getFirst().placeholderCount()).isEqualTo(2);
+        assertThat(tableProfile.placeholders())
+                .extracting(TemplatePlaceholderProfile::key)
+                .contains("标题", "正文");
+
+        TemplateProfile headerFooterProfile = parser.parse(DocxTestFactory.docxWithHeaderAndFooter());
+        assertThat(headerFooterProfile.sections()).hasSize(1);
+        assertThat(headerFooterProfile.sections().getFirst().hasHeader()).isTrue();
+        assertThat(headerFooterProfile.sections().getFirst().hasFooter()).isTrue();
+
+        TemplateProfile missingFontProfile = parser.parse(DocxTestFactory.docxWithMissingFontFormatting());
+        TemplateStructureProfile bodyStructure = missingFontProfile.structures().stream()
+                .filter(structure -> "BODY".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(bodyStructure.formatting().fontFamily()).isNull();
+        assertThat(bodyStructure.formatting().eastAsiaFontFamily()).isNull();
+        assertThat(bodyStructure.formatting().latinFontFamily()).isNull();
+    }
 }

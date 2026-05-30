@@ -66,7 +66,7 @@ Completion evidence format:
 | T13 | 已完成 | Frontend Format Agent | T9, T12 | node-level font and format panel | `b6f2394` | `npm test -- src/App.test.tsx`; `npm run build` | Browser screenshot not captured because Browser/node_repl tooling unavailable; true DOCX render regeneration remains deferred to T15 |
 | T14 | 已完成 | Backend Export Agent | T6, T8, T12 | export consumes mapping, nodes, and format merge | `e73814a` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.quality.QualityCheckServiceTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest" --tests "com.gongwen.assistant.exporting.WordExportServiceTest"` | plan script still bypassed because local `.tools\gradle-8.10.2` is absent; wrapper/JDK 21 focused tests passed |
 | T15 | 已完成 | Frontend Export Agent | T11, T13, T14 | preview refresh and export status flow | `8040e53` | `npm test -- src/App.test.tsx`; `npm run build` | Browser verification not captured because the in-app Browser tool was not exposed and node_repl failed to initialize; App tests cover preview outdated refresh and backend export blocker display |
-| T16 | 未开始 | QA Agent | T1-T15 | fixture suite, regression tests, and docs sync |  |  |  |
+| T16 | 已完成 | QA Agent | T1-T15 | fixture suite, regression tests, and docs sync | 未提交（T16 QA） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest"`; focused backend regression command for upload/structure/AI/format/export; `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | backend full test and full frontend `npm test --` skipped per lightweight-test instruction; Browser/node_repl automation still unavailable |
 | T17 | 未开始 | Integration Agent | T1-T16 | final integration verification and progress closure |  |  |  |
 
 ## Progress Log
@@ -90,6 +90,7 @@ Completion evidence format:
 | 2026-05-31 | T13 | Codex Frontend Format Agent | `b6f2394` | `npm test -- src/App.test.tsx`; `npm run build` | pass; right panel now has a node format panel, saves T12 format overrides, merges saved formatting into the structured editor immediately, and marks true preview as outdated | first frontend RED run failed on missing `中文字体` control as expected; full frontend suite beyond `App.test.tsx` skipped per lightweight-test instruction |
 | 2026-05-31 | T14 | Codex Backend Export Agent | `e73814a` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.quality.QualityCheckServiceTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest" --tests "com.gongwen.assistant.exporting.WordExportServiceTest"` | pass; export now requires published structure mapping, consumes `DraftNode` content before legacy blocks, merges draft-local format overrides into export formatting, and stores trace snapshots on export records | first RED run failed on missing T14 constructor/request trace contracts as expected; full backend suite skipped per lightweight-test instruction |
 | 2026-05-31 | T15 | Codex Frontend Export Agent | `8040e53` | `npm test -- src/App.test.tsx`; `npm run build` | pass; workbench right panel now shows true preview states, refreshes render preview, marks edits/format changes stale, and surfaces backend export blocker messages | browser verification not captured because the in-app Browser tool was not exposed and node_repl failed to initialize; visual states covered by focused App tests |
+| 2026-05-31 | T16 | Codex QA Agent | 未提交（T16 QA） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest"`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.template.TemplateUploadServiceTest" --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.ai.AiOutlineServiceTest" --tests "com.gongwen.assistant.ai.AiParagraphServiceTest" --tests "com.gongwen.assistant.ai.AiLocalOperationServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest"`; `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | pass; fixture coverage now records placeholder, style, reference official document, manual/guide, complex table, header/footer, and missing font categories; focused regressions cover manual blocking, Chinese fonts, node AI, draft-local format overrides, and export trace snapshots | backend full test and full frontend `npm test --` skipped per lightweight-test instruction; browser automation remains unavailable |
 
 ## Agent File Boundaries
 
@@ -1083,14 +1084,14 @@ npm run build
 
 **Dependencies:** T1-T15
 
-- [ ] Ensure fixture categories include placeholder template, style template, reference official document, manual/guide, complex table, header/footer, missing font.
-- [ ] Add or update tests that prove the manual file category does not enter auto template flow.
-- [ ] Add or update tests for Chinese fonts, node AI, draft-local format override, export traceability.
-- [ ] Update `AGENTS.md` with final APIs, env vars, module boundaries, and local verification notes.
-- [ ] Update `docs/PROJECT_TASKS.md` with milestone statuses and next recommended tasks.
-- [ ] Run backend full test if feasible.
-- [ ] Run frontend test/build.
-- [ ] Update Progress Board row T16 and Progress Log.
+- [x] Ensure fixture categories include placeholder template, style template, reference official document, manual/guide, complex table, header/footer, missing font.
+- [x] Add or update tests that prove the manual file category does not enter auto template flow.
+- [x] Add or update tests for Chinese fonts, node AI, draft-local format override, export traceability.
+- [x] Update `AGENTS.md` with final APIs, env vars, module boundaries, and local verification notes.
+- [x] Update `docs/PROJECT_TASKS.md` with milestone statuses and next recommended tasks.
+- [x] Run backend full test if feasible.
+- [x] Run frontend test/build.
+- [x] Update Progress Board row T16 and Progress Log.
 
 **Verification:**
 
@@ -1103,6 +1104,13 @@ npm run build
 ```
 
 **Completion note required:** list fixture categories and any tests not run with concrete reason.
+
+**T16 completion notes (2026-05-31):**
+
+- Fixture categories are recorded in `backend/src/test/resources/docx-fixtures/README.md`: placeholder template, style template, reference official document, manual/guide, complex table, header/footer, and missing font.
+- New generated fixture methods cover complex table, header/footer, and missing font documents; `TemplateProfileParserTest` verifies their parser coverage.
+- Existing focused regressions verify manual/guide documents do not enter automatic mapping/export flow, Chinese eastAsia/latin font separation, node-aware AI requests, draft-local format override merge priority, and export trace snapshots.
+- Tests not run: backend full test and full frontend `npm test --` were skipped to follow the user's lightweight-test instruction; browser automation was not run because the in-app Browser tool was not exposed and node_repl failed to initialize.
 
 ## Task T17: Final Integration Verification And Closure
 

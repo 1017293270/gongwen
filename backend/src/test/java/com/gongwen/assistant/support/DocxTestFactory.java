@@ -45,6 +45,58 @@ public final class DocxTestFactory {
         }
     }
 
+    public static byte[] docxWithComplexTable() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFTable table = document.createTable(2, 2);
+            table.getRow(0).getCell(0).setText("事项");
+            table.getRow(0).getCell(1).setText("{{标题}}");
+            table.getRow(1).getCell(0).setText("正文摘要");
+            table.getRow(1).getCell(1).setText("{{正文}}");
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create complex table docx", exception);
+        }
+    }
+
+    public static byte[] docxWithHeaderAndFooter() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            document.createHeader(HeaderFooterType.DEFAULT)
+                    .createParagraph()
+                    .createRun()
+                    .setText("内部资料");
+            document.createFooter(HeaderFooterType.DEFAULT)
+                    .createParagraph()
+                    .createRun()
+                    .setText("第  页");
+            document.createParagraph().createRun().setText("{{正文}}");
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create header/footer docx", exception);
+        }
+    }
+
+    public static byte[] docxWithMissingFontFormatting() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph title = document.createParagraph();
+            title.setAlignment(ParagraphAlignment.CENTER);
+            title.createRun().setText("{{标题}}");
+
+            XWPFParagraph body = document.createParagraph();
+            body.setIndentationFirstLine(420);
+            body.createRun().setText("{{正文}}");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create missing font docx", exception);
+        }
+    }
+
     public static byte[] docxWithSplitPlaceholder() {
         try (XWPFDocument document = new XWPFDocument();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
