@@ -285,6 +285,23 @@ export type QualityCheckResult = {
   items: QualityCheckItem[];
 };
 
+export type ExportRecordSummary = {
+  id: number;
+  draftId: number | null;
+  draftTitle: string | null;
+  documentTypeCode: string | null;
+  templateId: number | null;
+  templateVersionId: number | null;
+  templateName: string;
+  templateVersion: number;
+  fileName: string;
+  status: 'SUCCESS' | 'FAILED' | string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  canDownload: boolean;
+  createdAt: string;
+};
+
 export type AiProviderSettings = {
   provider: 'mock' | 'deepseek';
   deepSeekEnabled: boolean;

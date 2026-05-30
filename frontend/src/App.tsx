@@ -39,6 +39,7 @@ import {
   deleteDocumentType,
   deleteTemplate,
   disableUser,
+  downloadExportRecord,
   exportDraftWord,
   getAiProviderSettings,
   getCurrentUser,
@@ -51,6 +52,7 @@ import {
   listDepartments,
   listDocumentTypes,
   listDrafts,
+  listExportRecords,
   listDraftMaterials,
   listTemplates,
   listTemplateVersions,
@@ -94,6 +96,7 @@ import type {
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
+  ExportRecordSummary,
   Material,
   QualityCheckItem,
   QualityCheckResult,
@@ -149,6 +152,7 @@ type AppView =
 type AiSettingsStatus = 'loading' | 'idle' | 'saving' | 'testing' | 'error';
 type DraftListStatus = 'idle' | 'loading' | 'creating' | 'error';
 type AdminPageStatus = 'idle' | 'loading' | 'saving' | 'error';
+type ExportRecordListStatus = 'idle' | 'loading' | 'error';
 type DraftListPageMode = 'folders' | 'list';
 type SettingsTab = 'ai' | 'accounts' | 'departments';
 type AiDialog = 'outline' | 'quality' | 'local' | null;
@@ -281,6 +285,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [draftListPageMode, setDraftListPageMode] = useState<DraftListPageMode>('folders');
   const [draftListStatus, setDraftListStatus] = useState<DraftListStatus>('idle');
   const [draftListMessage, setDraftListMessage] = useState('');
+  const [exportRecords, setExportRecords] = useState<ExportRecordSummary[]>([]);
+  const [exportRecordStatus, setExportRecordStatus] = useState<ExportRecordListStatus>('idle');
+  const [exportRecordMessage, setExportRecordMessage] = useState('');
+  const [downloadingExportRecordId, setDownloadingExportRecordId] = useState<number | null>(null);
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -444,6 +452,41 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       mounted = false;
     };
   }, [activeView, documentTypes, selectedDraftDocumentTypeCode]);
+
+  useEffect(() => {
+    if (activeView !== 'exports') {
+      return undefined;
+    }
+
+    let mounted = true;
+
+    async function loadRecords() {
+      try {
+        setExportRecordStatus('loading');
+        setExportRecordMessage('正在加载导出记录');
+        const records = await listExportRecords();
+        if (!mounted) {
+          return;
+        }
+        setExportRecords(records);
+        setExportRecordStatus('idle');
+        setExportRecordMessage(records.length > 0 ? '导出记录已加载' : '暂无导出记录');
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        setExportRecords([]);
+        setExportRecordStatus('error');
+        setExportRecordMessage(error instanceof Error ? error.message : '导出记录加载失败');
+      }
+    }
+
+    void loadRecords();
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeView]);
 
   async function loadCurrentDraft() {
     const storedDraftId = Number(window.localStorage.getItem(CURRENT_DRAFT_ID_KEY));
@@ -1215,6 +1258,23 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
+  async function handleDownloadExportRecord(record: ExportRecordSummary) {
+    if (!record.canDownload) {
+      return;
+    }
+    try {
+      setDownloadingExportRecordId(record.id);
+      const result = await downloadExportRecord(record.id);
+      downloadBlob(result.blob, result.fileName);
+      showToast({ title: '导出文件已下载', description: result.fileName, tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '导出文件下载失败';
+      showToast({ title: message, tone: 'error' });
+    } finally {
+      setDownloadingExportRecordId(null);
+    }
+  }
+
   async function handleAcceptLocalOperation() {
     if (!draft || !localOperationSuggestion) {
       return;
@@ -1879,6 +1939,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             <DocumentTypeManagementPage
               documentTypes={documentTypes}
               onDocumentTypesChange={setDocumentTypes}
+            />
+          ) : activeView === 'exports' ? (
+            <ExportRecordsPage
+              downloadingRecordId={downloadingExportRecordId}
+              message={exportRecordMessage}
+              onDownload={(record) => void handleDownloadExportRecord(record)}
+              records={exportRecords}
+              status={exportRecordStatus}
             />
           ) : (
             <PlaceholderPage view={activeView} />
@@ -4348,6 +4416,112 @@ function DocumentTypeManagementPage({
   );
 }
 
+function ExportRecordsPage({
+  downloadingRecordId,
+  message,
+  onDownload,
+  records,
+  status,
+}: {
+  downloadingRecordId: number | null;
+  message: string;
+  onDownload: (record: ExportRecordSummary) => void;
+  records: ExportRecordSummary[];
+  status: ExportRecordListStatus;
+}) {
+  const columns: Array<ManagementTableColumn<ExportRecordSummary>> = [
+    {
+      key: 'draft',
+      header: '草稿',
+      width: '1.5fr',
+      render: (record) => (
+        <span className="management-table-title">{record.draftTitle ?? '未绑定草稿'}</span>
+      ),
+    },
+    {
+      key: 'template',
+      header: '模板版本',
+      width: '1.1fr',
+      render: (record) => (
+        <span className="management-table-text">{record.templateName} v{record.templateVersion}</span>
+      ),
+    },
+    {
+      key: 'status',
+      header: '状态',
+      width: '1.2fr',
+      render: (record) => (
+        <div>
+          <span className={`status-chip ${record.status === 'SUCCESS' ? 'success' : 'danger'}`}>
+            {exportRecordStatusLabel(record.status)}
+          </span>
+          {record.errorMessage && (
+            <span className="management-table-text">{record.errorMessage}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: '导出时间',
+      width: '0.9fr',
+      render: (record) => <span className="management-table-text">{formatTimestamp(record.createdAt)}</span>,
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      width: '0.7fr',
+      align: 'end',
+      render: (record) => (
+        <div className="management-table-actions">
+          <Button
+            aria-label={record.canDownload ? `下载导出文件：${record.fileName}` : `导出文件不可下载：${record.fileName}`}
+            disabled={!record.canDownload}
+            icon={<FileDown aria-hidden="true" />}
+            isLoading={downloadingRecordId === record.id}
+            loadingLabel="正在下载"
+            onClick={() => onDownload(record)}
+            variant="secondary"
+          >
+            下载
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <main className="settings-page" aria-busy={status === 'loading'} aria-label="导出记录">
+      <section className="settings-panel template-admin-panel">
+        <div className="settings-header">
+          <div>
+            <div className="eyebrow">Export Records</div>
+            <h2>导出记录</h2>
+            <p>追踪 Word 导出结果、模板版本和失败原因。成功导出的历史文件可在这里重新下载。</p>
+          </div>
+          <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
+            {records.length} 条记录
+          </span>
+        </div>
+
+        {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />}
+
+        <ManagementTable<ExportRecordSummary>
+          ariaLabel="导出记录列表"
+          columns={columns}
+          emptyDescription="工作台成功导出 Word 后，会在这里形成可追溯记录。"
+          emptyIcon={<FileDown aria-hidden="true" />}
+          emptyTitle="暂无导出记录"
+          getKey={(record) => record.id}
+          items={records}
+          minWidth="920px"
+          status={status}
+        />
+      </section>
+    </main>
+  );
+}
+
 function PlaceholderPage({ view }: { view: AppView }) {
   return (
     <main className="placeholder-page">
@@ -4928,6 +5102,10 @@ function qualityStatusLabel(status: QualityCheckResult['status']) {
 
 function qualitySeverityLabel(severity: QualityCheckItem['severity']) {
   return severity === 'ERROR' ? '错误' : severity === 'WARNING' ? '警告' : '建议';
+}
+
+function exportRecordStatusLabel(status: string) {
+  return status === 'SUCCESS' ? '成功' : status === 'FAILED' ? '失败' : status;
 }
 
 function qualityCategoryLabel(category: string) {

@@ -903,6 +903,79 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '回到目录' })).toBeInTheDocument();
   });
 
+  it('lists export records and downloads a successful Word export', async () => {
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:export-history'),
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('导出记录草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/exports')) {
+        return Promise.resolve(jsonResponse([
+          sampleExportRecord({
+            id: 7,
+            draftTitle: '会议通知草稿',
+            templateVersionId: 9,
+            templateName: '通知模板',
+            templateVersion: 4,
+            fileName: '通知模板-v4.docx',
+            status: 'SUCCESS',
+            canDownload: true,
+          }),
+          sampleExportRecord({
+            id: 8,
+            draftTitle: '缺字段草稿',
+            templateVersionId: 9,
+            templateName: '通知模板',
+            templateVersion: 4,
+            fileName: '通知模板-v4.docx',
+            status: 'FAILED',
+            errorCode: 'MISSING_TEMPLATE_VALUE',
+            errorMessage: '正文不能为空',
+            canDownload: false,
+          }),
+        ]));
+      }
+      if (url.endsWith('/api/exports/7/download')) {
+        return Promise.resolve(docxResponse('通知模板-v4.docx'));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '导出记录' }));
+
+    expect((await screen.findAllByRole('heading', { name: '导出记录' })).length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: '导出记录列表' })).toBeInTheDocument();
+    expect(screen.getByText('会议通知草稿')).toBeInTheDocument();
+    expect(screen.getAllByText('通知模板 v4').length).toBeGreaterThan(0);
+    expect(screen.getByText('正文不能为空')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports', expect.objectContaining({
+      credentials: 'include',
+    }));
+
+    await userEvent.click(screen.getByRole('button', { name: '下载导出文件：通知模板-v4.docx' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/7/download', expect.any(Object));
+    expect(clickSpy).toHaveBeenCalled();
+  });
+
   it('creates a document type from the new management page', async () => {
     let documentTypes = [
       { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
@@ -1709,6 +1782,41 @@ function qualityCheckBlocked() {
         suggestion: '请补齐该字段后再导出。',
       },
     ],
+  };
+}
+
+function sampleExportRecord(overrides: Partial<{
+  id: number;
+  draftId: number | null;
+  draftTitle: string | null;
+  documentTypeCode: string | null;
+  templateId: number | null;
+  templateVersionId: number | null;
+  templateName: string;
+  templateVersion: number;
+  fileName: string;
+  status: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  canDownload: boolean;
+  createdAt: string;
+}> = {}) {
+  return {
+    id: 1,
+    draftId: 1,
+    draftTitle: '导出测试草稿',
+    documentTypeCode: 'NOTICE',
+    templateId: 2,
+    templateVersionId: 9,
+    templateName: '通知模板',
+    templateVersion: 1,
+    fileName: '通知模板-v1.docx',
+    status: 'SUCCESS',
+    errorCode: null,
+    errorMessage: null,
+    canDownload: true,
+    createdAt: '2026-05-30T09:30:00Z',
+    ...overrides,
   };
 }
 

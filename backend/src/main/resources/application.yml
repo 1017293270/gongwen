@@ -32,6 +32,8 @@ gongwen:
   material:
     storage-dir: ${GONGWEN_MATERIAL_STORAGE_DIR:storage/materials}
     max-file-size-bytes: ${GONGWEN_MATERIAL_MAX_FILE_SIZE_BYTES:20971520}
+  export:
+    storage-dir: ${GONGWEN_EXPORT_STORAGE_DIR:storage/exports}
   security:
     bootstrap-admin:
       username: ${GONGWEN_BOOTSTRAP_ADMIN_USERNAME:admin}

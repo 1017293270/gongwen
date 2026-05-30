@@ -15,6 +15,7 @@ import type {
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
+  ExportRecordSummary,
   Material,
   QualityCheckResult,
   TemplateProfile,
@@ -392,6 +393,14 @@ export function exportDraftWord(draftId: number) {
   return requestBlob(`/api/exports/drafts/${draftId}/word`, {
     method: 'POST',
   });
+}
+
+export function listExportRecords() {
+  return requestJson<ExportRecordSummary[]>('/api/exports');
+}
+
+export function downloadExportRecord(recordId: number) {
+  return requestBlob(`/api/exports/${recordId}/download`);
 }
 
 export function getAiProviderSettings() {

@@ -98,7 +98,8 @@ public class DraftWordExportService {
     }
 
     public WordExportResult exportDraft(long draftId) {
-        DraftDetailDto draft = draftRepository.findById(draftId, currentUserOrNull());
+        CurrentUser currentUser = currentUserOrNull();
+        DraftDetailDto draft = draftRepository.findById(draftId, currentUser);
         Long templateVersionId = draft.templateVersionId();
         if (templateVersionId == null) {
             throw new WordExportException(
@@ -128,9 +129,14 @@ public class DraftWordExportService {
         TemplateProfile profile = templateProfile(templateVersionId);
         ensureQualityCheckAllowsExport(draft.id());
 
-        return wordExportService.export(readTemplateBytes(version.filePath()), new WordExportRequest(
+        return wordExportService.export(readTemplateBytes(version.filePath()), WordExportRequest.draftExport(
                 template.templateName(),
                 version.versionNo(),
+                version.templateId(),
+                version.id(),
+                draft.id(),
+                currentUser == null ? null : currentUser.id(),
+                currentUser == null ? null : currentUser.departmentId(),
                 draftValues(draft),
                 exportFormattingContext(templateVersionId, profile),
                 profile

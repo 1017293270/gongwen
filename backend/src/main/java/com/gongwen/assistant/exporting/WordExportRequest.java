@@ -8,6 +8,11 @@ import java.util.Map;
 public record WordExportRequest(
         String templateName,
         int templateVersion,
+        Long templateId,
+        Long templateVersionId,
+        Long draftId,
+        Long exportedBy,
+        Long departmentId,
         Map<String, String> values,
         ExportFormattingContext formatting,
         TemplateProfile templateProfile
@@ -22,10 +27,36 @@ public record WordExportRequest(
             Map<String, String> values,
             ExportFormattingContext formatting
     ) {
-        this(templateName, templateVersion, values, formatting, null);
+        this(templateName, templateVersion, null, null, null, null, null, values, formatting, null);
     }
 
     public WordExportRequest(String templateName, int templateVersion, Map<String, String> values) {
-        this(templateName, templateVersion, values, null, null);
+        this(templateName, templateVersion, null, null, null, null, null, values, null, null);
+    }
+
+    public static WordExportRequest draftExport(
+            String templateName,
+            int templateVersion,
+            Long templateId,
+            Long templateVersionId,
+            Long draftId,
+            Long exportedBy,
+            Long departmentId,
+            Map<String, String> values,
+            ExportFormattingContext formatting,
+            TemplateProfile templateProfile
+    ) {
+        return new WordExportRequest(
+                templateName,
+                templateVersion,
+                templateId,
+                templateVersionId,
+                draftId,
+                exportedBy,
+                departmentId,
+                values,
+                formatting,
+                templateProfile
+        );
     }
 }
