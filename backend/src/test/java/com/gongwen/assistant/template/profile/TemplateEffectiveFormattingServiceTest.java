@@ -133,6 +133,50 @@ class TemplateEffectiveFormattingServiceTest {
     }
 
     @Test
+    void mergesEastAsiaLatinFontsAndStructuredLineSpacingIndependently() {
+        TemplateLineSpacingProfile defaultLineSpacing = new TemplateLineSpacingProfile("EXACT", 590, null);
+        TemplateLineSpacingProfile overrideLineSpacing = new TemplateLineSpacingProfile("AUTO", null, 150);
+        TemplateProfile profile = templateProfileWithStructures(
+                structure("body-1", "BODY", formatting(
+                        "FangSong",
+                        "FangSong",
+                        "Times New Roman",
+                        32,
+                        false,
+                        "LEFT",
+                        420,
+                        null,
+                        0,
+                        0,
+                        defaultLineSpacing
+                ))
+        );
+
+        ExportFormattingContext context = service.resolve(profile, Map.of(
+                "body-1", formatting(
+                        null,
+                        "KaiTi",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        150,
+                        null,
+                        null,
+                        overrideLineSpacing
+                )
+        ));
+
+        assertThat(context.body()).isNotNull();
+        assertThat(context.body().fontFamily()).isEqualTo("KaiTi");
+        assertThat(context.body().eastAsiaFontFamily()).isEqualTo("KaiTi");
+        assertThat(context.body().latinFontFamily()).isEqualTo("Times New Roman");
+        assertThat(context.body().lineSpacing()).isEqualTo(overrideLineSpacing);
+        assertThat(context.body().spacingBetween()).isEqualTo(150);
+    }
+
+    @Test
     void returnsEmptyFormattingContextWhenProfileAndOverridesAreNull() {
         ExportFormattingContext context = service.resolve(null, null);
 
@@ -194,6 +238,35 @@ class TemplateEffectiveFormattingServiceTest {
                 spacingBetween,
                 spacingBefore,
                 spacingAfter
+        );
+    }
+
+    private static TemplateStructureFormattingProfile formatting(
+            String fontFamily,
+            String eastAsiaFontFamily,
+            String latinFontFamily,
+            Integer fontSizeHalfPoints,
+            Boolean bold,
+            String alignment,
+            Integer indentationFirstLine,
+            Integer spacingBetween,
+            Integer spacingBefore,
+            Integer spacingAfter,
+            TemplateLineSpacingProfile lineSpacing
+    ) {
+        return new TemplateStructureFormattingProfile(
+                fontFamily,
+                fontSizeHalfPoints,
+                bold,
+                alignment,
+                indentationFirstLine,
+                spacingBetween,
+                spacingBefore,
+                spacingAfter,
+                null,
+                eastAsiaFontFamily,
+                latinFontFamily,
+                lineSpacing
         );
     }
 }

@@ -59,6 +59,37 @@ export type DraftBlock = {
   sortOrder: number;
 };
 
+export type DraftNodeFormatOverride = {
+  eastAsiaFont: string | null;
+  latinFont: string | null;
+  fontSizePt: number | null;
+  bold: boolean | null;
+  alignment: string | null;
+  firstLineIndentTwip: number | null;
+  lineSpacingRule: string | null;
+  lineSpacingTwip: number | null;
+  spacingBeforeTwip: number | null;
+  spacingAfterTwip: number | null;
+};
+
+export type DraftNode = {
+  id: number;
+  draftId: number;
+  structureMappingProfileId: number | null;
+  templateNodeKey: string;
+  parentTemplateNodeKey: string | null;
+  nodeType: string;
+  role: string;
+  slotKey: string;
+  title: string;
+  content: string;
+  sortOrder: number;
+  status: string;
+  formatOverride: DraftNodeFormatOverride;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type DraftDetail = {
   id: number;
   documentTypeCode: string;
@@ -66,6 +97,7 @@ export type DraftDetail = {
   status: string;
   templateVersionId: number | null;
   blocks: DraftBlock[];
+  nodes?: DraftNode[];
 };
 
 export type DraftSummary = {
@@ -103,6 +135,12 @@ export type TemplateUploadResult = {
   validationCodes: string[];
 };
 
+export type TemplateLineSpacing = {
+  mode: string;
+  valueTwips: number | null;
+  multipleHundred: number | null;
+};
+
 export type TemplateProfile = {
   schemaVersion: number;
   structures: Array<{
@@ -122,11 +160,14 @@ export type TemplateProfile = {
     type: string;
     basedOn: string | null;
     fontFamily: string | null;
+    eastAsiaFontFamily?: string | null;
+    latinFontFamily?: string | null;
     fontSizeHalfPoints: number | null;
     bold: boolean | null;
     alignment: string | null;
     indentationFirstLine: number | null;
     spacingBetween: number | null;
+    lineSpacing?: TemplateLineSpacing | null;
     spacingBefore: number | null;
     spacingAfter: number | null;
   }>;
@@ -163,6 +204,10 @@ export type TemplateProfile = {
     }>;
     message: string;
     source: string;
+    documentKind?: string;
+    reasonCodes?: string[];
+    recommendedWorkflow?: string;
+    blockingWarnings?: string[];
   } | null;
   placeholders: Array<{
     key: string;
@@ -179,17 +224,120 @@ export type TemplateProfile = {
 
 export type TemplateStructureFormatting = {
   fontFamily: string | null;
+  eastAsiaFontFamily?: string | null;
+  latinFontFamily?: string | null;
   fontSizeHalfPoints: number | null;
   bold: boolean | null;
   alignment: string | null;
   indentationFirstLine: number | null;
   spacingBetween: number | null;
+  lineSpacing?: TemplateLineSpacing | null;
   spacingBefore: number | null;
   spacingAfter: number | null;
   colorHex?: string | null;
 };
 
 export type TemplateStructureFormattingOverrides = Record<string, Partial<TemplateStructureFormatting>>;
+
+export type DocumentStructureNode = {
+  nodeKey: string;
+  parentKey: string | null;
+  nodeType: string;
+  roleSuggestion: string;
+  text: string;
+  textPreview: string;
+  orderIndex: number;
+  path: string;
+  formatting: TemplateStructureFormatting | null;
+  riskCodes: string[];
+};
+
+export type DocumentStructureProfile = {
+  schemaVersion: number;
+  sourceFileHash: string;
+  extractorVersion: string;
+  nodes: DocumentStructureNode[];
+  styles: TemplateProfile['styles'];
+  sections: TemplateProfile['sections'];
+  risks: TemplateProfile['validationItems'];
+  createdAt: string;
+};
+
+export type TemplateDocumentKind = {
+  documentKind: string;
+  templateKind: string;
+  confidence: number;
+  documentTypeCode: string;
+  reasonCodes: string[];
+  recommendedWorkflow: string;
+  blockingWarnings: string[];
+  message: string;
+  source: string;
+};
+
+export type DocumentRenderPreviewStatus = 'PENDING' | 'RENDERING' | 'READY' | 'FAILED' | 'UNSUPPORTED';
+
+export type DocumentRenderPreviewPage = {
+  pageNumber: number;
+  fileName: string;
+  contentType: string;
+  widthPixels: number;
+  heightPixels: number;
+  dpi: number;
+};
+
+export type DocumentRenderPreview = {
+  id: number | null;
+  templateVersionId: number;
+  sourceFileHash: string;
+  renderer: string;
+  rendererVersion: string | null;
+  status: DocumentRenderPreviewStatus;
+  pageCount: number;
+  storagePath: string | null;
+  manifest: {
+    schemaVersion: number;
+    pdfFileName: string | null;
+    pages: DocumentRenderPreviewPage[];
+  };
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type StructureMappingItem = {
+  nodeKey: string;
+  role: string;
+  slotKey: string;
+  status: 'SUGGESTED' | 'CONFIRMED' | 'IGNORED' | 'NEEDS_REVIEW' | string;
+  source: 'RULE' | 'AI' | 'USER' | 'IMPORT' | 'SYSTEM' | string;
+  confidence: number;
+  notes: string;
+  sortOrder: number;
+};
+
+export type StructureMappingValidationItem = {
+  severity: 'INFO' | 'WARNING' | 'BLOCKING' | string;
+  code: string;
+  message: string;
+  nodeKey: string | null;
+  role: string | null;
+};
+
+export type StructureMappingProfile = {
+  mappingProfileId: number | null;
+  templateVersionId: number;
+  versionNo: number;
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED' | string;
+  items: StructureMappingItem[];
+  validationItems: StructureMappingValidationItem[];
+  confirmedCount: number;
+  needsReviewCount: number;
+  publishedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
 
 export type WorkbenchNodeType =
   | 'TITLE'
@@ -211,10 +359,15 @@ export type WorkbenchNode = {
   nodeType: WorkbenchNodeType;
   templateStructureKey?: string;
   draftBlockId?: number;
+  draftNodeId?: number;
+  headingDraftNodeId?: number;
+  templateNodeKey?: string;
+  role?: string;
   sortOrder: number;
   label: string;
   heading?: string;
   content: string;
+  status?: string;
   source: WorkbenchNodeSource;
   locked: boolean;
   formatting?: Partial<TemplateStructureFormatting>;
@@ -243,24 +396,43 @@ export type AiOutlineSection = {
   points: string[];
 };
 
+export type AiNodeSuggestion = {
+  nodeId: number | null;
+  nodeRole: string;
+  nodeTitle: string;
+  action: string;
+  suggestedText: string;
+};
+
+export type AiNodeRequestContext = {
+  nodeId?: number;
+  nodeRole?: string;
+  nodeTitle?: string;
+  nodeContext?: string;
+};
+
 export type AiOutline = {
   traceId: string;
   titleSuggestion: string;
   sections: AiOutlineSection[];
   missingInformation: string[];
+  nodeSuggestions?: AiNodeSuggestion[];
 };
 
 export type AiParagraph = {
   traceId: string;
   draft: DraftDetail;
   block: DraftBlock;
+  node?: DraftNode | null;
 };
 
 export type AiLocalOperationType = 'FORMALIZE' | 'COMPRESS' | 'EXPAND' | 'REWRITE' | 'SUPPLEMENT';
 
 export type AiLocalOperation = {
   traceId: string;
-  targetBlockId: number;
+  targetBlockId: number | null;
+  targetNodeId?: number | null;
+  targetNodeRole?: string;
   operationType: AiLocalOperationType;
   suggestionText: string;
 };

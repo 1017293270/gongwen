@@ -1,5 +1,7 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.documentstructure.DocumentStructureExtractor;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
@@ -26,6 +28,8 @@ public class TemplateUploadService {
     private final TemplateProperties properties;
     private final TemplateIntelligenceService intelligenceService;
     private final TemplateRepository templateRepository;
+    private final DocumentStructureExtractor documentStructureExtractor;
+    private final DocumentStructureProfileRepository documentStructureProfileRepository;
 
     @Autowired
     public TemplateUploadService(
@@ -35,7 +39,9 @@ public class TemplateUploadService {
             TemplateProfileParser profileParser,
             TemplateProperties properties,
             TemplateIntelligenceService intelligenceService,
-            TemplateRepository templateRepository
+            TemplateRepository templateRepository,
+            DocumentStructureExtractor documentStructureExtractor,
+            DocumentStructureProfileRepository documentStructureProfileRepository
     ) {
         this.storage = storage;
         this.versionRepository = versionRepository;
@@ -44,6 +50,8 @@ public class TemplateUploadService {
         this.properties = properties;
         this.intelligenceService = intelligenceService;
         this.templateRepository = templateRepository;
+        this.documentStructureExtractor = documentStructureExtractor;
+        this.documentStructureProfileRepository = documentStructureProfileRepository;
     }
 
     public TemplateUploadService(
@@ -54,7 +62,8 @@ public class TemplateUploadService {
             TemplateProperties properties
     ) {
         this(storage, versionRepository, profileRepository, profileParser, properties,
-                new TemplateIntelligenceService(new MockModelAdapter()), new InMemoryTemplateRepository());
+                new TemplateIntelligenceService(new MockModelAdapter()), new InMemoryTemplateRepository(),
+                new DocumentStructureExtractor(), null);
     }
 
     public TemplateUploadResponse upload(long templateId, String originalFileName, String contentType, byte[] content) {
@@ -81,6 +90,7 @@ public class TemplateUploadService {
             TemplateProfile profile = intelligenceService.enrich(documentTypeCode, originalFileName, content, profileParser.parse(content));
             String profileHash = sha256(content);
             profileRepository.save(version.id(), profile, profileHash);
+            saveDocumentStructureProfile(version.id(), profile, profileHash);
             versionRepository.markParsed(version.id(), profileHash);
 
             return new TemplateUploadResponse(
@@ -122,6 +132,16 @@ public class TemplateUploadService {
             return;
         }
         versionRepository.markFailed(version.id(), "TEMPLATE_PARSE_FAILED", exception.getMessage());
+    }
+
+    private void saveDocumentStructureProfile(long templateVersionId, TemplateProfile profile, String profileHash) {
+        if (documentStructureProfileRepository == null || documentStructureExtractor == null) {
+            return;
+        }
+        documentStructureProfileRepository.save(
+                templateVersionId,
+                documentStructureExtractor.extract(profile, profileHash)
+        );
     }
 
     private String sha256(byte[] content) {

@@ -200,12 +200,14 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 标题：%s
                 字段摘要：%s
                 材料摘要：%s
+                选中节点：%s
                 补充要求：%s
                 """.formatted(
                 prompt.documentTypeCode(),
                 prompt.title(),
                 prompt.fieldSummaries(),
                 prompt.materialSummaries(),
+                prompt.nodeContext().promptSummary(),
                 prompt.instruction()
         );
     }
@@ -225,6 +227,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 段落要点：%s
                 字段摘要：%s
                 材料摘要：%s
+                目标节点：%s
                 补充要求：%s
                 """.formatted(
                 prompt.documentTypeCode(),
@@ -233,6 +236,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 prompt.points(),
                 prompt.fieldSummaries(),
                 prompt.materialSummaries(),
+                prompt.nodeContext().promptSummary(),
                 prompt.instruction()
         );
     }
@@ -245,6 +249,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 文种：%s
                 标题：%s
                 操作类型：%s
+                目标节点：nodeId=%s;role=%s;title=%s
                 原段落：%s
                 字段摘要：%s
                 材料摘要：%s
@@ -253,6 +258,9 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 prompt.documentTypeCode(),
                 prompt.title(),
                 prompt.operationType(),
+                prompt.targetNodeId() == null ? "" : prompt.targetNodeId(),
+                prompt.targetNodeRole(),
+                prompt.targetNodeTitle(),
                 prompt.originalText(),
                 prompt.fieldSummaries(),
                 prompt.materialSummaries(),

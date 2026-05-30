@@ -327,6 +327,9 @@ Agent: 后端
 
 当前下一轮并行建议：
 
+- Agent P10D-F 后端格式 T12：给 `DraftNode` 格式覆盖补后端 API、DTO、服务校验和 focused tests；如需迁移只能使用冻结的 `V16`。
+- Agent P10D-G 前端格式 T13：在 T12 契约稳定后做节点级字体/字号/对齐/缩进/行距面板，文件边界优先 `frontend/src/**`。
+- Agent P10D-H 导出 T14/T15：等 T12/T13 后，让导出和预览消费结构映射、节点正文和格式合并结果。
 - Agent A 后端 P11：在导出服务前读取或触发最新质检结果，`exportBlocked=true` 时阻断导出并返回稳定错误；确保导出记录绑定具体模板版本。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检和导出失败反馈；后续导出记录页只做列表入口，不扩大成完整审计后台。
 - Agent C 后端/前端 P10：继续模板后台字段映射、模板启停和版本详情；必须复用已存在 `GET/POST /api/templates`、版本上传和 profile API。
@@ -355,7 +358,31 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表、导出详情、失败重试和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/导出记录表、文种/草稿/草稿块数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、导出记录页、模板管理文种卡片、模板卡片、新增模板、上传新版本、profile 解析结果展示、模板结构与维度展示/本地编辑、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机已安装 JDK 21，并已落地 Gradle Wrapper、本地 Gradle 8.10.2 工具目录和后端测试脚本，后续后端验证优先使用本机脚本，避免反复启动 Docker Gradle 冷环境。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表、导出详情、失败重试和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、导出记录页、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
+
+P10D DOCX 原貌预览与结构化工作台已完成 T0 契约冻结。冻结内容见 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`：下一迁移号从 `V12` 开始，后续 T3/T4/T6/T8/T14 分别预留 `V12`/`V13`/`V14`/`V15`/`V16`；共享枚举、API 边界、Agent 文件边界和进度更新规则已固定；本机 `18081` 只视为手动联调后端，不作为自动测试前置条件。
+
+P10D T1 字体与行距基线已落地：`TemplateStructureFormattingProfile` 继续保留兼容字段 `fontFamily`、`spacingBetween`，同时新增 `eastAsiaFontFamily`、`latinFontFamily` 和结构化 `lineSpacing`；解析时中文字体优先读取 OOXML `w:rFonts/@w:eastAsia`，西文字体读取 `ascii`/`hAnsi`，行距可区分 `AUTO` 倍数和 `EXACT`/`AT_LEAST` 固定值。后续前端、质检和导出应优先使用新字段，旧字段仅作为兼容兜底。
+
+P10D T2 文件类型识别基线已落地：`TemplateAnalysisProfile` 继续保留 `templateKind`，同时新增 `documentKind`、`reasonCodes`、`recommendedWorkflow` 和 `blockingWarnings`；显式占位符模板标记为 `PLACEHOLDER_TEMPLATE`，手册/格式说明类文档标记为 `MANUAL_OR_GUIDE` 并默认阻断自动套版。`TemplateProfileParser` 已避免把“标题：方正小标宋简体”“正文：方正仿宋...”等格式说明文字误判为真实公文槽位。
+
+P10D T3 `DocumentStructureProfile` 基础已落地：新增 `document_structure_profile` 表（Flyway `V12__document_structure_profile.sql`）和 `com.gongwen.assistant.documentstructure` 包。模板上传时会在保存 `TemplateProfile` 后同步派生并保存 `DocumentStructureProfile`，首版从 `TemplateProfile.structures` 生成 `DocumentNode`，节点字段包含 `nodeKey`、`nodeType`、`roleSuggestion`、`textPreview`、`orderIndex`、`path`、`formatting` 和 `riskCodes`；首版节点类型覆盖 `PARAGRAPH`、`TABLE_PARAGRAPH`、`HEADER_PARAGRAPH` 和 `FOOTER_PARAGRAPH`，完整 OOXML 事实提取仍留给后续增强。
+
+P10D T4 DOCX 渲染预览后端已落地：新增 `document_render_preview` 表（Flyway `V13__document_render_preview.sql`）和 `com.gongwen.assistant.rendering` 包；`DocumentRenderPreviewService` 会先记录 `RENDERING` 任务，再通过可替换 renderer seam 生成 `READY`、`FAILED` 或 `UNSUPPORTED` 状态，页面文件下载会校验路径必须位于配置的预览存储目录下。默认 renderer 为 LibreOffice headless，命令由 `LibreOfficeRenderClient` 构造，PDF 页面栅格化使用 PDFBox；本轮仅用 focused tests 覆盖命令、状态和路径约束，未实际调用本机 LibreOffice。新增环境变量：`GONGWEN_RENDER_PREVIEW_STORAGE_DIR`、`GONGWEN_RENDER_PREVIEW_RENDERER`、`GONGWEN_LIBREOFFICE_PATH`、`GONGWEN_RENDER_PREVIEW_DPI`、`GONGWEN_RENDER_PREVIEW_TIMEOUT_SECONDS`。
+
+P10D T5 模板解析工作台只读 UI 已落地：`GET /api/templates/versions/{versionId}/structure-profile` 和 `GET /api/templates/versions/{versionId}/document-kind` 已补齐，前端 `TemplateProfile` 类型同步支持 `eastAsiaFontFamily`、`latinFontFamily` 和结构化 `lineSpacing`；模板解析弹窗已替换为只读工作台，展示文档类型、结构树、占位符、解析风险和渲染预览状态。手册/格式说明、制度或普通文档应以非模板流程警告呈现，不作为解析失败处理；结构映射编辑和发布仍留给 T6/T7。
+
+P10D T6 结构映射后端已落地：新增 `structure_mapping_profile` 表（Flyway `V14__structure_mapping_profile.sql`）和 `com.gongwen.assistant.documentstructure.mapping` 包；提供读取默认/最新映射、保存草稿映射和发布映射 API。映射项使用冻结的 role、status、source 合同，保存时校验 nodeKey 必须存在于 `DocumentStructureProfile`；发布时要求模板管理员或系统管理员，默认要求已确认 `TITLE` 和 `BODY`，并默认阻断 `MANUAL_OR_GUIDE`、`POLICY_OR_REGULATION`、`ORDINARY_DOCUMENT`，除非 `adminOverride=true`。当前发布响应为 `StructureMappingProfile`，包含 `mappingProfileId`、`templateVersionId`、`versionNo`、`status`、`items`、`validationItems`、`confirmedCount`、`needsReviewCount` 和 `publishedAt`。
+
+P10D T7 结构映射前端已落地：模板解析工作台会加载 `StructureMappingProfile`，结构节点行内可选择角色并保存草稿，发布映射时展示后端 `validationItems` 阻断原因。当前 UI 可编辑角色：`UNKNOWN`、`TITLE`、`RECIPIENT`、`BODY`、`BODY_HEADING_LEVEL_1`、`ATTACHMENT_NOTE`、`SIGNATURE`、`DATE`、`STATIC_TEXT`、`IGNORE`；更完整角色集、批量映射、admin override 发布和映射审计展示仍留给后续增强。
+
+P10D T8 `DraftNode` 后端基础已落地：新增 `draft_node` 表（Flyway `V15__draft_node_foundation.sql`）和 `com.gongwen.assistant.draft.node` 包；提供从已发布结构映射初始化草稿节点、读取草稿节点列表、保存节点内容和状态的 API。节点初始化要求草稿已绑定模板版本、模板版本已有 `PUBLISHED` 结构映射和 `DocumentStructureProfile`；服务通过现有 `DraftService.getDraft` 复用当前用户草稿访问过滤。旧 `draft_block`、`PUT /api/drafts/{id}/blocks` 和 `DraftDetailDto.blocks` 保持兼容。
+
+P10D T9 工作台结构树与节点编辑 UI 已落地：前端进入工作台时优先使用 `DraftDetail.nodes` 或 `GET /api/drafts/{draftId}/nodes`，没有节点且草稿已绑定模板时会调用 `POST /api/drafts/{draftId}/nodes/initialize`；`WorkbenchNode` 适配器优先消费后端 `DraftNode`，并在缺失时回退到模板 `structures` 与旧 `DraftBlock`。左栏新增结构节点树和状态标记，中间编辑区可直接编辑标题、主送、正文、附件、落款和日期等选中节点；保存时先提交 dirty `DraftNode`，再物化兼容 `DraftBlock`，以便现有 AI、质检和导出链路在 T10/T14 前继续工作。
+
+P10D T10 节点感知 AI 后端已落地：`AiOutlineRequest`、`AiParagraphRequest` 和 `AiLocalOperationRequest` 均支持可选 `nodeId`、`nodeRole`、`nodeTitle`、`nodeContext`。提纲生成仍只返回建议，不自动写草稿，并新增 `nodeSuggestions` 表达节点级创建/更新建议；段落生成在目标为正文 `DraftNode` 时会写回该节点并标记 `AI_GENERATED`，同时继续写兼容 `BODY_PARAGRAPH` 块；局部操作优先读取目标 `DraftNode`，返回 `targetNodeId` 和建议文本但不自动保存。AI trace 只记录节点 id、角色、字符数和摘要统计，不记录完整节点正文、完整材料文本或完整建议文本。
+
+P10D T11 右栏节点 AI 前端已落地：工作台右栏 AI 动作会随选中 `WorkbenchNode` 切换；持久化节点的局部操作请求发送 `nodeId`、`nodeRole`、`nodeTitle` 和 `nodeContext`，旧正文段落继续使用 `targetBlockId` fallback。标题和正文节点显示生成建议入口，落款和日期节点转为质检确认，固定文本、页眉页脚、锁定或不支持节点禁用节点级 AI；右栏原有基础质检和 Word 导出入口保持可见。
 
 当前核心 API：
 
@@ -380,6 +407,14 @@ Agent: 后端
 - `GET /api/templates/versions`
 - `POST /api/templates/{templateId}/versions`
 - `GET /api/templates/versions/{versionId}/profile`
+- `GET /api/templates/versions/{versionId}/structure-profile`
+- `GET /api/templates/versions/{versionId}/document-kind`
+- `GET /api/templates/versions/{versionId}/render-preview`
+- `POST /api/templates/versions/{versionId}/render-preview`
+- `GET /api/render-previews/{previewId}/pages/{pageNumber}`
+- `GET /api/templates/versions/{versionId}/structure-mapping`
+- `PUT /api/templates/versions/{versionId}/structure-mapping/draft`
+- `POST /api/templates/versions/{versionId}/structure-mapping/publish`
 - `GET /api/exports`
 - `GET /api/exports/{recordId}`
 - `POST /api/exports/word`
@@ -397,6 +432,9 @@ Agent: 后端
 - `PUT /api/drafts/{id}/blocks`
 - `PUT /api/drafts/{id}/title`
 - `PUT /api/drafts/{id}/template-version`
+- `POST /api/drafts/{draftId}/nodes/initialize`
+- `GET /api/drafts/{draftId}/nodes`
+- `PUT /api/drafts/{draftId}/nodes/{nodeId}`
 - `GET /api/drafts/{draftId}/materials`
 - `POST /api/drafts/{draftId}/materials`
 - `POST /api/drafts/{draftId}/ai/outline`
@@ -443,7 +481,7 @@ AI 提纲生成当前约定：
 - `PromptBuilder` 集中构建结构化提纲输入，不在 controller 或前端散落 prompt。
 - `ai_generation_trace` 记录任务类型、provider、model、状态、prompt 版本、输入摘要、输出摘要、错误摘要和耗时。
 - trace 不保存完整草稿正文、完整材料提取文本或完整 prompt。
-- 提纲 API 返回标题建议、正文结构、段落要点和缺失信息提示。
+- 提纲 API 返回标题建议、正文结构、段落要点、缺失信息提示和可选 `nodeSuggestions`；节点建议只表示待用户确认的创建/更新建议，不自动改写草稿节点。
 - 前端右栏已接入生成中、成功、失败和重试状态。
 
 草稿列表当前约定：
@@ -459,7 +497,8 @@ AI 提纲生成当前约定：
 AI 逐段正文生成当前约定：
 
 - `POST /api/drafts/{draftId}/ai/paragraph` 基于提纲章节标题、要点、补充要求和 READY 材料摘要生成单个正文段落。
-- 生成结果保存为 `BODY_PARAGRAPH` 草稿块；同一 `sortOrder` 重新生成会替换原段落，支持单段重试。
+- 生成结果默认保存为 `BODY_PARAGRAPH` 草稿块；如果请求带目标正文 `nodeId`，后端会同时写入对应 `DraftNode` 并标记 `AI_GENERATED`，但不会改变节点角色。
+- 段落生成不能直接写入 `TITLE`、`RECIPIENT`、`SIGNATURE`、`DATE` 等受保护结构槽位，防止 AI 隐式改写标题、主送、落款或日期。
 - 段落生成会要求并兜底确保正文以提纲章节标题开头，避免同一篇正文中部分段落有标题、部分段落无标题。
 - `PromptBuilder` 集中构建 `paragraph-v1` 输入摘要，不在前端或 controller 散落 prompt。
 - `ai_generation_trace` 使用 `PARAGRAPH` task type 记录 provider、model、状态、prompt 版本、输入摘要、输出摘要、错误摘要和耗时。
@@ -468,14 +507,14 @@ AI 逐段正文生成当前约定：
 
 P7 局部段落 AI 操作当前约定：
 
-- `POST /api/drafts/{draftId}/ai/local-operation` 针对单个 `BODY_PARAGRAPH` 草稿块生成建议文本，不直接保存或覆盖原文。
+- `POST /api/drafts/{draftId}/ai/local-operation` 可优先针对单个 `DraftNode` 生成建议文本；没有 `nodeId` 时继续 fallback 到单个 `BODY_PARAGRAPH` 草稿块，不直接保存或覆盖原文。
 - 支持 `FORMALIZE`、`COMPRESS`、`EXPAND`、`REWRITE`、`SUPPLEMENT` 五类操作。
 - 用户必须先在 Word 风格预览中选择一个正文段落；右栏生成建议后可采纳或放弃。
 - 左栏正文区域显示正文段落目录，段落标题从 `DraftBlock` 内容开头提取；点击目录项会定位并选中中间 Word 风格预览中的对应段落。
 - Word 风格预览中的正文段落支持选中后直接编辑；手工修改后仍通过现有保存草稿链路持久化。
 - 采纳建议时复用 `PUT /api/drafts/{id}/blocks` 保存替换后的草稿块。
 - `PromptBuilder` 集中构建 `local-operation-v1` 输入摘要；Mock 和 DeepSeek 均通过 `ModelAdapter.generateLocalOperation` 统一调用。
-- `ai_generation_trace` 使用 `LOCAL_OPERATION` task type 记录 provider、model、状态、prompt 版本、目标块、操作类型、字符数和耗时。
+- `ai_generation_trace` 使用 `LOCAL_OPERATION` task type 记录 provider、model、状态、prompt 版本、目标节点或目标块、操作类型、字符数和耗时。
 - trace 不保存完整原文段落、完整建议文本、完整材料提取文本或完整 prompt。
 
 P8 基础质检当前约定：
@@ -513,7 +552,7 @@ P11 导出体验当前约定：
 - 正文 effective formatting 不再盲取第一个 `BODY` 结构；当首个 body-like 段落实际是主送或未缩进段时，应优先选择带首行缩进的正文段作为正文格式样本，避免导出正文丢首行缩进和段落节奏。
 - 无占位符参考范文导出不再从空白 `XWPFDocument` 生成；`WordExportService` 会把 `TemplateProfile` 传给导出渲染器，保留原模板 DOCX 的 section、页边距、页脚和 styles 外壳，重建发文机关/文号/标题/主送/正文/附件/落款/日期等结构槽位；导出前会清洗旧草稿正文块里混入的主送、附件、落款和日期，避免重复输出。
 - 当前已稳定复现的关键规则是标题居中、正文首行缩进与段落间距、落款右对齐、日期右对齐；后续 richer style inheritance 和 unsupported OOXML 风险显式提示仍属于 P10B 增强项。
-- P10C 当前前端切片新增 `WorkbenchNode` 派生模型：工作台会从 `DraftDetail + TemplateProfile + formattingOverrides` 派生正文结构节点，正文小标题和正文内容在左栏目录、中间纸张和右栏选中上下文中分开呈现；底层仍兼容 `DraftBlock`，后续需要新增后端 `draft_node` 持久化、AI/质检 `nodeId` 绑定和导出复现。
+- P10C/P10D 当前工作台结构节点模型：工作台会优先从后端 `DraftNode` 派生 `WorkbenchNode`，并在节点缺失时从 `DraftDetail + TemplateProfile + formattingOverrides` 和旧 `DraftBlock` 回退派生；正文小标题和正文内容在左栏结构树、中间纸张和右栏选中上下文中分开呈现。后续重点是让 AI、质检和导出直接消费 `nodeId`，减少对兼容 `DraftBlock` 的依赖。
 - 当前 T1/P10 底座已提供 `GET /api/templates`、`POST /api/templates`、`DELETE /api/templates/{templateId}`、`POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。
 - `POST /api/templates` 对同名同文种模板按幂等创建处理：已存在时返回已有模板，随后上传文件会进入该模板的新版本；不同文种同名因旧表唯一键限制会返回稳定业务错误。
 - 模板管理入口采用“文种文件夹 -> 模板卡片 -> 新增模板/上传版本”的层级 UI；首屏选择文种，进入后展示该文种模板卡片，新增模板进入独立表单，选择 Word 文件后需要点击“确认创建并解析”，不会选择文件即自动上传。
@@ -563,7 +602,7 @@ P11 导出体验当前约定：
 - 本地 Gradle 缓存目录：`D:\gongwen\.gradle-user-home`，该目录不提交。
 - focused 后端测试：`powershell -ExecutionPolicy Bypass -File .\scripts\backend-test-focused.ps1 "com.gongwen.assistant.ai.PromptBuilderTest"`。
 - 全量后端测试：`powershell -ExecutionPolicy Bypass -File .\scripts\backend-test.ps1`。
-- 前端测试：在 `frontend/` 下运行 `npm test -- --run`，构建运行 `npm run build`。
+- 前端测试：在 `frontend/` 下运行 `npm test --`，构建运行 `npm run build`。当前 `package.json` 的 test 脚本已经包含 `vitest --run`，不要再额外传 `--run`。
 
 长期任务总表已建立：`docs/PROJECT_TASKS.md`。后续 AI Agent 接手时必须用该文件判断当前阶段、依赖、验收标准和下一步任务。
 
@@ -587,7 +626,7 @@ P11 导出体验当前约定：
 下一步建议：
 
 1. 推进 P11 导出体验增强：补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
-2. 推进 P10C 结构节点持久化：新增后端 `draft_node` 或兼容节点 API，让工作台节点内容和草稿级样式覆盖刷新后不丢失，并逐步接入 AI/质检 `nodeId`。
+2. 推进 P10D T12/T13：先做 `DraftNode` 格式覆盖后端，再接前端节点级格式面板，同时继续保留旧 `DraftBlock` fallback。
 3. P10 模板管理员后台继续扩展字段映射、模板启停、版本详情和模板列表操作；不要重复实现文种文件夹、模板卡片、上传解析首版。
 4. P8/P11 后续围绕模板版本 `TemplateProfile` 做导出前阻断和导出记录追溯；P10B 的格式复现合同已落地，不要再把这部分回滚成 P11 前置依赖。
 5. P9 登录与基础权限仍是 MVP 闭环的关键后续，尤其是草稿、材料、模板、导出文件访问控制。

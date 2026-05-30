@@ -3,6 +3,8 @@ package com.gongwen.assistant.ai;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
+import com.gongwen.assistant.draft.node.DraftNode;
+import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialRepository;
 import org.springframework.stereotype.Service;
 
@@ -20,27 +22,33 @@ public class AiLocalOperationService {
     private final PromptBuilder promptBuilder;
     private final ModelAdapter modelAdapter;
     private final AiGenerationTraceRepository traceRepository;
+    private final DraftNodeRepository draftNodeRepository;
 
     public AiLocalOperationService(
             DraftService draftService,
             MaterialRepository materialRepository,
             PromptBuilder promptBuilder,
             ModelAdapter modelAdapter,
-            AiGenerationTraceRepository traceRepository
+            AiGenerationTraceRepository traceRepository,
+            DraftNodeRepository draftNodeRepository
     ) {
         this.draftService = draftService;
         this.materialRepository = materialRepository;
         this.promptBuilder = promptBuilder;
         this.modelAdapter = modelAdapter;
         this.traceRepository = traceRepository;
+        this.draftNodeRepository = draftNodeRepository;
     }
 
     public AiLocalOperationResponse generateSuggestion(long draftId, AiLocalOperationRequest request) {
         validateRequest(request);
         DraftDetailDto draft = draftService.getDraft(draftId);
-        DraftBlockDto targetBlock = findTargetBlock(draft, request.targetBlockId());
+        DraftNode targetNode = resolveTargetNode(draftId, request);
+        DraftBlockDto targetBlock = targetNode == null ? findTargetBlock(draft, request.targetBlockId()) : null;
         List<MaterialPromptSummary> materials = materialRepository.findReadyTextSummariesByDraftId(draftId);
-        LocalOperationPrompt prompt = promptBuilder.buildLocalOperationPrompt(draft, materials, targetBlock, request);
+        LocalOperationPrompt prompt = targetNode == null
+                ? promptBuilder.buildLocalOperationPrompt(draft, materials, targetBlock, request)
+                : promptBuilder.buildLocalOperationPrompt(draft, materials, nodeContext(request, targetNode), targetNode.sortOrder(), request);
         UUID traceId = UUID.randomUUID();
         Instant startedAt = Instant.now();
 
@@ -51,7 +59,14 @@ public class AiLocalOperationService {
             }
             String suggestion = modelResponse.suggestionText().strip();
             traceRepository.save(successTrace(traceId, draftId, prompt, suggestion, startedAt));
-            return new AiLocalOperationResponse(traceId, targetBlock.id(), request.operationType(), suggestion);
+            return new AiLocalOperationResponse(
+                    traceId,
+                    targetBlock == null ? null : targetBlock.id(),
+                    targetNode == null ? null : targetNode.id(),
+                    targetNode == null ? "" : targetNode.role(),
+                    request.operationType(),
+                    suggestion
+            );
         } catch (ModelAdapterException exception) {
             traceRepository.save(failedTrace(traceId, draftId, prompt, exception.errorCode(), exception.getMessage(), startedAt));
             throw new AiOutlineException("AI_MODEL_UNAVAILABLE", "AI 服务暂不可用，请稍后重试");
@@ -62,7 +77,7 @@ public class AiLocalOperationService {
     }
 
     private void validateRequest(AiLocalOperationRequest request) {
-        if (request == null || request.targetBlockId() == null) {
+        if (request == null || (request.targetBlockId() == null && request.nodeId() == null)) {
             throw new AiOutlineException("AI_LOCAL_TARGET_REQUIRED", "请选择要处理的正文段落");
         }
         if (request.operationType() == null) {
@@ -71,6 +86,23 @@ public class AiLocalOperationService {
         if (request.instruction() != null && request.instruction().length() > MAX_INSTRUCTION_LENGTH) {
             throw new AiOutlineException("AI_LOCAL_INSTRUCTION_TOO_LONG", "补充要求不能超过 1000 字");
         }
+    }
+
+    private DraftNode resolveTargetNode(long draftId, AiLocalOperationRequest request) {
+        if (request == null || request.nodeId() == null) {
+            return null;
+        }
+        DraftNode node = draftNodeRepository.findByDraftId(draftId).stream()
+                .filter(candidate -> candidate.id() == request.nodeId())
+                .findFirst()
+                .orElseThrow(() -> new AiOutlineException("AI_NODE_TARGET_NOT_FOUND", "目标结构节点不存在"));
+        if ("LOCKED".equals(node.status())) {
+            throw new AiOutlineException("AI_LOCAL_TARGET_LOCKED", "锁定节点不能执行局部 AI 操作");
+        }
+        if (node.content() == null || node.content().isBlank()) {
+            throw new AiOutlineException("AI_LOCAL_TARGET_EMPTY", "目标结构节点内容为空");
+        }
+        return node;
     }
 
     private DraftBlockDto findTargetBlock(DraftDetailDto draft, long targetBlockId) {
@@ -103,8 +135,10 @@ public class AiLocalOperationService {
                 "SUCCESS",
                 prompt.promptVersion(),
                 prompt.inputSummary(),
-                "targetBlockId=%d;operationType=%s;suggestionChars=%d".formatted(
+                "targetBlockId=%d;targetNodeId=%s;targetNodeRole=%s;operationType=%s;suggestionChars=%d".formatted(
                         prompt.targetBlockId(),
+                        prompt.targetNodeId() == null ? "" : prompt.targetNodeId(),
+                        prompt.targetNodeRole(),
                         prompt.operationType(),
                         suggestion.length()
                 ),
@@ -138,5 +172,21 @@ public class AiLocalOperationService {
                 Duration.between(startedAt, Instant.now()).toMillis(),
                 Instant.now()
         );
+    }
+
+    private AiNodeContext nodeContext(AiLocalOperationRequest request, DraftNode node) {
+        return new AiNodeContext(
+                node.id(),
+                firstNonBlank(node.role(), request.nodeRole()),
+                firstNonBlank(node.title(), request.nodeTitle()),
+                firstNonBlank(request.nodeContext(), node.content())
+        );
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first.strip();
+        }
+        return second == null ? "" : second.strip();
     }
 }

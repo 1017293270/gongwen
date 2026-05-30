@@ -11,7 +11,7 @@
 
 ## 当前状态
 
-当前分支：`p2-p3-draft-workbench`
+当前分支：`codex/2026-05-30-dev`
 
 已完成：
 
@@ -47,13 +47,25 @@
 - P10C 工作台结构节点前端切片：新增 `WorkbenchNode` 派生层，左栏正文目录、中间类 Word 纸张和右栏局部操作上下文统一围绕结构节点；正文小标题和正文内容分开展示、选择和编辑，底层仍兼容现有 `DraftBlock`。
 - P11 导出体验阻断与追溯切片：新增草稿绑定模板版本后的 Word 导出 API 和工作台右栏入口，导出前会自动保存、运行基础质检，后端按最近一次质检结果阻断 `exportBlocked=true` 的草稿；导出记录页已接入真实列表、详情弹窗、失败原因展示、失败重试和成功历史文件下载。
 - P9 账号与组织底座第三档首版：Spring Security 会话登录、CSRF、系统管理员 bootstrap、部门树、账号与角色表、部门管理 UI、账号管理 UI、文种 CRUD UI，以及草稿/模板/文种的当前用户归属过滤。
+- P10D T0 契约冻结：专项计划已冻结共享枚举、迁移号、API 边界、Agent 分工和进度规则；下一迁移号从 `V12` 开始，`18081` 仅作为本地手动联调服务，不作为自动测试前置条件。
+- P10D T1 字体与行距基线：模板解析已分离 `eastAsiaFontFamily` 与 `latinFontFamily`，兼容字段 `fontFamily` 优先使用 eastAsia，避免中文段落误显示为 `Times New Roman`；行距新增结构化 `lineSpacing`，区分 AUTO 倍数与 EXACT 固定值。
+- P10D T2 文件类型识别基线：无占位符 Word 会补充 `documentKind`、`reasonCodes`、`recommendedWorkflow` 和 `blockingWarnings`；手册/格式说明类文档会识别为 `MANUAL_OR_GUIDE` 并阻断自动套版流程，格式说明文字中的“标题/正文/附件”等不再被当作真实公文槽位。
+- P10D T3 `DocumentStructureProfile` 基础：新增 `document_structure_profile` 表和后端 `documentstructure` 包，模板上传后会从 `TemplateProfile.structures` 派生事实层节点并以 JSONB 持久化，首版节点类型覆盖段落、表格段落、页眉段落和页脚段落。
+- P10D T4 DOCX 渲染预览后端：新增 `document_render_preview` 表和后端 `rendering` 包，支持模板版本渲染预览状态、页面元数据、页面图片下载接口、LibreOffice headless 命令 seam、PDFBox 栅格化路径和预览存储目录约束；本轮只做后端接口和轻量验证，未要求前端接入。
+- P10D T5 模板解析工作台只读 UI：模板解析弹窗已改为只读工作台，展示文档类型、结构树、占位符、解析风险和渲染预览状态；手册/格式说明类文件以非模板流程警告呈现，不再像解析失败一样打断；前端已接入 `structure-profile`、`document-kind` 和 `render-preview` API。
+- P10D T6 结构映射后端：新增 `structure_mapping_profile` 表和后端 `documentstructure.mapping` 包，支持读取默认建议映射、保存草稿映射和发布映射；发布会校验节点存在、模板管理员权限、`TITLE`/`BODY` 必备槽位，并默认阻断手册/制度/普通文档，除非请求显式 `adminOverride=true`。
+- P10D T7 结构映射前端：模板解析工作台已支持对结构节点选择语义角色、保存映射草稿和发布映射，并展示后端返回的发布阻断原因；首版角色控件覆盖标题、主送、正文、一级标题、附件说明、落款、日期、固定文本、忽略和待确认。
+- P10D T8 `DraftNode` 后端基础：新增 `draft_node` 表和后端 `draft.node` 包，支持从已发布结构映射初始化草稿节点、读取节点列表、保存节点正文和状态；节点访问复用现有草稿权限过滤，旧 `draft_block` 与草稿保存 API 保持兼容。
+- P10D T9 工作台结构树与节点编辑 UI：前端已接入 `DraftNode` 初始化、读取和保存 API，`WorkbenchNode` 优先使用后端节点记录，左栏展示结构节点树和状态标记，中间编辑区可编辑选中节点内容；节点缺失或接口不可用时仍回退到模板结构与旧 `DraftBlock` 数据，保存时继续物化兼容块供现有 AI、质检和导出使用。
+- P10D T10 节点感知 AI 后端：提纲、段落生成和局部操作请求已支持可选 `nodeId`、`nodeRole`、`nodeTitle`、`nodeContext`；提纲返回节点级创建/更新建议但不自动写草稿，段落生成可写入目标正文 `DraftNode` 并保留兼容 `BODY_PARAGRAPH` fallback，局部操作优先目标节点并继续只返回建议文本。
+- P10D T11 右栏节点 AI 前端：右栏 AI 动作会随选中 `WorkbenchNode` 切换；持久化节点的局部操作请求发送 `nodeId`、`nodeRole`、`nodeTitle` 和 `nodeContext`，旧正文段落继续保留 `targetBlockId` fallback；标题/正文显示生成建议入口，落款/日期转为质检确认，锁定或不支持节点禁用节点级 AI。
 
 当前推荐下一阶段：
 
-- P10D DOCX 原貌预览与结构化工作台：按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 执行，先完成中文字体/eastAsia 修复、手册/模板识别稳定、`DocumentStructureProfile`、LibreOffice 真预览和结构映射，再推进 `DraftNode`、节点 AI、字体/格式覆盖和导出追溯。
+- P10D DOCX 原貌预览与结构化工作台：T0-T11 已完成，按 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 继续执行；下一步优先派后端格式 Agent 做 T12，再派前端格式 Agent 做 T13，让节点级格式覆盖进入编辑闭环。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
 - P9 权限继续收口，补材料/导出文件下载鉴权、模板管理员细粒度授权、审计日志和权限不足 UI。
-- P10C 结构节点持久化，新增后端节点 API/存储，并把 AI/质检/导出从草稿块逐步迁到 `nodeId`。
+- P10D 结构节点链路继续下沉，把 AI、质检和导出从兼容 `DraftBlock` 逐步迁到 `DraftNode` / `nodeId`。
 - P10B 后续增强，继续补 richer style inheritance 和 unsupported OOXML 结构显式提示。
 - P10 模板管理员后台后续增强，继续做字段映射、启停和版本详情。
 
@@ -752,7 +764,7 @@
 后续范围：
 
 - 从 Word style 定义本身补充更多继承属性，而不仅依赖代表段落和 run。
-- 新增后端 `draft_node` 持久化或兼容节点 API，避免 `WorkbenchNode` 长期只作为前端派生层。
+- 继续把 AI、质检和导出从兼容 `DraftBlock` 逐步迁到 `DraftNode` / `nodeId`；当前 `draft_node` 后端和工作台节点 UI 已完成首版。
 - 补 unsupported OOXML 结构列表，例如域、脚注尾注、复杂 DrawingML、宏等，并在质检或模板风险里显式提示。
 
 验证状态：
@@ -861,20 +873,23 @@ P10D 执行纪律：
 
 - 每完成一个任务，必须同步更新专项计划里的 `Progress Board` 和 `Progress Log`。
 - 任务完成必须写明 commit、验证命令、结果和剩余风险。
-- 后续 Agent 必须先完成或确认 T0 契约冻结，再并行拆后端结构、渲染、前端解析工作台、映射、DraftNode、AI、格式、导出和 QA。
+- 后续 Agent 必须先确认 T0 契约冻结，再并行拆后端结构、渲染、前端解析工作台、映射、DraftNode、AI、格式、导出和 QA。
+- P10D 迁移号已冻结：T3 使用 `V12`，T4 使用 `V13`，T6 使用 `V14`，T8 使用 `V15`，T14 如需迁移使用 `V16`。
 - 阶段完成后再回写本文件当前状态；涉及 API、数据表、环境变量或模块边界变化时同步更新 `AGENTS.md`。
 
 ## 当前推荐多 Agent 分工
 
 目标阶段：P10D DOCX 原貌预览与结构化工作台 + P11 导出体验增强 + P10 后续增强 + P9 权限收口。
 
-建议先由集成 Agent 冻结接口契约，再并行：
+T0 已由集成 Agent 冻结接口契约；后续并行建议：
 
-- Agent P10D-0 集成：执行 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md` 的 T0，冻结枚举、迁移号、接口和进度更新规则。
-- Agent P10D-A 后端结构：执行 T1-T3，负责 eastAsia 字体、文件类型识别和 `DocumentStructureProfile`。
-- Agent P10D-B 后端渲染：执行 T4，负责 LibreOffice 真预览、存储、状态和预览 API。
-- Agent P10D-C 前端模板：执行 T5-T7，负责解析工作台、结构树、预览状态、映射编辑和发布。
-- Agent P10D-D 草稿/AI/格式/导出：按顺序执行 T8-T15，每个任务完成后都要回写专项计划进度。
+- Agent P10D-0 集成：T0 已完成；后续只负责核对冻结枚举、迁移号、接口和进度更新规则未被偏离。
+- Agent P10D-A 后端 Profile：执行 T1-T2，负责 eastAsia 字体、effective formatting 和文件类型识别。
+- Agent P10D-B 后端结构：执行 T3，负责 `DocumentStructureProfile`，使用冻结迁移 `V12`。
+- Agent P10D-C 后端渲染：执行 T4，负责 LibreOffice 真预览、存储、状态和预览 API，使用冻结迁移 `V13`。
+- Agent P10D-D 后端映射：T6 已完成，负责结构映射保存/发布，使用冻结迁移 `V14`。
+- Agent P10D-E 前端模板：T5 已完成；后续执行 T7，负责映射编辑和发布。
+- Agent P10D-F 草稿/AI/格式/导出：T8-T11 已完成；后续按顺序执行 T12-T15，每个任务完成后都要回写专项计划进度。
 - Agent P10D-QA 文档：执行 T16-T17，负责样本库、回归测试、最终验证和文档同步。
 - Agent A 后端 P11：读取或触发最新质检结果，`exportBlocked=true` 时阻断导出；补导出记录模板版本追溯和稳定错误 shape。
 - Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检、导出中、导出失败和成功下载状态。
@@ -897,11 +912,11 @@ P10D 执行纪律：
 
 - 当前分支和 `git status --short --branch`。
 - `AGENTS.md` 与本文件是否反映当前代码。
-- 最近提交：`9744a31 feat: add template management library flow`。如果工作区还有未提交 UI 微调，必须先阅读 diff，不要覆盖。
+- 最近提交：`1013a3b docs: add docx structure workbench task plan`。如果工作区还有未提交改动，必须先阅读 diff，不要覆盖。
 - 当前阶段是否已有 `docs/superpowers/plans/*` 实施计划。
 - 是否存在未提交用户改动，不能随意覆盖。
 - 当前本机已有 JDK 21、本地 Gradle 8.10.2 和脚本，后端优先用 `scripts/backend-test-focused.ps1` 或 `scripts/backend-test.ps1`，不必默认启 Docker Gradle 冷环境。
-- 如果改前端，至少运行 `npm run build`；风险较高或改测试相关时再运行 `npm test -- --run`。
+- 如果改前端，至少运行 `npm run build`；风险较高或改测试相关时再运行 `npm test --`。当前前端 test 脚本已经包含 `vitest --run`，不要再额外传 `--run`。
 - 如果改 UI，必须用浏览器检查桌面布局，必要时检查移动视口；常规 UI 必须先复用全局组件和全局样式。
 
 ## 验证命令备忘
@@ -910,7 +925,7 @@ P10D 执行纪律：
 
 ```powershell
 cd D:\gongwen\frontend
-npm test -- --run
+npm test --
 npm run build
 ```
 

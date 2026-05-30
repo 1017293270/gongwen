@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class TemplateIntelligenceService {
@@ -33,14 +35,24 @@ public class TemplateIntelligenceService {
                     profile.placeholders().stream().map(placeholder -> placeholder.key()).distinct().toList(),
                     List.of(),
                     "已识别到显式占位符，可直接用于自动套版。",
-                    "RULE"
+                    "RULE",
+                    "PLACEHOLDER_TEMPLATE",
+                    List.of("EXPLICIT_PLACEHOLDERS"),
+                    "AUTO_TEMPLATE",
+                    List.of()
             ));
+        }
+
+        String textSample = extractTextSample(content);
+        TemplateAnalysisProfile ruleAnalysis = classifyByRules(documentTypeCode, originalFileName, textSample);
+        if (ruleAnalysis != null) {
+            return profile.withTemplateAnalysis(ruleAnalysis);
         }
 
         TemplateAnalysisPrompt prompt = new TemplateAnalysisPrompt(
                 documentTypeCode,
                 originalFileName,
-                extractTextSample(content),
+                textSample,
                 profile.styles().stream().map(style -> style.styleName() == null ? style.styleId() : style.styleName()).toList(),
                 profile.tables().size(),
                 profile.sections().stream().anyMatch(section -> section.hasHeader()),
@@ -64,8 +76,78 @@ public class TemplateIntelligenceService {
                         .map(suggestion -> new TemplatePlaceholderSuggestionProfile(suggestion.field(), suggestion.reason()))
                         .toList(),
                 response.message(),
-                response.source()
+                response.source(),
+                documentKind(response.templateKind()),
+                List.of("AI_TEMPLATE_ANALYSIS"),
+                recommendedWorkflow(response.templateKind()),
+                blockingWarnings(documentKind(response.templateKind()))
         );
+    }
+
+    private TemplateAnalysisProfile classifyByRules(String documentTypeCode, String originalFileName, String textSample) {
+        String combined = safeText(originalFileName) + "\n" + safeText(textSample);
+        List<String> reasonCodes = new ArrayList<>();
+        if (containsAny(combined, "手册", "指南", "培训", "写作基础", "格式说明")) {
+            reasonCodes.add("MANUAL_OR_GUIDE_KEYWORD");
+        }
+        if (containsAny(combined, "标题：", "标题:", "正文：", "正文:", "方正小标宋", "方正仿宋", "首行缩进", "行距")) {
+            reasonCodes.add("FORMAT_INSTRUCTION_TEXT");
+        }
+        if (reasonCodes.contains("MANUAL_OR_GUIDE_KEYWORD") && reasonCodes.contains("FORMAT_INSTRUCTION_TEXT")) {
+            return new TemplateAnalysisProfile(
+                    "MANUAL_OR_GUIDE",
+                    0.92,
+                    documentTypeCode,
+                    List.of(),
+                    List.of(),
+                    "该文件更像公文使用手册或格式说明，适合作为知识材料或参考资料，不应直接进入自动套版模板发布流程。",
+                    "RULE",
+                    "MANUAL_OR_GUIDE",
+                    reasonCodes,
+                    "BLOCK_AUTO_TEMPLATE",
+                    blockingWarnings("MANUAL_OR_GUIDE")
+            );
+        }
+        return null;
+    }
+
+    private String documentKind(String templateKind) {
+        if (templateKind == null || templateKind.isBlank()) {
+            return "UNKNOWN_DOCUMENT";
+        }
+        return switch (templateKind) {
+            case "STANDARD_PLACEHOLDER_TEMPLATE" -> "PLACEHOLDER_TEMPLATE";
+            default -> templateKind;
+        };
+    }
+
+    private String recommendedWorkflow(String templateKind) {
+        return switch (documentKind(templateKind)) {
+            case "PLACEHOLDER_TEMPLATE" -> "AUTO_TEMPLATE";
+            case "STYLE_TEMPLATE" -> "REVIEW_AND_ADD_PLACEHOLDERS";
+            case "REFERENCE_DOCUMENT", "OFFICIAL_DOCUMENT" -> "REVIEW_AND_MAP";
+            case "MANUAL_OR_GUIDE", "POLICY_OR_REGULATION", "ORDINARY_DOCUMENT" -> "BLOCK_AUTO_TEMPLATE";
+            default -> "REVIEW_REQUIRED";
+        };
+    }
+
+    private List<String> blockingWarnings(String documentKind) {
+        return switch (documentKind) {
+            case "MANUAL_OR_GUIDE" -> List.of("该文件更像公文使用手册或格式说明，不应直接发布为自动套版模板。");
+            case "POLICY_OR_REGULATION" -> List.of("该文件更像制度或规范文本，不应直接发布为自动套版模板。");
+            case "ORDINARY_DOCUMENT" -> List.of("该文件不像公文模板或范文，不应直接发布为自动套版模板。");
+            default -> List.of();
+        };
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        String normalized = safeText(text).toLowerCase(Locale.ROOT);
+        for (String keyword : keywords) {
+            if (normalized.contains(keyword.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String extractTextSample(byte[] content) {
@@ -85,5 +167,9 @@ public class TemplateIntelligenceService {
             return;
         }
         text.append(value.strip()).append('\n');
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value;
     }
 }

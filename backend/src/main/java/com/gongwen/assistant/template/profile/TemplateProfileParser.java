@@ -2,6 +2,7 @@ package com.gongwen.assistant.template.profile;
 
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFHeader;
+import org.apache.poi.xwpf.usermodel.LineSpacingRule;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFStyle;
@@ -165,16 +166,20 @@ public class TemplateProfileParser {
 
     private TemplateStructureFormattingProfile formattingFromParagraph(XWPFParagraph paragraph) {
         XWPFRun run = firstRun(paragraph);
+        TemplateLineSpacingProfile lineSpacing = lineSpacing(paragraph);
         return new TemplateStructureFormattingProfile(
-                run == null ? null : run.getFontFamily(),
+                preferredFontFamily(run),
                 fontSizeHalfPoints(run),
                 run == null ? null : run.isBold(),
                 paragraph.getAlignment() == null ? null : paragraph.getAlignment().name(),
                 positiveOrNull(paragraph.getIndentationFirstLine()),
-                spacingBetween(paragraph),
+                legacySpacingBetween(lineSpacing),
                 positiveOrNull(paragraph.getSpacingBefore()),
                 positiveOrNull(paragraph.getSpacingAfter()),
-                run == null ? null : run.getColor()
+                run == null ? null : run.getColor(),
+                eastAsiaFontFamily(run),
+                latinFontFamily(run),
+                lineSpacing
         );
     }
 
@@ -184,6 +189,9 @@ public class TemplateProfileParser {
         }
         if ("FOOTER".equals(locationType)) {
             return "FOOTER";
+        }
+        if (isFormattingInstructionLine(text)) {
+            return "UNKNOWN";
         }
         String raw = (text + " " + safeText(paragraph.getStyle()) + " " + safeText(styleName(paragraph))).toLowerCase();
         if (containsAny(raw, "标题", "title", "{{标题", "{{title")) {
@@ -323,6 +331,32 @@ public class TemplateProfileParser {
         return false;
     }
 
+    private boolean isFormattingInstructionLine(String text) {
+        String normalized = text.strip();
+        if (PLACEHOLDER_PATTERN.matcher(normalized).find()) {
+            return false;
+        }
+        boolean mentionsSlot = normalized.matches("^(\\d+[.．、]|[一二三四五六七八九十]+[、.．])?\\s*(标题|正文|附件|主送|落款|日期)[：:].*");
+        boolean mentionsFormatting = containsAny(
+                normalized,
+                "方正",
+                "小标宋",
+                "仿宋",
+                "黑体",
+                "楷体",
+                "字号",
+                "二号",
+                "三号",
+                "四号",
+                "首行缩进",
+                "行距",
+                "居中",
+                "右对齐",
+                "格式"
+        );
+        return mentionsSlot && mentionsFormatting;
+    }
+
     private String previewText(String text) {
         if (text.length() <= 120) {
             return text;
@@ -347,14 +381,17 @@ public class TemplateProfileParser {
                     style == null ? styleId : style.getName(),
                     style == null ? "PARAGRAPH" : String.valueOf(style.getType()),
                     style == null ? null : style.getBasisStyleID(),
-                    run == null ? null : run.getFontFamily(),
+                    preferredFontFamily(run),
+                    eastAsiaFontFamily(run),
+                    latinFontFamily(run),
                     fontSizeHalfPoints(run),
                     run == null ? null : run.isBold(),
                     paragraph == null || paragraph.getAlignment() == null ? null : paragraph.getAlignment().name(),
                     positiveOrNull(paragraph == null ? -1 : paragraph.getIndentationFirstLine()),
-                    spacingBetween(paragraph),
+                    legacySpacingBetween(lineSpacing(paragraph)),
                     positiveOrNull(paragraph == null ? -1 : paragraph.getSpacingBefore()),
-                    positiveOrNull(paragraph == null ? -1 : paragraph.getSpacingAfter())
+                    positiveOrNull(paragraph == null ? -1 : paragraph.getSpacingAfter()),
+                    lineSpacing(paragraph)
             ));
         }
         return profiles;
@@ -389,11 +426,65 @@ public class TemplateProfileParser {
         return run.getFontSize() * 2;
     }
 
-    private Integer spacingBetween(XWPFParagraph paragraph) {
+    private String preferredFontFamily(XWPFRun run) {
+        if (run == null) {
+            return null;
+        }
+        return firstNonBlank(eastAsiaFontFamily(run), run.getFontFamily(), latinFontFamily(run));
+    }
+
+    private String eastAsiaFontFamily(XWPFRun run) {
+        return run == null ? null : blankToNull(run.getFontFamily(XWPFRun.FontCharRange.eastAsia));
+    }
+
+    private String latinFontFamily(XWPFRun run) {
+        if (run == null) {
+            return null;
+        }
+        return firstNonBlank(
+                run.getFontFamily(XWPFRun.FontCharRange.ascii),
+                run.getFontFamily(XWPFRun.FontCharRange.hAnsi)
+        );
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    private TemplateLineSpacingProfile lineSpacing(XWPFParagraph paragraph) {
         if (paragraph == null || paragraph.getSpacingBetween() <= 0) {
             return null;
         }
-        return (int) Math.round(paragraph.getSpacingBetween() * 100);
+        LineSpacingRule rule = paragraph.getSpacingLineRule();
+        String mode = rule == null ? "AUTO" : rule.name();
+        if ("EXACT".equals(mode) || "AT_LEAST".equals(mode)) {
+            return new TemplateLineSpacingProfile(
+                    mode,
+                    (int) Math.round(paragraph.getSpacingBetween() * 20),
+                    null
+            );
+        }
+        return new TemplateLineSpacingProfile(
+                "AUTO",
+                null,
+                (int) Math.round(paragraph.getSpacingBetween() * 100)
+        );
+    }
+
+    private Integer legacySpacingBetween(TemplateLineSpacingProfile lineSpacing) {
+        if (lineSpacing == null || !"AUTO".equals(lineSpacing.mode())) {
+            return null;
+        }
+        return lineSpacing.multipleHundred();
     }
 
     private Integer positiveOrNull(int value) {

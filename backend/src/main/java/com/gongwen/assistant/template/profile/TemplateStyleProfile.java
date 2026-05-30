@@ -6,12 +6,15 @@ public record TemplateStyleProfile(
         String type,
         String basedOn,
         String fontFamily,
+        String eastAsiaFontFamily,
+        String latinFontFamily,
         Integer fontSizeHalfPoints,
         Boolean bold,
         String alignment,
         Integer indentationFirstLine,
         Integer spacingBetween,
         Integer spacingBefore,
-        Integer spacingAfter
+        Integer spacingAfter,
+        TemplateLineSpacingProfile lineSpacing
 ) {
 }

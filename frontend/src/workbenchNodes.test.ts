@@ -98,6 +98,33 @@ describe('deriveWorkbenchNodes', () => {
     expect(composeBodySectionContent(nodes[0], nodes[0].content)).toBe('一、会议时间\n2026年6月5日上午10:00。');
   });
 
+  it('prefers persisted draft nodes over template profile and legacy blocks', () => {
+    const nodes = deriveWorkbenchNodes({
+      ...draft([{ id: 3, blockType: 'BODY_PARAGRAPH', content: '旧正文', sortOrder: 30 }]),
+      nodes: [
+        draftNode(101, 'TITLE', '节点标题', 10),
+        draftNode(102, 'BODY_HEADING_LEVEL_1', '一、节点标题', 20),
+        draftNode(103, 'BODY', '节点正文', 30),
+      ],
+    }, profile(), {});
+
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]).toMatchObject({
+      draftNodeId: 101,
+      nodeType: 'TITLE',
+      content: '节点标题',
+      status: 'USER_FILLED',
+    });
+    expect(nodes[1]).toMatchObject({
+      draftNodeId: 103,
+      headingDraftNodeId: 102,
+      nodeType: 'BODY_SECTION',
+      heading: '一、节点标题',
+      content: '节点正文',
+      source: 'USER',
+    });
+  });
+
   it('does not turn reference recipient attachment signature and date paragraphs into body nodes', () => {
     const referenceProfile = {
       ...profile(),
@@ -164,3 +191,34 @@ describe('deriveWorkbenchNodes', () => {
     expect(nodes.find((node) => node.nodeType === 'DATE')).toMatchObject({ content: '2026年5月27日' });
   });
 });
+
+function draftNode(id: number, role: string, content: string, sortOrder: number) {
+  return {
+    id,
+    draftId: 1,
+    structureMappingProfileId: 7,
+    templateNodeKey: `node-${id}`,
+    parentTemplateNodeKey: null,
+    nodeType: 'PARAGRAPH',
+    role,
+    slotKey: role === 'TITLE' ? 'title' : 'body',
+    title: role,
+    content,
+    sortOrder,
+    status: 'USER_FILLED',
+    formatOverride: {
+      eastAsiaFont: null,
+      latinFont: null,
+      fontSizePt: null,
+      bold: null,
+      alignment: null,
+      firstLineIndentTwip: null,
+      lineSpacingRule: null,
+      lineSpacingTwip: null,
+      spacingBeforeTwip: null,
+      spacingAfterTwip: null,
+    },
+    createdAt: '2026-05-30T00:00:00Z',
+    updatedAt: '2026-05-30T00:00:00Z',
+  };
+}

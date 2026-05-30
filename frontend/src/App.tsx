@@ -42,17 +42,24 @@ import {
   disableUser,
   downloadExportRecord,
   exportDraftWord,
+  getDocumentStructureProfile,
   getExportRecordDetail,
   getAiProviderSettings,
   getCurrentUser,
+  getRenderPreview,
+  getRenderPreviewPageUrl,
+  getStructureMapping,
   getTemplateProfile,
+  getTemplateDocumentKind,
   getTemplateStructureFormatting,
   generateDraftOutline,
   generateDraftParagraph,
   generateLocalOperation,
   getDraft,
+  initializeDraftNodes,
   listDepartments,
   listDocumentTypes,
+  listDraftNodes,
   listDrafts,
   listExportRecords,
   listDraftMaterials,
@@ -62,9 +69,13 @@ import {
   login,
   logout,
   resetUserPassword,
+  publishStructureMapping,
+  requestRenderPreview,
   retryExportRecord,
   runQualityCheck,
+  saveDraftNode,
   saveDraftBlocks,
+  saveStructureMappingDraft,
   testAiProviderConnection,
   updateAiProviderSettings,
   updateDepartment,
@@ -89,12 +100,16 @@ import {
 import type {
   AiLocalOperation,
   AiLocalOperationType,
+  AiNodeRequestContext,
   AiOutline,
   AiProviderSettings,
   AiProviderStatus,
   AuthUser,
   Department,
+  DocumentRenderPreview,
+  DocumentStructureProfile,
   DocumentType,
+  DraftNode,
   DraftBlock,
   DraftBlockUpdate,
   DraftDetail,
@@ -104,6 +119,9 @@ import type {
   Material,
   QualityCheckItem,
   QualityCheckResult,
+  StructureMappingItem,
+  StructureMappingProfile,
+  TemplateDocumentKind,
   TemplateProfile,
   TemplateStructureFormatting,
   TemplateStructureFormattingOverrides,
@@ -165,6 +183,7 @@ type TemplateStructureOverrideMap = TemplateStructureFormattingOverrides;
 type TemplateStructureOverridesByVersion = Record<number, TemplateStructureOverrideMap>;
 type DraftWorkspaceData = {
   loadedDraft: DraftDetail;
+  loadedDraftNodes: DraftNode[];
   loadedMaterials: Material[];
   loadedTemplateVersions: TemplateVersionSummary[];
   loadedTemplateProfile: TemplateProfile | null;
@@ -190,6 +209,21 @@ const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: strin
   { value: 'EXPAND', label: '扩写' },
   { value: 'REWRITE', label: '改写' },
   { value: 'SUPPLEMENT', label: '补充' },
+];
+
+type NodeAiActionKind = 'local-operation' | 'quality-check' | 'none';
+
+const MAPPING_ROLE_OPTIONS = [
+  { value: 'UNKNOWN', label: '待确认' },
+  { value: 'TITLE', label: '标题' },
+  { value: 'RECIPIENT', label: '主送' },
+  { value: 'BODY', label: '正文' },
+  { value: 'BODY_HEADING_LEVEL_1', label: '一级标题' },
+  { value: 'ATTACHMENT_NOTE', label: '附件说明' },
+  { value: 'SIGNATURE', label: '落款' },
+  { value: 'DATE', label: '日期' },
+  { value: 'STATIC_TEXT', label: '固定文本' },
+  { value: 'IGNORE', label: '忽略' },
 ];
 
 const DEFAULT_AI_SETTINGS: AiProviderSettings = {
@@ -299,6 +333,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [exportRecordDetailMessage, setExportRecordDetailMessage] = useState('');
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [blocks, setBlocks] = useState<DraftBlock[]>([]);
+  const [draftNodes, setDraftNodes] = useState<DraftNode[]>([]);
+  const [dirtyDraftNodeIds, setDirtyDraftNodeIds] = useState<Set<number>>(() => new Set());
   const [materials, setMaterials] = useState<Material[]>([]);
   const [templateVersions, setTemplateVersions] = useState<TemplateVersionSummary[]>([]);
   const [selectedTemplateProfile, setSelectedTemplateProfile] = useState<TemplateProfile | null>(null);
@@ -514,6 +550,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   async function loadWorkspaceData(loadedDraft: DraftDetail): Promise<DraftWorkspaceData> {
     const loadedMaterials = await listDraftMaterials(loadedDraft.id);
     const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode).catch(() => []);
+    const loadedDraftNodes = await loadDraftNodesForWorkbench(loadedDraft);
     const [loadedTemplateProfile, loadedStructureOverrides] = loadedDraft.templateVersionId
       ? await Promise.all([
         getTemplateProfile(loadedDraft.templateVersionId).catch(() => null),
@@ -522,6 +559,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       : [null, {}];
     return {
       loadedDraft,
+      loadedDraftNodes,
       loadedMaterials,
       loadedTemplateVersions,
       loadedTemplateProfile,
@@ -529,9 +567,22 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     };
   }
 
+  async function loadDraftNodesForWorkbench(loadedDraft: DraftDetail) {
+    if (!loadedDraft.templateVersionId) {
+      return loadedDraft.nodes ?? [];
+    }
+
+    const listedNodes = await listDraftNodes(loadedDraft.id).catch(() => loadedDraft.nodes ?? []);
+    if (listedNodes.length > 0) {
+      return listedNodes;
+    }
+    return initializeDraftNodes(loadedDraft.id).catch(() => []);
+  }
+
   function applyWorkspaceData(workspaceData: DraftWorkspaceData) {
     const {
       loadedDraft,
+      loadedDraftNodes,
       loadedMaterials,
       loadedTemplateVersions,
       loadedTemplateProfile,
@@ -539,6 +590,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     } = workspaceData;
     setDraft(loadedDraft);
     setBlocks(loadedDraft.blocks);
+    setDraftNodes(loadedDraftNodes);
+    setDirtyDraftNodeIds(new Set());
     setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(loadedDraft.id, loadedDraft.templateVersionId)));
     setMaterials(loadedMaterials);
     setTemplateVersions(loadedTemplateVersions);
@@ -621,6 +674,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         window.localStorage.removeItem(CURRENT_DRAFT_ID_KEY);
         setDraft(null);
         setBlocks([]);
+        setDraftNodes([]);
+        setDirtyDraftNodeIds(new Set());
         setMaterials([]);
         setTemplateVersions([]);
         setSelectedTemplateProfile(null);
@@ -647,7 +702,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         summary.id === draftId ? { ...summary, title: renamedDraft.title, updatedAt: new Date().toISOString() } : summary
       )));
       if (draft?.id === draftId) {
-        setDraft(renamedDraft);
+        setDraft({ ...renamedDraft, nodes: draftNodes });
         setBlocks(renamedDraft.blocks);
       }
       setDraftListStatus('idle');
@@ -668,24 +723,35 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       return acc;
     }, {});
   }, [blocks]);
+  const draftNodeValues = useMemo(() => {
+    return draftNodes.reduce<Record<string, string>>((acc, node) => {
+      if (node.role && !acc[node.role]) {
+        acc[node.role] = node.content;
+      }
+      if ((node.role === 'ATTACHMENT_NOTE' || node.role === 'ATTACHMENT_CONTENT') && !acc.ATTACHMENT) {
+        acc.ATTACHMENT = node.content;
+      }
+      return acc;
+    }, {});
+  }, [draftNodes]);
 
   const currentWorkbenchDocumentTypeCode = selectedDraftDocumentTypeCode || draft?.documentTypeCode || 'NOTICE';
   const currentDocumentType = documentTypes.find((type) => type.code === currentWorkbenchDocumentTypeCode);
-  const title = blockValues.TITLE ?? draft?.title ?? DEFAULT_TITLE;
-  const recipient = blockValues.RECIPIENT ?? '';
+  const title = draftNodeValues.TITLE ?? blockValues.TITLE ?? draft?.title ?? DEFAULT_TITLE;
+  const recipient = draftNodeValues.RECIPIENT ?? blockValues.RECIPIENT ?? '';
   const bodyBlocks = blocks
     .filter((block) => block.blockType === 'BODY_PARAGRAPH')
     .sort((a, b) => a.sortOrder - b.sortOrder);
-  const attachment = blockValues.ATTACHMENT ?? '';
-  const signature = blockValues.SIGNATURE ?? '';
-  const date = blockValues.DATE ?? '';
+  const attachment = draftNodeValues.ATTACHMENT ?? blockValues.ATTACHMENT ?? '';
+  const signature = draftNodeValues.SIGNATURE ?? blockValues.SIGNATURE ?? '';
+  const date = draftNodeValues.DATE ?? blockValues.DATE ?? '';
   const selectedTemplateOverrides = draft?.templateVersionId
     ? templateStructureOverrides[draft.templateVersionId] ?? {}
     : {};
   const workbenchNodes = useMemo(
-    () => deriveWorkbenchNodes(draft ? { ...draft, blocks } : null, selectedTemplateProfile, selectedTemplateOverrides)
+    () => deriveWorkbenchNodes(draft ? { ...draft, blocks, nodes: draftNodes } : null, selectedTemplateProfile, selectedTemplateOverrides)
       .filter((node) => !deletedNodeIds.has(node.nodeId)),
-    [blocks, deletedNodeIds, draft, selectedTemplateProfile, selectedTemplateOverrides],
+    [blocks, deletedNodeIds, draft, draftNodes, selectedTemplateProfile, selectedTemplateOverrides],
   );
   const bodySectionNodes = workbenchNodes.filter((node) => node.nodeType === 'BODY_SECTION');
   const selectedNode = workbenchNodes.find((node) => node.nodeId === selectedNodeId) ?? null;
@@ -695,6 +761,32 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       ?? bodyBlocks.find((block) => block.sortOrder === selectedBodyNode.sortOrder)
       ?? null
     : null;
+  const selectedNodeAiContext = aiNodeContextForWorkbenchNode(selectedNode);
+  const selectedNodeActionKind = aiActionKindForWorkbenchNode(selectedNode);
+  const selectedLocalOperationOptions = useMemo(
+    () => localOperationOptionsForWorkbenchNode(selectedNode),
+    [selectedNode],
+  );
+  const selectedNodeSupportsLocalOperation = selectedNodeActionKind === 'local-operation';
+  const selectedNodeCanTargetLocalOperation = Boolean(selectedNodeAiContext || selectedBodyBlock);
+  const selectedNodeActionButtonLabel = aiActionButtonLabelForWorkbenchNode(selectedNode);
+  const selectedNodePanelTitle = aiPanelTitleForWorkbenchNode(selectedNode);
+  const selectedNodePanelKicker = aiPanelKickerForWorkbenchNode(selectedNode, selectedBodyNode, bodySectionNodes);
+  const selectedNodeActionLoading = (
+    (selectedNodeActionKind === 'local-operation' && localOperationStatus === 'generating')
+    || (selectedNodeActionKind === 'quality-check' && qualityCheckStatus === 'checking')
+  );
+  const selectedNodeActionDisabled = !draft
+    || status === 'loading'
+    || selectedNodeActionKind === 'none'
+    || Boolean(selectedNode?.locked)
+    || (selectedNodeActionKind === 'local-operation' && (!selectedNodeCanTargetLocalOperation || localOperationStatus === 'generating' || localOperationStatus === 'saving'))
+    || (selectedNodeActionKind === 'quality-check' && qualityCheckStatus === 'checking');
+  const titleNode = workbenchNodes.find((node) => node.nodeType === 'TITLE') ?? null;
+  const recipientNode = workbenchNodes.find((node) => node.nodeType === 'RECIPIENT') ?? null;
+  const attachmentNode = workbenchNodes.find((node) => node.nodeType === 'ATTACHMENT') ?? null;
+  const signatureNode = workbenchNodes.find((node) => node.nodeType === 'SIGNATURE') ?? null;
+  const dateNode = workbenchNodes.find((node) => node.nodeType === 'DATE') ?? null;
   const visibleNavItems = useMemo(() => NAV_ITEMS.filter((item) => canAccessView(currentUser, item.view)), [currentUser]);
   const titlePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'TITLE');
   const recipientPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'RECIPIENT');
@@ -711,6 +803,20 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     () => pickLatestTemplateVersions(templateVersions),
     [templateVersions],
   );
+
+  useEffect(() => {
+    if (selectedLocalOperationOptions.length === 0) {
+      return;
+    }
+    if (!selectedLocalOperationOptions.some((option) => option.value === localOperationType)) {
+      setLocalOperationType(selectedLocalOperationOptions[0].value);
+    }
+  }, [localOperationType, selectedLocalOperationOptions]);
+
+  useEffect(() => {
+    setLocalOperationError('');
+    setLocalOperationSuggestion(null);
+  }, [selectedNodeId]);
 
   function handleSidebarNavigate(view: AppView) {
     if (view === 'drafts') {
@@ -776,10 +882,71 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
-  function updateBlock(blockType: string, content: string) {
+  function markDraftContentDirty() {
     setStatus('idle');
-    setStatusMessage('草稿有未保存修改');
+    setStatusMessage('草稿有未保存修改，质检和真预览需刷新');
+    setQualityCheck(null);
+    setQualityCheckStatus('idle');
+    setQualityCheckError('');
+    setExportStatus('idle');
+    setExportError('');
     setLocalOperationSuggestion(null);
+  }
+
+  function updateDraftNodeLocal(nodeId: number | undefined, content: string, statusValue = 'USER_FILLED') {
+    if (!nodeId) {
+      return;
+    }
+    setDraftNodes((currentNodes) => currentNodes.map((node) => (
+      node.id === nodeId ? { ...node, content, status: statusValue } : node
+    )));
+    setDirtyDraftNodeIds((currentIds) => new Set(currentIds).add(nodeId));
+  }
+
+  function syncGeneratedDraftNodes(nextNodes: DraftNode[] | undefined, nextNode: DraftNode | null | undefined) {
+    if (nextNodes) {
+      setDraftNodes(nextNodes);
+      setDirtyDraftNodeIds(new Set());
+      return;
+    }
+    if (!nextNode) {
+      return;
+    }
+    setDraftNodes((currentNodes) => (
+      currentNodes.some((node) => node.id === nextNode.id)
+        ? currentNodes.map((node) => node.id === nextNode.id ? nextNode : node)
+        : [...currentNodes, nextNode].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+    ));
+    setDirtyDraftNodeIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(nextNode.id);
+      return nextIds;
+    });
+  }
+
+  function updateWorkbenchNodeContent(node: WorkbenchNode | null, content: string) {
+    if (node?.draftNodeId) {
+      updateDraftNodeLocal(node.draftNodeId, content);
+    }
+    if (node?.nodeType === 'BODY_SECTION') {
+      updateBodyNodeContent(node, content);
+      return;
+    }
+    const blockType = blockTypeForWorkbenchNode(node);
+    if (blockType) {
+      updateBlock(blockType, content);
+    }
+  }
+
+  function updateBlock(blockType: string, content: string) {
+    markDraftContentDirty();
+    const nodeRole = nodeRoleForBlockType(blockType);
+    const matchingNode = draftNodes.find((node) => node.role === nodeRole || (
+      blockType === 'ATTACHMENT' && (node.role === 'ATTACHMENT_NOTE' || node.role === 'ATTACHMENT_CONTENT')
+    ));
+    if (matchingNode) {
+      updateDraftNodeLocal(matchingNode.id, content);
+    }
     setBlocks((currentBlocks) => {
       const existing = currentBlocks.find((block) => block.blockType === blockType);
       if (existing) {
@@ -798,18 +965,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   }
 
   function updateBlockById(blockId: number, content: string) {
-    setStatus('idle');
-    setStatusMessage('草稿有未保存修改');
-    setLocalOperationSuggestion(null);
+    markDraftContentDirty();
     setBlocks((currentBlocks) => currentBlocks.map((block) => (
       block.id === blockId ? { ...block, content } : block
     )));
   }
 
   function updateBodyNodeContent(node: WorkbenchNode, content: string) {
-    setStatus('idle');
-    setStatusMessage('草稿有未保存修改');
-    setLocalOperationSuggestion(null);
+    markDraftContentDirty();
+    if (node.draftNodeId) {
+      updateDraftNodeLocal(node.draftNodeId, content);
+    }
     const nextBlockContent = composeBodySectionContent(node, content);
     const sortOrder = node.sortOrder || BLOCK_SORT_ORDER.BODY_PARAGRAPH;
     setBlocks((currentBlocks) => {
@@ -835,9 +1001,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   }
 
   function updateBodyNodeHeading(node: WorkbenchNode, heading: string) {
-    setStatus('idle');
-    setStatusMessage('草稿有未保存修改');
-    setLocalOperationSuggestion(null);
+    markDraftContentDirty();
+    if (node.headingDraftNodeId) {
+      updateDraftNodeLocal(node.headingDraftNodeId, heading);
+    }
     const nextBlockContent = composeBodySectionParts(heading, node.content);
     const sortOrder = node.sortOrder || BLOCK_SORT_ORDER.BODY_PARAGRAPH;
     setBlocks((currentBlocks) => {
@@ -868,9 +1035,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       return;
     }
     const storageKey = draft ? deletedNodeStorageKey(draft.id, draft.templateVersionId) : null;
-    setStatus('idle');
-    setStatusMessage('草稿有未保存修改');
-    setLocalOperationSuggestion(null);
+    markDraftContentDirty();
     setLocalOperationError('');
     setLocalOperationStatus('idle');
     setSelectedNodeId(null);
@@ -921,13 +1086,33 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
     setStatus('saving');
     setStatusMessage(message);
+    const savedNodes = await saveDirtyDraftNodes();
     const updatedDraft = await saveDraftBlocks(draft.id, draftBlockPayload());
     window.localStorage.setItem(CURRENT_DRAFT_ID_KEY, String(updatedDraft.id));
-    setDraft(updatedDraft);
+    setDraft({ ...updatedDraft, nodes: savedNodes });
     setBlocks(updatedDraft.blocks);
+    setDraftNodes(savedNodes);
     setStatus('saved');
     setStatusMessage('已保存');
-    return updatedDraft;
+    return { ...updatedDraft, nodes: savedNodes };
+  }
+
+  async function saveDirtyDraftNodes() {
+    if (!draft || dirtyDraftNodeIds.size === 0) {
+      return draftNodes;
+    }
+    const dirtyIds = Array.from(dirtyDraftNodeIds);
+    const savedNodes = await Promise.all(dirtyIds.map((nodeId) => {
+      const node = draftNodes.find((candidate) => candidate.id === nodeId);
+      if (!node) {
+        return null;
+      }
+      return saveDraftNode(draft.id, node.id, node.content, node.status || 'USER_FILLED');
+    }));
+    const savedById = new Map(savedNodes.filter((node): node is DraftNode => Boolean(node)).map((node) => [node.id, node]));
+    const mergedNodes = draftNodes.map((node) => savedById.get(node.id) ?? node);
+    setDirtyDraftNodeIds(new Set());
+    return mergedNodes;
   }
 
   async function handleSave() {
@@ -1006,6 +1191,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   }
 
   function openLocalOperationDialog() {
+    if (selectedNodeActionKind === 'quality-check') {
+      openQualityDialog();
+      return;
+    }
+    if (selectedNodeActionKind !== 'local-operation') {
+      return;
+    }
     setActiveAiDialog('local');
     void handleGenerateLocalOperation();
   }
@@ -1035,8 +1227,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
           getTemplateStructureFormatting(templateVersionId).catch(() => ({})),
         ])
         : [null, {}];
-      setDraft(updatedDraft);
+      const updatedDraftNodes = templateVersionId
+        ? await initializeDraftNodes(updatedDraft.id).catch(() => [])
+        : [];
+      setDraft({ ...updatedDraft, nodes: updatedDraftNodes });
       setBlocks(updatedDraft.blocks);
+      setDraftNodes(updatedDraftNodes);
+      setDirtyDraftNodeIds(new Set());
       setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(updatedDraft.id, updatedDraft.templateVersionId)));
       setSelectedTemplateProfile(updatedProfile);
       if (templateVersionId) {
@@ -1102,9 +1299,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setAllParagraphError('');
       setParagraphStatuses((current) => ({ ...current, [key]: 'generating' }));
       setParagraphErrors((current) => ({ ...current, [key]: '' }));
-      const generated = await generateDraftParagraph(draft.id, section, outlineInstruction, sortOrder);
+      const targetNodeContext = aiNodeContextForWorkbenchNode(bodySectionNodes[sectionIndex] ?? null);
+      const generated = await generateDraftParagraph(draft.id, section, outlineInstruction, sortOrder, targetNodeContext ?? undefined);
       setDraft(generated.draft);
       setBlocks(generated.draft.blocks);
+      syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
       setParagraphStatuses((current) => ({ ...current, [key]: 'success' }));
       setStatus('saved');
       setStatusMessage('正文已生成并保存');
@@ -1131,10 +1330,12 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       for (const [index, section] of outline.sections.entries()) {
         activeSectionHeading = section.heading;
         setParagraphStatuses((current) => ({ ...current, [section.heading]: 'generating' }));
-        const generated = await generateDraftParagraph(latestDraft.id, section, outlineInstruction, 30 + index);
+        const targetNodeContext = aiNodeContextForWorkbenchNode(bodySectionNodes[index] ?? null);
+        const generated = await generateDraftParagraph(latestDraft.id, section, outlineInstruction, 30 + index, targetNodeContext ?? undefined);
         latestDraft = generated.draft;
         setDraft(generated.draft);
         setBlocks(generated.draft.blocks);
+        syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
         setParagraphStatuses((current) => ({ ...current, [section.heading]: 'success' }));
       }
       setAllParagraphStatus('success');
@@ -1154,10 +1355,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   }
 
   async function handleGenerateLocalOperation() {
-    if (!draft || !selectedBodyNode || !selectedBodyBlock) {
+    if (!draft) {
+      return;
+    }
+    if (selectedNodeActionKind === 'quality-check') {
+      openQualityDialog();
+      return;
+    }
+    if (selectedNodeActionKind !== 'local-operation' || !selectedNodeCanTargetLocalOperation) {
       setActiveAiDialog('local');
       setLocalOperationStatus('error');
-      setLocalOperationError(selectedBodyNode ? '请先保存当前正文结构后再生成建议' : '请先在预览中选择正文结构');
+      setLocalOperationError(selectedNode ? '请先保存当前结构节点后再生成建议' : '请先在预览中选择可编辑结构');
       return;
     }
 
@@ -1166,16 +1374,20 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setLocalOperationStatus('generating');
       setLocalOperationError('');
       setLocalOperationSuggestion(null);
+      const target = selectedNodeAiContext ?? selectedBodyBlock?.id;
+      if (!target) {
+        throw new Error('请先保存当前结构节点后再生成建议');
+      }
       const suggestion = await generateLocalOperation(
         draft.id,
-        selectedBodyBlock.id,
+        target,
         localOperationType,
         localOperationInstruction,
         controller.signal,
       );
       setLocalOperationSuggestion(suggestion);
       setLocalOperationStatus('suggested');
-      showToast({ title: '段落建议已生成', tone: 'success' });
+      showToast({ title: selectedNodeAiContext ? '节点建议已生成' : '段落建议已生成', tone: 'success' });
     } catch (error) {
       if (isAbortError(error)) {
         setLocalOperationStatus('idle');
@@ -1333,6 +1545,25 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
     try {
       setLocalOperationStatus('saving');
+      const targetNodeId = localOperationSuggestion.targetNodeId ?? selectedNodeAiContext?.nodeId ?? null;
+      if (targetNodeId) {
+        const updatedNode = await saveDraftNode(
+          draft.id,
+          targetNodeId,
+          localOperationSuggestion.suggestionText,
+          'USER_MODIFIED_AFTER_AI',
+        );
+        syncGeneratedDraftNodes(undefined, updatedNode);
+        if (selectedNode) {
+          setSelectedNodeId(selectedNode.nodeId);
+        }
+        setLocalOperationSuggestion(null);
+        setLocalOperationStatus('saved');
+        setStatus('saved');
+        setStatusMessage('节点建议已采纳并保存');
+        showToast({ title: '建议已采纳', tone: 'success' });
+        return;
+      }
       const payload: DraftBlockUpdate[] = blocks
         .map((block) => ({
           blockType: block.blockType,
@@ -1605,6 +1836,36 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
             <TextField label="主送" onChange={(event) => updateBlock('RECIPIENT', event.target.value)} value={recipient} />
 
+            <section className="structure-tree" aria-label="结构节点树">
+              <div className="paragraph-index-header">
+                <span className="field-label">结构树</span>
+                <span className="paragraph-count">{workbenchNodes.length} 节点</span>
+              </div>
+              {workbenchNodes.length > 0 ? (
+                <div className="structure-tree-list">
+                  {workbenchNodes.map((node, index) => (
+                    <button
+                      aria-current={selectedNodeId === node.nodeId ? 'true' : undefined}
+                      className={`structure-tree-item ${selectedNodeId === node.nodeId ? 'selected' : ''}`}
+                      key={node.nodeId}
+                      onClick={() => selectNode(node.nodeId)}
+                      type="button"
+                    >
+                      <span className="structure-tree-main">
+                        <span className="structure-tree-title">{workbenchNodeLabel(node, index)}</span>
+                        <span className="structure-tree-meta">{workbenchNodeRoleLabel(node.nodeType)}</span>
+                      </span>
+                      <span className={`node-status-badge ${statusBadgeTone(node.status)}`}>
+                        {draftNodeStatusLabel(node.status)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-note">暂无结构节点，先绑定模板或填写正文。</p>
+              )}
+            </section>
+
             <section className="paragraph-index" aria-label="正文段落目录">
               <div className="paragraph-index-header">
                 <span className="field-label">正文</span>
@@ -1713,8 +1974,28 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   ))}
                 </div>
               )}
-              <h2 className="document-title" style={titlePreviewStyle}>{title}</h2>
-              <p style={recipientPreviewStyle}>{recipient}：</p>
+              {selectedNodeId === titleNode?.nodeId ? (
+                <input
+                  aria-label="编辑节点：标题"
+                  className="document-title-editor"
+                  onChange={(event) => updateWorkbenchNodeContent(titleNode, event.target.value)}
+                  style={titlePreviewStyle}
+                  value={title}
+                />
+              ) : (
+                <h2 className="document-title" style={titlePreviewStyle}>{title}</h2>
+              )}
+              {selectedNodeId === recipientNode?.nodeId ? (
+                <input
+                  aria-label="编辑节点：主送"
+                  className="document-inline-editor"
+                  onChange={(event) => updateWorkbenchNodeContent(recipientNode, event.target.value)}
+                  style={recipientPreviewStyle}
+                  value={recipient}
+                />
+              ) : (
+                <p style={recipientPreviewStyle}>{recipient}：</p>
+              )}
               {bodySectionNodes.length > 0 ? bodySectionNodes.map((node, index) => (
                 selectedNodeId === node.nodeId ? (
                   <section
@@ -1770,11 +2051,35 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   </button>
                 )
               )) : <p>请在左侧填写正文内容。</p>}
-              {attachment && <p style={attachmentPreviewStyle}>附件：{attachment}</p>}
+              {attachment && (selectedNodeId === attachmentNode?.nodeId ? (
+                <input
+                  aria-label="编辑节点：附件"
+                  className="document-inline-editor"
+                  onChange={(event) => updateWorkbenchNodeContent(attachmentNode, event.target.value)}
+                  style={attachmentPreviewStyle}
+                  value={attachment}
+                />
+              ) : <p style={attachmentPreviewStyle}>附件：{attachment}</p>)}
               <p className="signature" style={signaturePreviewStyle}>
-                <span>{signature}</span>
+                {selectedNodeId === signatureNode?.nodeId ? (
+                  <input
+                    aria-label="编辑节点：落款"
+                    className="document-inline-editor"
+                    onChange={(event) => updateWorkbenchNodeContent(signatureNode, event.target.value)}
+                    style={signaturePreviewStyle}
+                    value={signature}
+                  />
+                ) : <span>{signature}</span>}
                 <br />
-                <span style={datePreviewStyle}>{date}</span>
+                {selectedNodeId === dateNode?.nodeId ? (
+                  <input
+                    aria-label="编辑节点：日期"
+                    className="document-inline-editor"
+                    onChange={(event) => updateWorkbenchNodeContent(dateNode, event.target.value)}
+                    style={datePreviewStyle}
+                    value={date}
+                  />
+                ) : <span style={datePreviewStyle}>{date}</span>}
               </p>
               {templateUnknownStructures.length > 0 && (
                 <div className="document-template-region document-template-extra" aria-label="模板未映射结构">
@@ -1801,7 +2106,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
           </div>
           <div className="panel-body">
             <StatusMessage title={statusMessage} tone={status === 'error' ? 'warning' : 'success'} />
-            <StatusMessage title={`结构化草稿块 ${blocks.length} 项`} tone="success" />
+            <StatusMessage title={`结构节点 ${workbenchNodes.length} 项，兼容草稿块 ${blocks.length} 项`} tone="success" />
             <StatusMessage title={`参考材料 ${materials.length} 项`} tone={materials.length > 0 ? 'success' : 'warning'} />
             <TextareaField
               aria-label="提纲补充要求"
@@ -1889,44 +2194,49 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             <div className="local-operation" aria-label="局部段落操作">
               <div className="local-operation-header">
                 <div>
-                  <div className="outline-title">局部段落操作</div>
-                  <div className="panel-kicker">
-                    {selectedBodyNode ? `已选择：${bodyNodeLabel(selectedBodyNode, bodySectionNodes.indexOf(selectedBodyNode))}` : '请先在预览中选择正文结构'}
-                  </div>
+                  <div className="outline-title">{selectedNodePanelTitle}</div>
+                  <div className="panel-kicker">{selectedNodePanelKicker}</div>
                 </div>
               </div>
-              <div className="operation-grid" role="group" aria-label="局部操作类型">
-                {LOCAL_OPERATION_OPTIONS.map((option) => (
-                  <button
-                    aria-pressed={localOperationType === option.value}
-                    className={`operation-choice ${localOperationType === option.value ? 'selected' : ''}`}
-                    key={option.value}
-                    onClick={() => setLocalOperationType(option.value)}
-                    type="button"
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <TextareaField
-                aria-label="局部补充要求"
-                className="outline-instruction"
-                disabled={!draft || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
-                label="局部补充要求"
-                maxLength={1000}
-                onChange={(event) => setLocalOperationInstruction(event.target.value)}
-                placeholder="可补充语气、长度、必须保留或强化的信息"
-                value={localOperationInstruction}
-              />
+              {selectedNodeSupportsLocalOperation ? (
+                <>
+                  <div className="operation-grid" role="group" aria-label="局部操作类型">
+                    {selectedLocalOperationOptions.map((option) => (
+                      <button
+                        aria-pressed={localOperationType === option.value}
+                        className={`operation-choice ${localOperationType === option.value ? 'selected' : ''}`}
+                        disabled={localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                        key={option.value}
+                        onClick={() => setLocalOperationType(option.value)}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <TextareaField
+                    aria-label="局部补充要求"
+                    className="outline-instruction"
+                    disabled={!draft || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                    label="局部补充要求"
+                    maxLength={1000}
+                    onChange={(event) => setLocalOperationInstruction(event.target.value)}
+                    placeholder="可补充语气、长度、必须保留或强化的信息"
+                    value={localOperationInstruction}
+                  />
+                </>
+              ) : (
+                <StatusMessage title={selectedNode ? '该结构节点建议先通过质检确认，不直接改写正文。' : '未选择结构时，可使用上方提纲生成、基础质检和 Word 导出。'} />
+              )}
               <Button
-                disabled={!draft || !selectedBodyNode || !selectedBodyBlock || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
-                icon={<Sparkles aria-hidden="true" />}
-                isLoading={localOperationStatus === 'generating'}
-                loadingLabel="正在生成建议"
+                disabled={selectedNodeActionDisabled}
+                icon={selectedNodeActionKind === 'quality-check' ? <CheckCircle2 aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+                isLoading={selectedNodeActionLoading}
+                loadingLabel={selectedNodeActionKind === 'quality-check' ? '正在质检' : '正在生成建议'}
                 onClick={openLocalOperationDialog}
                 variant="secondary"
               >
-                生成段落建议
+                {selectedNodeActionButtonLabel}
               </Button>
               {localOperationError && <StatusMessage title={localOperationError} tone="warning" />}
               {localOperationSuggestion && (
@@ -2153,22 +2463,22 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             </Button>
           )}
           className="ai-task-dialog"
-          description={selectedBodyNode ? `目标结构：${bodyNodeLabel(selectedBodyNode, bodySectionNodes.indexOf(selectedBodyNode))}` : '请先在预览中选择正文结构。'}
+          description={localOperationDialogDescription(selectedNode, selectedBodyNode, bodySectionNodes, selectedNodeAiContext)}
           onClose={closeAiDialog}
           open={activeAiDialog === 'local'}
-          title="生成段落建议"
+          title={localOperationDialogTitle(selectedNodeAiContext)}
         >
           <div className="ai-dialog-stack">
             {localOperationStatus === 'generating' && (
               <AiProgress
                 detail={`正在生成${localOperationLabel(localOperationType)}建议，不会直接覆盖原文`}
-                label="生成段落建议进度"
+                label={`${localOperationDialogTitle(selectedNodeAiContext)}进度`}
                 value={localOperationProgress}
               />
             )}
             {localOperationError && (
               <StatusMessage title={localOperationError} tone="warning">
-                {selectedBodyNode && selectedBodyBlock ? (
+                {selectedNodeActionKind === 'local-operation' && selectedNodeCanTargetLocalOperation ? (
                   <Button icon={<Sparkles aria-hidden="true" />} onClick={() => void handleGenerateLocalOperation()} variant="secondary">
                     重试生成建议
                   </Button>
@@ -2199,7 +2509,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               </div>
             )}
             {!localOperationSuggestion && localOperationStatus !== 'generating' && !localOperationError && (
-              <StatusMessage title="点击右栏生成段落建议后，建议文本会显示在这里。" />
+              <StatusMessage title={`点击右栏${selectedNodeActionButtonLabel}后，建议文本会显示在这里。`} />
             )}
           </div>
         </Dialog>
@@ -2367,6 +2677,15 @@ function TemplateManagementPage({
   const [versions, setVersions] = useState<TemplateVersionSummary[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [profile, setProfile] = useState<TemplateProfile | null>(null);
+  const [structureProfile, setStructureProfile] = useState<DocumentStructureProfile | null>(null);
+  const [documentKind, setDocumentKind] = useState<TemplateDocumentKind | null>(null);
+  const [renderPreview, setRenderPreview] = useState<DocumentRenderPreview | null>(null);
+  const [renderPreviewStatus, setRenderPreviewStatus] = useState<'idle' | 'loading' | 'requesting' | 'error'>('idle');
+  const [renderPreviewMessage, setRenderPreviewMessage] = useState('');
+  const [mappingProfile, setMappingProfile] = useState<StructureMappingProfile | null>(null);
+  const [mappingItems, setMappingItems] = useState<StructureMappingItem[]>([]);
+  const [mappingStatus, setMappingStatus] = useState<'idle' | 'loading' | 'saving' | 'publishing' | 'blocked' | 'error'>('idle');
+  const [mappingMessage, setMappingMessage] = useState('');
   const [profileContext, setProfileContext] = useState<{
     templateVersionId: number;
     templateName: string;
@@ -2443,6 +2762,12 @@ function TemplateManagementPage({
     setTemplateName('');
     setSelectedTemplateId(null);
     setProfile(null);
+    setStructureProfile(null);
+    setDocumentKind(null);
+    setRenderPreview(null);
+    setRenderPreviewStatus('idle');
+    setRenderPreviewMessage('');
+    clearMappingState();
     setProfileContext(null);
     setUploadResult(null);
     setSelectedTemplateFile(null);
@@ -2454,6 +2779,12 @@ function TemplateManagementPage({
     setTemplateName('');
     setSelectedTemplateId(null);
     setProfile(null);
+    setStructureProfile(null);
+    setDocumentKind(null);
+    setRenderPreview(null);
+    setRenderPreviewStatus('idle');
+    setRenderPreviewMessage('');
+    clearMappingState();
     setProfileContext(null);
     setUploadResult(null);
     setSelectedTemplateFile(null);
@@ -2465,6 +2796,12 @@ function TemplateManagementPage({
     setSelectedTemplateId(template?.id ?? null);
     setTemplateName(template?.templateName ?? '');
     setProfile(null);
+    setStructureProfile(null);
+    setDocumentKind(null);
+    setRenderPreview(null);
+    setRenderPreviewStatus('idle');
+    setRenderPreviewMessage('');
+    clearMappingState();
     setProfileContext(null);
     setUploadResult(null);
     setSelectedTemplateFile(null);
@@ -2474,11 +2811,17 @@ function TemplateManagementPage({
   async function handleViewProfile(version: TemplateVersionSummary) {
     try {
       setStatus('loading');
-      const [parsedProfile, formattingOverrides] = await Promise.all([
+      const [parsedProfile, formattingOverrides, parsedStructureProfile, parsedDocumentKind, loadedMapping] = await Promise.all([
         getTemplateProfile(version.templateVersionId),
         getTemplateStructureFormatting(version.templateVersionId),
+        getDocumentStructureProfile(version.templateVersionId).catch(() => null),
+        getTemplateDocumentKind(version.templateVersionId).catch(() => null),
+        getStructureMapping(version.templateVersionId).catch(() => null),
       ]);
       setProfile(parsedProfile);
+      setStructureProfile(parsedStructureProfile);
+      setDocumentKind(parsedDocumentKind ?? documentKindFromProfile(parsedProfile));
+      applyMappingState(loadedMapping);
       onStructureOverridesLoaded(version.templateVersionId, formattingOverrides);
       setProfileContext({
         templateVersionId: version.templateVersionId,
@@ -2489,6 +2832,7 @@ function TemplateManagementPage({
       setUploadResult(null);
       setStatus('idle');
       setMessage(`${version.templateName} v${version.versionNo} 解析结果已加载`);
+      void loadRenderPreviewStatus(version.templateVersionId);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '解析结果加载失败';
       setStatus('error');
@@ -2519,9 +2863,12 @@ function TemplateManagementPage({
         : await createTemplate(name, activeDocumentTypeCode);
       setSelectedTemplateId(template.id);
       const result = await uploadTemplateVersion(template.id, file);
-      const [parsedProfile, formattingOverrides] = await Promise.all([
+      const [parsedProfile, formattingOverrides, parsedStructureProfile, parsedDocumentKind, loadedMapping] = await Promise.all([
         getTemplateProfile(result.templateVersionId),
         getTemplateStructureFormatting(result.templateVersionId),
+        getDocumentStructureProfile(result.templateVersionId).catch(() => null),
+        getTemplateDocumentKind(result.templateVersionId).catch(() => null),
+        getStructureMapping(result.templateVersionId).catch(() => null),
       ]);
       const [loadedTemplates, loadedVersions] = await Promise.all([
         listTemplates(activeDocumentTypeCode),
@@ -2531,6 +2878,9 @@ function TemplateManagementPage({
       setVersions(loadedVersions);
       setUploadResult(result);
       setProfile(parsedProfile);
+      setStructureProfile(parsedStructureProfile);
+      setDocumentKind(parsedDocumentKind ?? documentKindFromProfile(parsedProfile));
+      applyMappingState(loadedMapping);
       onStructureOverridesLoaded(result.templateVersionId, formattingOverrides);
       setProfileContext({
         templateVersionId: result.templateVersionId,
@@ -2541,6 +2891,7 @@ function TemplateManagementPage({
       setPageMode('list');
       setStatus('idle');
       setMessage('模板已解析');
+      void loadRenderPreviewStatus(result.templateVersionId);
       await onTemplateVersionCreated();
       showToast({ title: '模板版本已上传', description: `${name} v${result.versionNo}`, tone: 'success' });
       setSelectedTemplateFile(null);
@@ -2565,6 +2916,12 @@ function TemplateManagementPage({
         setSelectedTemplateId(null);
       }
       setProfile(null);
+      setStructureProfile(null);
+      setDocumentKind(null);
+      setRenderPreview(null);
+      setRenderPreviewStatus('idle');
+      setRenderPreviewMessage('');
+      clearMappingState();
       setProfileContext(null);
       setUploadResult(null);
       setMessage('模板已删除');
@@ -2584,8 +2941,133 @@ function TemplateManagementPage({
 
   function handleCloseProfileDialog() {
     setProfile(null);
+    setStructureProfile(null);
+    setDocumentKind(null);
+    setRenderPreview(null);
+    setRenderPreviewStatus('idle');
+    setRenderPreviewMessage('');
+    clearMappingState();
     setProfileContext(null);
     setUploadResult(null);
+  }
+
+  async function loadRenderPreviewStatus(templateVersionId: number) {
+    try {
+      setRenderPreviewStatus('loading');
+      setRenderPreviewMessage('正在读取渲染预览状态');
+      const preview = await getRenderPreview(templateVersionId);
+      setRenderPreview(preview);
+      setRenderPreviewStatus('idle');
+      setRenderPreviewMessage('预览状态已加载');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '渲染预览状态加载失败';
+      setRenderPreview(null);
+      setRenderPreviewStatus('error');
+      setRenderPreviewMessage(errorMessage);
+    }
+  }
+
+  async function handleRequestRenderPreview() {
+    if (!profileContext) {
+      return;
+    }
+    try {
+      setRenderPreviewStatus('requesting');
+      setRenderPreviewMessage('正在提交渲染预览任务');
+      const preview = await requestRenderPreview(profileContext.templateVersionId);
+      setRenderPreview(preview);
+      setRenderPreviewStatus('idle');
+      setRenderPreviewMessage('渲染预览已更新');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '渲染预览生成失败';
+      setRenderPreviewStatus('error');
+      setRenderPreviewMessage(errorMessage);
+      showToast({ title: errorMessage, tone: 'error' });
+    }
+  }
+
+  function clearMappingState() {
+    setMappingProfile(null);
+    setMappingItems([]);
+    setMappingStatus('idle');
+    setMappingMessage('');
+  }
+
+  function applyMappingState(nextMapping: StructureMappingProfile | null) {
+    setMappingProfile(nextMapping);
+    setMappingItems(nextMapping?.items ?? []);
+    setMappingStatus(nextMapping ? 'idle' : 'error');
+    setMappingMessage(nextMapping ? '结构映射已加载' : '结构映射暂不可用');
+  }
+
+  function handleMappingRoleChange(nodeKey: string, role: string, sortOrder: number) {
+    setMappingItems((current) => {
+      const nextItem: StructureMappingItem = {
+        nodeKey,
+        role,
+        slotKey: slotKeyForMappingRole(role),
+        status: role === 'IGNORE' ? 'IGNORED' : 'CONFIRMED',
+        source: 'USER',
+        confidence: 1,
+        notes: '',
+        sortOrder,
+      };
+      const exists = current.some((item) => item.nodeKey === nodeKey);
+      return exists
+        ? current.map((item) => item.nodeKey === nodeKey ? { ...item, ...nextItem } : item)
+        : [...current, nextItem];
+    });
+    setMappingStatus('idle');
+    setMappingMessage('映射草稿有未保存修改');
+  }
+
+  async function handleSaveMappingDraft() {
+    if (!profileContext) {
+      return;
+    }
+    try {
+      setMappingStatus('saving');
+      const saved = await saveStructureMappingDraft(
+        profileContext.templateVersionId,
+        mappingProfile?.mappingProfileId ?? null,
+        mappingItems,
+      );
+      setMappingProfile(saved);
+      setMappingItems(saved.items);
+      setMappingStatus('idle');
+      setMappingMessage('映射草稿已保存');
+      showToast({ title: '映射草稿已保存', tone: 'success' });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '映射草稿保存失败';
+      setMappingStatus('error');
+      setMappingMessage(errorMessage);
+      showToast({ title: errorMessage, tone: 'error' });
+    }
+  }
+
+  async function handlePublishMapping() {
+    if (!profileContext) {
+      return;
+    }
+    try {
+      setMappingStatus('publishing');
+      const published = await publishStructureMapping(profileContext.templateVersionId);
+      setMappingProfile(published);
+      setMappingItems(published.items);
+      if (published.validationItems.length > 0) {
+        setMappingStatus('blocked');
+        setMappingMessage('映射发布被阻断');
+      } else {
+        setMappingStatus('idle');
+        setMappingMessage('映射已发布');
+        showToast({ title: '映射已发布', tone: 'success' });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '映射发布失败';
+      setMappingStatus('error');
+      setMappingMessage(errorMessage);
+      showToast({ title: errorMessage, tone: 'error' });
+    }
   }
 
   return (
@@ -2764,7 +3246,7 @@ function TemplateManagementPage({
         description={profileContext ? `${profileContext.templateName} v${profileContext.versionNo} · ${profileContext.originalFileName}` : undefined}
         onClose={handleCloseProfileDialog}
         open={Boolean(profile)}
-        title="解析结果"
+        title="模板解析工作台"
       >
         {uploadResult && (
           <div className="template-profile-summary">
@@ -2784,70 +3266,22 @@ function TemplateManagementPage({
         )}
 
         {profile && (
-          <div className="template-profile-grid">
-            {profile.placeholders.length > 0 && (
-              <section className="template-profile-box">
-                <h3>占位符</h3>
-                {profile.placeholders.map((placeholder) => (
-                  <div className="template-profile-item" key={`${placeholder.key}-${placeholder.paragraphKey}`}>
-                    <ClipboardList aria-hidden="true" />
-                    <span>{placeholder.key}</span>
-                    {placeholder.splitAcrossRuns && <small>跨 run</small>}
-                  </div>
-                ))}
-              </section>
-            )}
-            <section className="template-profile-box template-profile-wide">
-              <h3>结构与维度</h3>
-              {(profile.structures ?? []).length === 0 ? (
-                <p className="empty-note">未识别到可配置的正文结构。</p>
-              ) : (
-                <div className="template-structure-list">
-                  {(profile.structures ?? []).slice(0, 10).map((structure) => (
-                    <TemplateStructureEditor
-                      key={structure.structureKey}
-                      onChange={(nextOverride) => {
-                        if (profileContext) {
-                          return onStructureOverrideChange(profileContext.templateVersionId, structure.structureKey, nextOverride);
-                        }
-                        return Promise.resolve();
-                      }}
-                      override={profileContext ? structureOverrides[profileContext.templateVersionId]?.[structure.structureKey] : undefined}
-                      structure={structure}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-            {profile.templateAnalysis && (
-              <section className="template-profile-box">
-                <h3>智能识别</h3>
-                <div className="template-analysis-summary">
-                  <strong>{templateKindLabel(profile.templateAnalysis.templateKind)}</strong>
-                  <span>{Math.round(profile.templateAnalysis.confidence * 100)}% · {profile.templateAnalysis.documentTypeCode || 'UNKNOWN'} · {profile.templateAnalysis.source}</span>
-                </div>
-                {profile.templateAnalysis.suggestedPlaceholders.length === 0 ? (
-                  <p className="empty-note">暂无建议占位符。</p>
-                ) : profile.templateAnalysis.suggestedPlaceholders.map((suggestion) => (
-                  <div className="template-profile-risk" key={`${suggestion.field}-${suggestion.reason}`}>
-                    <strong>{suggestion.field}</strong>
-                    <span>{suggestion.reason}</span>
-                  </div>
-                ))}
-              </section>
-            )}
-            <section className="template-profile-box">
-              <h3>解析风险</h3>
-              {profile.validationItems.length === 0 ? (
-                <p className="empty-note">未发现解析风险。</p>
-              ) : profile.validationItems.map((item) => (
-                <div className="template-profile-risk" key={`${item.code}-${item.message}`}>
-                  <strong>{item.code}</strong>
-                  <span>{item.message}</span>
-                </div>
-              ))}
-            </section>
-          </div>
+          <TemplateParseWorkspace
+            documentKind={documentKind ?? documentKindFromProfile(profile)}
+            profile={profile}
+            mappingItems={mappingItems}
+            mappingMessage={mappingMessage}
+            mappingProfile={mappingProfile}
+            mappingStatus={mappingStatus}
+            renderPreview={renderPreview}
+            renderPreviewMessage={renderPreviewMessage}
+            renderPreviewStatus={renderPreviewStatus}
+            structureProfile={structureProfile}
+            onMappingRoleChange={handleMappingRoleChange}
+            onPublishMapping={() => void handlePublishMapping()}
+            onSaveMappingDraft={() => void handleSaveMappingDraft()}
+            onRequestRenderPreview={() => void handleRequestRenderPreview()}
+          />
         )}
       </Dialog>
       <ConfirmDialog
@@ -2861,6 +3295,296 @@ function TemplateManagementPage({
         title="删除这个模板？"
       />
     </>
+  );
+}
+
+function TemplateParseWorkspace({
+  documentKind,
+  mappingItems,
+  mappingMessage,
+  mappingProfile,
+  mappingStatus,
+  profile,
+  structureProfile,
+  renderPreview,
+  renderPreviewStatus,
+  renderPreviewMessage,
+  onMappingRoleChange,
+  onPublishMapping,
+  onSaveMappingDraft,
+  onRequestRenderPreview,
+}: {
+  documentKind: TemplateDocumentKind | null;
+  mappingItems: StructureMappingItem[];
+  mappingMessage: string;
+  mappingProfile: StructureMappingProfile | null;
+  mappingStatus: 'idle' | 'loading' | 'saving' | 'publishing' | 'blocked' | 'error';
+  profile: TemplateProfile;
+  structureProfile: DocumentStructureProfile | null;
+  renderPreview: DocumentRenderPreview | null;
+  renderPreviewStatus: 'idle' | 'loading' | 'requesting' | 'error';
+  renderPreviewMessage: string;
+  onMappingRoleChange: (nodeKey: string, role: string, sortOrder: number) => void;
+  onPublishMapping: () => void;
+  onSaveMappingDraft: () => void;
+  onRequestRenderPreview: () => void;
+}) {
+  const warnings = documentKind?.blockingWarnings ?? [];
+  const blocksAutoTemplate = documentKind?.recommendedWorkflow === 'BLOCK_AUTO_TEMPLATE' || warnings.length > 0;
+  const nodes = structureProfile?.nodes ?? [];
+  const mappingByNodeKey = useMemo(
+    () => new Map(mappingItems.map((item) => [item.nodeKey, item])),
+    [mappingItems],
+  );
+
+  return (
+    <div className="template-parse-workspace">
+      <section className="template-profile-box template-profile-wide">
+        <div className="template-workspace-section-header">
+          <div>
+            <h3>文档类型</h3>
+            <p>系统会把手册、制度和普通文档提示为非自动套版流程，避免误当模板发布。</p>
+          </div>
+          <span className={`status-chip ${blocksAutoTemplate ? 'danger' : ''}`}>
+            {documentKindLabel(documentKind?.documentKind ?? 'UNKNOWN_DOCUMENT')}
+          </span>
+        </div>
+        {blocksAutoTemplate && (
+          <StatusMessage
+            title="该文件不适合直接作为自动套版模板"
+            tone="warning"
+          >
+            {(warnings.length > 0 ? warnings : ['建议先换用标准模板或范文，再进入结构映射。']).map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </StatusMessage>
+        )}
+        <div className="template-kind-grid">
+          <div>
+            <span>推荐流程</span>
+            <strong>{workflowLabel(documentKind?.recommendedWorkflow ?? 'REVIEW_REQUIRED')}</strong>
+          </div>
+          <div>
+            <span>置信度</span>
+            <strong>{Math.round((documentKind?.confidence ?? 0) * 100)}%</strong>
+          </div>
+          <div>
+            <span>来源</span>
+            <strong>{documentKind?.source || 'profile'}</strong>
+          </div>
+          <div>
+            <span>文种</span>
+            <strong>{documentKind?.documentTypeCode || 'UNKNOWN'}</strong>
+          </div>
+        </div>
+        {documentKind?.reasonCodes && documentKind.reasonCodes.length > 0 && (
+          <div className="template-reason-list" aria-label="识别原因">
+            {documentKind.reasonCodes.map((reason) => (
+              <span key={reason}>{reason}</span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="template-profile-box template-profile-wide">
+        <div className="template-workspace-section-header">
+          <div>
+            <h3>结构树</h3>
+            <p>{structureProfile ? `${nodes.length} 个结构节点 · ${structureProfile.extractorVersion}` : '结构 profile 暂不可用，使用模板 profile 兜底展示。'}</p>
+          </div>
+        </div>
+        {nodes.length > 0 ? (
+          <div className="template-node-tree" aria-label="模板结构树">
+            {nodes.slice(0, 30).map((node) => (
+              <article className="template-node-row" key={node.nodeKey}>
+                <ChevronRight aria-hidden="true" />
+                <div>
+                  <strong>{node.roleSuggestion || node.nodeType}</strong>
+                  <span>{node.nodeType} · {node.path}</span>
+                  <p>{node.textPreview || '该节点暂无可展示文字'}</p>
+                </div>
+                {node.riskCodes.length > 0 && <small>{node.riskCodes.length} 个风险</small>}
+                <label className="template-node-role-control">
+                  <span>角色</span>
+                  <select
+                    aria-label={`映射角色：${node.textPreview || node.nodeKey}`}
+                    onChange={(event) => onMappingRoleChange(node.nodeKey, event.target.value, node.orderIndex)}
+                    value={mappingByNodeKey.get(node.nodeKey)?.role ?? node.roleSuggestion ?? 'UNKNOWN'}
+                  >
+                    {MAPPING_ROLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </article>
+            ))}
+          </div>
+        ) : (profile.structures ?? []).length > 0 ? (
+          <div className="template-node-tree" aria-label="模板结构树">
+            {(profile.structures ?? []).slice(0, 30).map((structure) => (
+              <article className="template-node-row" key={structure.structureKey}>
+                <ChevronRight aria-hidden="true" />
+                <div>
+                  <strong>{structure.label}</strong>
+                  <span>{structure.structureType} · {locationLabel(structure.locationType)}</span>
+                  <p>{structure.textPreview || '该结构暂无可展示文字'}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-note">未识别到可展示的结构节点。</p>
+        )}
+      </section>
+
+      <section className="template-profile-box">
+        <h3>占位符</h3>
+        {profile.placeholders.length === 0 ? (
+          <p className="empty-note">未识别到显式占位符。</p>
+        ) : profile.placeholders.map((placeholder) => (
+          <div className="template-profile-item" key={`${placeholder.key}-${placeholder.paragraphKey}`}>
+            <ClipboardList aria-hidden="true" />
+            <span>{placeholder.key}</span>
+            {placeholder.splitAcrossRuns && <small>跨 run</small>}
+          </div>
+        ))}
+      </section>
+
+      <section className="template-profile-box">
+        <h3>解析风险</h3>
+        {profile.validationItems.length === 0 && (structureProfile?.risks ?? []).length === 0 ? (
+          <p className="empty-note">未发现解析风险。</p>
+        ) : (
+          [...profile.validationItems, ...(structureProfile?.risks ?? [])].map((item, index) => (
+            <div className="template-profile-risk" key={`${item.code}-${item.message}-${index}`}>
+              <strong>{item.code}</strong>
+              <span>{item.message}</span>
+            </div>
+          ))
+        )}
+      </section>
+
+      <section className="template-profile-box template-profile-wide">
+        <div className="template-workspace-section-header">
+          <div>
+            <h3>结构映射</h3>
+            <p>{mappingProfile ? `v${mappingProfile.versionNo} · ${mappingProfile.status} · ${mappingProfile.confirmedCount} 个已确认` : mappingMessage || '映射暂不可用'}</p>
+          </div>
+          <div className="template-mapping-actions">
+            <Button
+              disabled={!mappingProfile || mappingStatus === 'saving' || mappingStatus === 'publishing'}
+              icon={<Save aria-hidden="true" />}
+              isLoading={mappingStatus === 'saving'}
+              loadingLabel="保存中"
+              onClick={onSaveMappingDraft}
+              variant="secondary"
+            >
+              保存草稿
+            </Button>
+            <Button
+              disabled={!mappingProfile || mappingStatus === 'saving' || mappingStatus === 'publishing'}
+              icon={<CheckCircle2 aria-hidden="true" />}
+              isLoading={mappingStatus === 'publishing'}
+              loadingLabel="发布中"
+              onClick={onPublishMapping}
+            >
+              发布映射
+            </Button>
+          </div>
+        </div>
+        {mappingStatus === 'error' && (
+          <StatusMessage title={mappingMessage || '结构映射不可用'} tone="warning" />
+        )}
+        {mappingStatus === 'blocked' && (
+          <StatusMessage title={mappingMessage || '映射发布被阻断'} tone="warning">
+            {(mappingProfile?.validationItems ?? []).map((item) => (
+              <p key={`${item.code}-${item.role ?? ''}-${item.message}`}>{item.message}</p>
+            ))}
+          </StatusMessage>
+        )}
+        {mappingStatus === 'idle' && mappingMessage && (
+          <p className="empty-note">{mappingMessage}</p>
+        )}
+      </section>
+
+      <RenderPreviewPanel
+        preview={renderPreview}
+        status={renderPreviewStatus}
+        message={renderPreviewMessage}
+        onRequest={onRequestRenderPreview}
+      />
+    </div>
+  );
+}
+
+function RenderPreviewPanel({
+  preview,
+  status,
+  message,
+  onRequest,
+}: {
+  preview: DocumentRenderPreview | null;
+  status: 'idle' | 'loading' | 'requesting' | 'error';
+  message: string;
+  onRequest: () => void;
+}) {
+  return (
+    <section className="template-profile-box">
+      <div className="template-workspace-section-header">
+        <div>
+          <h3>原貌预览</h3>
+          <p>预览由后端渲染任务生成，当前只展示状态和页面入口。</p>
+        </div>
+        <Button
+          disabled={status === 'loading' || status === 'requesting'}
+          icon={<RotateCcw aria-hidden="true" />}
+          isLoading={status === 'requesting'}
+          loadingLabel="提交中"
+          onClick={onRequest}
+          variant="secondary"
+        >
+          生成预览
+        </Button>
+      </div>
+
+      {status === 'loading' && (
+        <StatusMessage title={message || '正在读取渲染预览状态'} tone="info" />
+      )}
+      {status === 'error' && (
+        <StatusMessage title={message || '渲染预览状态加载失败'} tone="warning" />
+      )}
+      {preview?.status === 'RENDERING' && (
+        <StatusMessage title="渲染预览生成中" tone="info" />
+      )}
+      {preview?.status === 'FAILED' && (
+        <StatusMessage title="预览生成失败" tone="warning">
+          <p>{preview.errorMessage ?? preview.errorCode ?? '请稍后重试。'}</p>
+        </StatusMessage>
+      )}
+      {preview?.status === 'UNSUPPORTED' && (
+        <StatusMessage title="当前环境暂不支持渲染预览" tone="warning">
+          <p>{preview.errorMessage ?? '请配置 LibreOffice 后再生成。'}</p>
+        </StatusMessage>
+      )}
+      {!preview && status === 'idle' && (
+        <p className="empty-note">尚未生成预览。</p>
+      )}
+      {preview?.status === 'PENDING' && (
+        <p className="empty-note">尚未生成预览，可点击生成预览。</p>
+      )}
+      {preview?.status === 'READY' && (
+        <div className="template-preview-page-list" aria-label="渲染预览页面">
+          <span>{preview.pageCount} 页 · {preview.renderer}</span>
+          {preview.id && preview.manifest.pages.length > 0 ? preview.manifest.pages.slice(0, 4).map((page) => (
+            <a href={getRenderPreviewPageUrl(preview.id as number, page.pageNumber)} key={page.pageNumber} rel="noreferrer" target="_blank">
+              第 {page.pageNumber} 页 · {page.widthPixels}×{page.heightPixels}
+            </a>
+          )) : (
+            <span>暂无可下载页面。</span>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -5339,6 +6063,299 @@ function templateKindLabel(templateKind: string) {
     UNKNOWN_DOCUMENT: '待人工确认',
   };
   return labels[templateKind] ?? templateKind;
+}
+
+function documentKindLabel(documentKind: string) {
+  const labels: Record<string, string> = {
+    PLACEHOLDER_TEMPLATE: '占位符模板',
+    STYLE_TEMPLATE: '样式模板',
+    REFERENCE_DOCUMENT: '参考范文',
+    OFFICIAL_DOCUMENT: '正式公文',
+    MANUAL_OR_GUIDE: '手册/说明',
+    POLICY_OR_REGULATION: '制度/规范',
+    ORDINARY_DOCUMENT: '普通文档',
+    UNKNOWN_DOCUMENT: '待确认',
+  };
+  return labels[documentKind] ?? documentKind;
+}
+
+function workflowLabel(workflow: string) {
+  const labels: Record<string, string> = {
+    AUTO_TEMPLATE: '可进入自动套版',
+    REVIEW_AND_MAP: '先审核并映射结构',
+    REVIEW_AND_ADD_PLACEHOLDERS: '先审核并补占位符',
+    BLOCK_AUTO_TEMPLATE: '阻断自动套版',
+    REVIEW_REQUIRED: '需要人工确认',
+  };
+  return labels[workflow] ?? workflow;
+}
+
+function slotKeyForMappingRole(role: string) {
+  switch (role) {
+    case 'TITLE':
+      return 'title';
+    case 'RECIPIENT':
+      return 'recipient';
+    case 'BODY':
+    case 'BODY_HEADING_LEVEL_1':
+    case 'BODY_HEADING_LEVEL_2':
+    case 'BODY_HEADING_LEVEL_3':
+      return 'body';
+    case 'ATTACHMENT_NOTE':
+    case 'ATTACHMENT_CONTENT':
+    case 'TABLE_ATTACHMENT':
+      return 'attachment';
+    case 'SIGNATURE':
+      return 'signature';
+    case 'DATE':
+      return 'date';
+    default:
+      return '';
+  }
+}
+
+function nodeRoleForBlockType(blockType: string) {
+  switch (blockType) {
+    case 'TITLE':
+      return 'TITLE';
+    case 'RECIPIENT':
+      return 'RECIPIENT';
+    case 'ATTACHMENT':
+      return 'ATTACHMENT_NOTE';
+    case 'SIGNATURE':
+      return 'SIGNATURE';
+    case 'DATE':
+      return 'DATE';
+    default:
+      return blockType;
+  }
+}
+
+function blockTypeForWorkbenchNode(node: WorkbenchNode | null) {
+  switch (node?.nodeType) {
+    case 'TITLE':
+      return 'TITLE';
+    case 'RECIPIENT':
+      return 'RECIPIENT';
+    case 'ATTACHMENT':
+      return 'ATTACHMENT';
+    case 'SIGNATURE':
+      return 'SIGNATURE';
+    case 'DATE':
+      return 'DATE';
+    default:
+      return null;
+  }
+}
+
+function workbenchNodeRoleLabel(nodeType: WorkbenchNode['nodeType']) {
+  const labels: Record<WorkbenchNode['nodeType'], string> = {
+    TITLE: '标题',
+    RECIPIENT: '主送',
+    BODY_SECTION: '正文',
+    ATTACHMENT: '附件',
+    SIGNATURE: '落款',
+    DATE: '日期',
+    STATIC_TEMPLATE_TEXT: '固定文本',
+    HEADER: '页眉',
+    FOOTER: '页脚',
+  };
+  return labels[nodeType];
+}
+
+function workbenchNodeLabel(node: WorkbenchNode, index: number) {
+  if (node.nodeType === 'BODY_SECTION') {
+    return bodyNodeLabel(node, index);
+  }
+  return node.label || workbenchNodeRoleLabel(node.nodeType);
+}
+
+function aiNodeContextForWorkbenchNode(node: WorkbenchNode | null): AiNodeRequestContext | null {
+  if (!node?.draftNodeId) {
+    return null;
+  }
+  return {
+    nodeId: node.draftNodeId,
+    nodeRole: aiRoleForWorkbenchNode(node),
+    nodeTitle: workbenchNodeRoleLabel(node.nodeType),
+    nodeContext: node.content,
+  };
+}
+
+function aiRoleForWorkbenchNode(node: WorkbenchNode) {
+  if (node.role) {
+    return normalizeAiNodeRole(node.role);
+  }
+  switch (node.nodeType) {
+    case 'TITLE':
+      return 'TITLE';
+    case 'RECIPIENT':
+      return 'RECIPIENT';
+    case 'BODY_SECTION':
+      return 'BODY';
+    case 'ATTACHMENT':
+      return 'ATTACHMENT_NOTE';
+    case 'SIGNATURE':
+      return 'SIGNATURE';
+    case 'DATE':
+      return 'DATE';
+    default:
+      return 'STATIC_TEXT';
+  }
+}
+
+function normalizeAiNodeRole(role: string) {
+  if (role.startsWith('BODY_HEADING_LEVEL_')) {
+    return 'BODY';
+  }
+  if (role === 'ATTACHMENT_CONTENT') {
+    return 'ATTACHMENT_NOTE';
+  }
+  return role;
+}
+
+function aiActionKindForWorkbenchNode(node: WorkbenchNode | null): NodeAiActionKind {
+  switch (node?.nodeType) {
+    case 'TITLE':
+    case 'RECIPIENT':
+    case 'BODY_SECTION':
+    case 'ATTACHMENT':
+      return 'local-operation';
+    case 'SIGNATURE':
+    case 'DATE':
+      return 'quality-check';
+    default:
+      return 'none';
+  }
+}
+
+function localOperationOptionsForWorkbenchNode(node: WorkbenchNode | null) {
+  const allowedByType: Record<string, AiLocalOperationType[]> = {
+    TITLE: ['FORMALIZE', 'COMPRESS', 'REWRITE'],
+    RECIPIENT: ['FORMALIZE', 'REWRITE', 'SUPPLEMENT'],
+    BODY_SECTION: ['FORMALIZE', 'COMPRESS', 'EXPAND', 'REWRITE', 'SUPPLEMENT'],
+    ATTACHMENT: ['REWRITE', 'SUPPLEMENT'],
+  };
+  const allowed = node ? allowedByType[node.nodeType] ?? [] : [];
+  return LOCAL_OPERATION_OPTIONS.filter((option) => allowed.includes(option.value));
+}
+
+function aiActionButtonLabelForWorkbenchNode(node: WorkbenchNode | null) {
+  const actionKind = aiActionKindForWorkbenchNode(node);
+  if (!node) {
+    return '选择结构';
+  }
+  if (node.locked) {
+    return '结构已锁定';
+  }
+  if (actionKind === 'quality-check') {
+    return '运行质检确认';
+  }
+  if (actionKind === 'local-operation') {
+    if (node.nodeType === 'BODY_SECTION' && !node.draftNodeId) {
+      return '生成段落建议';
+    }
+    return `生成${workbenchNodeRoleLabel(node.nodeType)}建议`;
+  }
+  return '暂不支持节点 AI';
+}
+
+function aiPanelTitleForWorkbenchNode(node: WorkbenchNode | null) {
+  if (!node) {
+    return '全局 AI 操作';
+  }
+  return `${workbenchNodeRoleLabel(node.nodeType)}节点`;
+}
+
+function aiPanelKickerForWorkbenchNode(
+  node: WorkbenchNode | null,
+  selectedBodyNode: WorkbenchNode | null,
+  bodySectionNodes: WorkbenchNode[],
+) {
+  if (!node) {
+    return '未选择结构时，可使用提纲生成、基础质检和导出。';
+  }
+  if (selectedBodyNode) {
+    return `已选择：${bodyNodeLabel(selectedBodyNode, bodySectionNodes.indexOf(selectedBodyNode))}`;
+  }
+  if (node.locked) {
+    return '该节点来自模板或已锁定，暂不直接改写。';
+  }
+  if (aiActionKindForWorkbenchNode(node) === 'quality-check') {
+    return '建议通过质检确认必填、格式和位置风险。';
+  }
+  return `已选择：${node.label || workbenchNodeRoleLabel(node.nodeType)}`;
+}
+
+function localOperationDialogTitle(nodeContext: AiNodeRequestContext | null) {
+  return nodeContext ? '生成节点建议' : '生成段落建议';
+}
+
+function localOperationDialogDescription(
+  selectedNode: WorkbenchNode | null,
+  selectedBodyNode: WorkbenchNode | null,
+  bodySectionNodes: WorkbenchNode[],
+  nodeContext: AiNodeRequestContext | null,
+) {
+  if (nodeContext && selectedNode) {
+    return `目标节点：${workbenchNodeRoleLabel(selectedNode.nodeType)} · ${selectedNode.label || selectedNode.content || '结构节点'}`;
+  }
+  if (selectedBodyNode) {
+    return `目标结构：${bodyNodeLabel(selectedBodyNode, bodySectionNodes.indexOf(selectedBodyNode))}`;
+  }
+  return '请先在预览中选择正文结构。';
+}
+
+function draftNodeStatusLabel(status: string | undefined) {
+  const labels: Record<string, string> = {
+    EMPTY: '空',
+    USER_FILLED: '已填写',
+    AI_GENERATED: 'AI',
+    USER_MODIFIED_AFTER_AI: '已改',
+    NEEDS_REVIEW: '待审',
+    QUALITY_WARNING: '警告',
+    QUALITY_ERROR: '错误',
+    EXPORT_BLOCKED: '阻断',
+    FORMAT_OVERRIDDEN: '改格式',
+    LOCKED: '锁定',
+  };
+  return status ? labels[status] ?? status : '兼容';
+}
+
+function statusBadgeTone(status: string | undefined) {
+  if (status === 'QUALITY_ERROR' || status === 'EXPORT_BLOCKED') {
+    return 'danger';
+  }
+  if (status === 'QUALITY_WARNING' || status === 'NEEDS_REVIEW' || status === 'EMPTY') {
+    return 'warning';
+  }
+  if (status === 'USER_FILLED' || status === 'AI_GENERATED' || status === 'USER_MODIFIED_AFTER_AI') {
+    return 'success';
+  }
+  return 'neutral';
+}
+
+function documentKindFromProfile(profile: TemplateProfile): TemplateDocumentKind | null {
+  const analysis = profile.templateAnalysis;
+  if (!analysis) {
+    return null;
+  }
+  const documentKind = analysis.documentKind ?? (
+    analysis.templateKind === 'STANDARD_PLACEHOLDER_TEMPLATE'
+      ? 'PLACEHOLDER_TEMPLATE'
+      : analysis.templateKind
+  );
+  return {
+    documentKind,
+    templateKind: analysis.templateKind,
+    confidence: analysis.confidence,
+    documentTypeCode: analysis.documentTypeCode,
+    reasonCodes: analysis.reasonCodes ?? [],
+    recommendedWorkflow: analysis.recommendedWorkflow ?? 'REVIEW_REQUIRED',
+    blockingWarnings: analysis.blockingWarnings ?? [],
+    message: analysis.message,
+    source: analysis.source,
+  };
 }
 
 function structurePreviewStyle(

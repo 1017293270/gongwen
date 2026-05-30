@@ -1,9 +1,12 @@
 package com.gongwen.assistant.template;
 
 import com.gongwen.assistant.common.api.ApiResponse;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
+import com.gongwen.assistant.template.profile.TemplateAnalysisProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
@@ -35,6 +38,7 @@ public class TemplateController {
     private final TemplateUploadService uploadService;
     private final TemplateProfileRepository profileRepository;
     private final TemplateStructureFormattingRepository structureFormattingRepository;
+    private final DocumentStructureProfileRepository documentStructureProfileRepository;
     private final TemplateVersionRepository versionRepository;
     private final TemplateRepository templateRepository;
     private final CurrentUserProvider currentUserProvider;
@@ -44,6 +48,7 @@ public class TemplateController {
             TemplateUploadService uploadService,
             TemplateProfileRepository profileRepository,
             TemplateStructureFormattingRepository structureFormattingRepository,
+            DocumentStructureProfileRepository documentStructureProfileRepository,
             TemplateVersionRepository versionRepository,
             TemplateRepository templateRepository,
             CurrentUserProvider currentUserProvider
@@ -52,6 +57,7 @@ public class TemplateController {
         this.uploadService = uploadService;
         this.profileRepository = profileRepository;
         this.structureFormattingRepository = structureFormattingRepository;
+        this.documentStructureProfileRepository = documentStructureProfileRepository;
         this.versionRepository = versionRepository;
         this.templateRepository = templateRepository;
         this.currentUserProvider = currentUserProvider;
@@ -99,6 +105,43 @@ public class TemplateController {
                 .orElseThrow(() -> new TemplateException("TEMPLATE_PROFILE_NOT_FOUND", "Template profile not found")));
     }
 
+    @GetMapping("/versions/{versionId}/structure-profile")
+    public ApiResponse<DocumentStructureProfile> getStructureProfile(@PathVariable long versionId) {
+        return ApiResponse.ok(documentStructureProfileRepository.findByTemplateVersionId(versionId)
+                .orElseThrow(() -> new TemplateException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found")));
+    }
+
+    @GetMapping("/versions/{versionId}/document-kind")
+    public ApiResponse<TemplateDocumentKindResponse> getDocumentKind(@PathVariable long versionId) {
+        TemplateProfile profile = profileRepository.findByTemplateVersionId(versionId)
+                .orElseThrow(() -> new TemplateException("TEMPLATE_PROFILE_NOT_FOUND", "Template profile not found"));
+        TemplateAnalysisProfile analysis = profile.templateAnalysis();
+        if (analysis == null) {
+            return ApiResponse.ok(new TemplateDocumentKindResponse(
+                    "UNKNOWN_DOCUMENT",
+                    "UNKNOWN_DOCUMENT",
+                    0,
+                    "",
+                    List.of(),
+                    "REVIEW_REQUIRED",
+                    List.of(),
+                    "未生成智能识别结果",
+                    "profile"
+            ));
+        }
+        return ApiResponse.ok(new TemplateDocumentKindResponse(
+                analysis.documentKind(),
+                analysis.templateKind(),
+                analysis.confidence(),
+                analysis.documentTypeCode(),
+                analysis.reasonCodes(),
+                analysis.recommendedWorkflow(),
+                analysis.blockingWarnings(),
+                analysis.message(),
+                analysis.source()
+        ));
+    }
+
     @GetMapping("/versions/{versionId}/structure-formatting")
     public ApiResponse<Map<String, TemplateStructureFormattingProfile>> getStructureFormatting(@PathVariable long versionId) {
         return ApiResponse.ok(structureFormattingRepository.findOverrides(versionId));
@@ -133,5 +176,18 @@ public class TemplateController {
     }
 
     public record TemplateParseResponse(List<String> placeholders) {
+    }
+
+    public record TemplateDocumentKindResponse(
+            String documentKind,
+            String templateKind,
+            double confidence,
+            String documentTypeCode,
+            List<String> reasonCodes,
+            String recommendedWorkflow,
+            List<String> blockingWarnings,
+            String message,
+            String source
+    ) {
     }
 }

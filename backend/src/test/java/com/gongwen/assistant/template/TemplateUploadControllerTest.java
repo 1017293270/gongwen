@@ -1,6 +1,7 @@
 package com.gongwen.assistant.template;
 
 import com.gongwen.assistant.security.CurrentUserProvider;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
@@ -47,6 +48,9 @@ class TemplateUploadControllerTest {
 
     @MockBean
     private TemplateStructureFormattingRepository structureFormattingRepository;
+
+    @MockBean
+    private DocumentStructureProfileRepository documentStructureProfileRepository;
 
     @MockBean
     private TemplateVersionRepository versionRepository;

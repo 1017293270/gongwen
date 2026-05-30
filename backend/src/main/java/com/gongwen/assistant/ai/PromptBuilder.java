@@ -20,6 +20,15 @@ public class PromptBuilder {
             List<MaterialPromptSummary> materials,
             String instruction
     ) {
+        return buildOutlinePrompt(draft, materials, instruction, AiNodeContext.none());
+    }
+
+    public OutlinePrompt buildOutlinePrompt(
+            DraftDetailDto draft,
+            List<MaterialPromptSummary> materials,
+            String instruction,
+            AiNodeContext nodeContext
+    ) {
         List<String> fieldSummaries = draft.blocks().stream()
                 .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
                 .toList();
@@ -27,6 +36,7 @@ public class PromptBuilder {
                 .map(material -> material.originalFileName() + ": " + summarize(material.text(), MATERIAL_TEXT_LIMIT))
                 .toList();
         String safeInstruction = instruction == null ? "" : instruction.strip();
+        AiNodeContext safeNodeContext = nodeContext == null ? AiNodeContext.none() : nodeContext;
         return new OutlinePrompt(
                 OUTLINE_PROMPT_VERSION,
                 draft.documentTypeCode(),
@@ -34,13 +44,15 @@ public class PromptBuilder {
                 fieldSummaries,
                 materialSummaries,
                 safeInstruction,
-                "documentType=%s;draftBlocks=%d;materials=%d;materialSummaryChars=%d;instructionChars=%d".formatted(
+                "documentType=%s;draftBlocks=%d;materials=%d;materialSummaryChars=%d;instructionChars=%d;%s".formatted(
                         draft.documentTypeCode(),
                         draft.blocks().size(),
                         materials.size(),
                         materialSummaries.stream().mapToInt(String::length).sum(),
-                        safeInstruction.length()
-                )
+                        safeInstruction.length(),
+                        safeNodeContext.traceSummary()
+                ),
+                safeNodeContext
         );
     }
 
@@ -48,6 +60,15 @@ public class PromptBuilder {
             DraftDetailDto draft,
             List<MaterialPromptSummary> materials,
             AiParagraphRequest request
+    ) {
+        return buildParagraphPrompt(draft, materials, request, AiNodeContext.none());
+    }
+
+    public ParagraphPrompt buildParagraphPrompt(
+            DraftDetailDto draft,
+            List<MaterialPromptSummary> materials,
+            AiParagraphRequest request,
+            AiNodeContext nodeContext
     ) {
         List<String> fieldSummaries = draft.blocks().stream()
                 .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
@@ -61,6 +82,7 @@ public class PromptBuilder {
                 .map(String::strip)
                 .toList();
         String instruction = request == null || request.instruction() == null ? "" : request.instruction().strip();
+        AiNodeContext safeNodeContext = nodeContext == null ? AiNodeContext.none() : nodeContext;
         return new ParagraphPrompt(
                 PARAGRAPH_PROMPT_VERSION,
                 draft.documentTypeCode(),
@@ -70,15 +92,17 @@ public class PromptBuilder {
                 fieldSummaries,
                 materialSummaries,
                 instruction,
-                "documentType=%s;draftBlocks=%d;materials=%d;materialSummaryChars=%d;headingChars=%d;points=%d;instructionChars=%d".formatted(
+                "documentType=%s;draftBlocks=%d;materials=%d;materialSummaryChars=%d;headingChars=%d;points=%d;instructionChars=%d;%s".formatted(
                         draft.documentTypeCode(),
                         draft.blocks().size(),
                         materials.size(),
                         materialSummaries.stream().mapToInt(String::length).sum(),
                         heading.length(),
                         points.size(),
-                        instruction.length()
-                )
+                        instruction.length(),
+                        safeNodeContext.traceSummary()
+                ),
+                safeNodeContext
         );
     }
 
@@ -117,6 +141,51 @@ public class PromptBuilder {
                         materialSummaries.stream().mapToInt(String::length).sum(),
                         instruction.length()
                 )
+        );
+    }
+
+    public LocalOperationPrompt buildLocalOperationPrompt(
+            DraftDetailDto draft,
+            List<MaterialPromptSummary> materials,
+            AiNodeContext nodeContext,
+            int targetSortOrder,
+            AiLocalOperationRequest request
+    ) {
+        List<String> fieldSummaries = draft.blocks().stream()
+                .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
+                .toList();
+        List<String> materialSummaries = materials.stream()
+                .map(material -> material.originalFileName() + ": " + summarize(material.text(), MATERIAL_TEXT_LIMIT))
+                .toList();
+        String instruction = request == null || request.instruction() == null ? "" : request.instruction().strip();
+        AiNodeContext safeNodeContext = nodeContext == null ? AiNodeContext.none() : nodeContext;
+        String originalText = safeNodeContext.nodeContext() == null ? "" : safeNodeContext.nodeContext().strip();
+        return new LocalOperationPrompt(
+                LOCAL_OPERATION_PROMPT_VERSION,
+                draft.documentTypeCode(),
+                draft.title(),
+                0L,
+                targetSortOrder,
+                request.operationType(),
+                originalText,
+                fieldSummaries,
+                materialSummaries,
+                instruction,
+                "documentType=%s;targetNodeId=%s;targetNodeRole=%s;targetSortOrder=%d;operationType=%s;originalChars=%d;materials=%d;materialSummaryChars=%d;instructionChars=%d".formatted(
+                        draft.documentTypeCode(),
+                        safeNodeContext.nodeId() == null ? "" : safeNodeContext.nodeId(),
+                        safeNodeContext.nodeRole(),
+                        targetSortOrder,
+                        request.operationType(),
+                        originalText.length(),
+                        materials.size(),
+                        materialSummaries.stream().mapToInt(String::length).sum(),
+                        instruction.length()
+                ),
+                safeNodeContext.nodeId(),
+                safeNodeContext.nodeRole(),
+                safeNodeContext.nodeTitle(),
+                safeNodeContext.nodeContext()
         );
     }
 

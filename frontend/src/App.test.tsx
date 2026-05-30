@@ -208,6 +208,60 @@ describe('App', () => {
     expect(await screen.findByText('草稿已保存')).toBeInTheDocument();
   });
 
+  it('selects a persisted draft node, edits content, and saves through the node API', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('节点草稿'), templateVersionId: 9 };
+    const nodeRows = sampleDraftNodes();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/103') && init?.method === 'PUT') {
+        const payload = JSON.parse(String(init.body));
+        return Promise.resolve(jsonResponse({ ...nodeRows[2], content: payload.content, status: payload.status }));
+      }
+      if (url.endsWith('/api/drafts/1/blocks')) {
+        const payload = JSON.parse(String(init?.body));
+        return Promise.resolve(jsonResponse({ ...nodeDraft, blocks: payload.blocks }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    const editor = await within(screen.getByLabelText('公文预览')).findByLabelText(/编辑段落：节点事项/);
+    await userEvent.type(editor, '已修改');
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/nodes/103', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        content: '节点正文已修改',
+        status: 'USER_FILLED',
+      }),
+    }));
+    expect(await screen.findByText('草稿已保存')).toBeInTheDocument();
+  });
+
   it('edits a template-derived body section without appending a block per keypress', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '1');
     const draft = {
@@ -630,6 +684,133 @@ describe('App', () => {
     }));
     expect(within(screen.getByLabelText('公文预览')).getByText('第二段建议文本')).toBeInTheDocument();
     expect(within(screen.getByLabelText('公文预览')).getByText('第一段原文')).toBeInTheDocument();
+  });
+
+  it('routes local operation requests to the selected persisted draft node', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = {
+      ...sampleDraft('节点 AI 草稿'),
+      templateVersionId: 9,
+      blocks: [
+        { id: 1, blockType: 'TITLE', content: '节点 AI 草稿', sortOrder: 10 },
+        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+      ],
+    };
+    const nodeRows = sampleDraftNodes();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/ai/local-operation')) {
+        return Promise.resolve(jsonResponse({
+          traceId: '55555555-5555-5555-5555-555555555555',
+          targetBlockId: null,
+          targetNodeId: 103,
+          targetNodeRole: 'BODY',
+          operationType: 'FORMALIZE',
+          suggestionText: '节点建议文本',
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    await userEvent.click(screen.getByRole('button', { name: '生成正文建议' }));
+    await screen.findByRole('dialog', { name: '生成节点建议' });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/local-operation', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        nodeId: 103,
+        nodeRole: 'BODY',
+        nodeTitle: '正文',
+        nodeContext: '节点正文',
+        operationType: 'FORMALIZE',
+        instruction: '',
+      }),
+    }));
+    expect(await screen.findByText('节点建议文本')).toBeInTheDocument();
+  });
+
+  it('changes right-panel node actions when selected node role changes', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('节点动作草稿'), templateVersionId: 9 };
+    const nodeRows = [
+      ...sampleDraftNodes(),
+      {
+        ...sampleDraftNodes()[0],
+        id: 104,
+        templateNodeKey: 'date-node',
+        role: 'DATE',
+        slotKey: 'date',
+        title: '日期',
+        content: '2026年5月31日',
+        sortOrder: 60,
+      },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    const structureTree = screen.getByLabelText('结构节点树');
+
+    await userEvent.click(await within(structureTree).findByRole('button', { name: /标题 标题/ }));
+    expect(screen.getByText('标题节点')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '生成标题建议' })).toBeEnabled();
+
+    await userEvent.click(await within(structureTree).findByText('节点事项'));
+    expect(screen.getByText('正文节点')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '生成正文建议' })).toBeEnabled();
+
+    await userEvent.click(await within(structureTree).findByRole('button', { name: /日期 日期/ }));
+    expect(screen.getByText('日期节点')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '运行质检确认' })).toBeEnabled();
   });
 
   it('expands the selected paragraph editor to fit its content', async () => {
@@ -1730,6 +1911,175 @@ describe('App', () => {
     expect(screen.queryByRole('heading', { name: '待删除模板' })).not.toBeInTheDocument();
   });
 
+  it('shows manual document warning and render preview loading state in template parse workspace', async () => {
+    let resolvePreview: (value: Response) => void = () => undefined;
+    const previewPromise = new Promise<Response>((resolve) => {
+      resolvePreview = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([
+          { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+        ]));
+      }
+      if (url.endsWith('/api/templates?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          { id: 12, templateName: '格式说明文件', documentTypeCode: 'NOTICE', status: 'ACTIVE' },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          {
+            templateVersionId: 31,
+            templateId: 12,
+            templateName: '格式说明文件',
+            documentTypeCode: 'NOTICE',
+            versionNo: 1,
+            originalFileName: '公文格式说明.docx',
+          },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions/31/profile')) {
+        return Promise.resolve(jsonResponse(manualTemplateProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-profile')) {
+        return Promise.resolve(jsonResponse(manualStructureProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/document-kind')) {
+        return Promise.resolve(jsonResponse(manualDocumentKind()));
+      }
+      if (url.endsWith('/api/templates/versions/31/render-preview')) {
+        return previewPromise;
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
+    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
+    expect(within(dialog).getByText('该文件不适合直接作为自动套版模板')).toBeInTheDocument();
+    expect(within(dialog).getByText('该文件更像公文使用手册或格式说明，不应直接发布为自动套版模板。')).toBeInTheDocument();
+    expect(within(dialog).getByText('正在读取渲染预览状态')).toBeInTheDocument();
+
+    resolvePreview(jsonResponse(renderPreviewFixture('RENDERING')));
+    expect(await within(dialog).findByText('渲染预览生成中')).toBeInTheDocument();
+  });
+
+  it('maps a structure node and shows publish blockers from backend', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([
+          { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+        ]));
+      }
+      if (url.endsWith('/api/templates?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          { id: 12, templateName: '通知映射模板', documentTypeCode: 'NOTICE', status: 'ACTIVE' },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          {
+            templateVersionId: 31,
+            templateId: 12,
+            templateName: '通知映射模板',
+            documentTypeCode: 'NOTICE',
+            versionNo: 1,
+            originalFileName: 'notice-template.docx',
+          },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions/31/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-profile')) {
+        return Promise.resolve(jsonResponse(mappingStructureProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/document-kind')) {
+        return Promise.resolve(jsonResponse(styleDocumentKind()));
+      }
+      if (url.endsWith('/api/templates/versions/31/render-preview')) {
+        return Promise.resolve(jsonResponse(renderPreviewFixture('PENDING')));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-mapping') && !init?.method) {
+        return Promise.resolve(jsonResponse(structureMappingFixture('DRAFT', [])));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-mapping/draft') && init?.method === 'PUT') {
+        return Promise.resolve(jsonResponse(structureMappingFixture('DRAFT', [
+          {
+            nodeKey: 'title-node',
+            role: 'TITLE',
+            slotKey: 'title',
+            status: 'CONFIRMED',
+            source: 'USER',
+            confidence: 1,
+            notes: '',
+            sortOrder: 10,
+          },
+        ])));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-mapping/publish') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({
+          ...structureMappingFixture('DRAFT', [
+            {
+              nodeKey: 'title-node',
+              role: 'TITLE',
+              slotKey: 'title',
+              status: 'CONFIRMED',
+              source: 'USER',
+              confidence: 1,
+              notes: '',
+              sortOrder: 10,
+            },
+          ]),
+          validationItems: [
+            {
+              severity: 'BLOCKING',
+              code: 'REQUIRED_SLOT_MISSING',
+              message: '发布映射前必须确认 BODY 槽位。',
+              nodeKey: null,
+              role: 'BODY',
+            },
+          ],
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
+    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
+    await userEvent.selectOptions(within(dialog).getByLabelText('映射角色：关于召开会议的通知'), 'TITLE');
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存草稿' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/templates/versions/31/structure-mapping/draft', expect.objectContaining({
+      method: 'PUT',
+      body: expect.stringContaining('"role":"TITLE"'),
+    }));
+
+    await userEvent.click(await within(dialog).findByRole('button', { name: '发布映射' }));
+    expect(await within(dialog).findByText('映射发布被阻断')).toBeInTheDocument();
+    expect(within(dialog).getByText('发布映射前必须确认 BODY 槽位。')).toBeInTheDocument();
+  });
+
   it('configures DeepSeek from system settings', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -1913,6 +2263,9 @@ function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
     if (!fetchMock.getMockImplementation() && url.includes('/api/templates/versions')) {
       return Promise.resolve(jsonResponse([]));
     }
+    if (!fetchMock.getMockImplementation() && /\/api\/drafts\/\d+\/nodes/.test(url)) {
+      return Promise.resolve(jsonResponse([]));
+    }
     return fetchMock(input, init);
   });
 }
@@ -1952,7 +2305,66 @@ function sampleDraft(title: string) {
       { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
       { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
     ],
+    nodes: [],
   };
+}
+
+function sampleDraftNodes() {
+  const base = {
+    draftId: 1,
+    structureMappingProfileId: 7,
+    parentTemplateNodeKey: null,
+    nodeType: 'PARAGRAPH',
+    formatOverride: {
+      eastAsiaFont: null,
+      latinFont: null,
+      fontSizePt: null,
+      bold: null,
+      alignment: null,
+      firstLineIndentTwip: null,
+      lineSpacingRule: null,
+      lineSpacingTwip: null,
+      spacingBeforeTwip: null,
+      spacingAfterTwip: null,
+    },
+    createdAt: '2026-05-30T00:00:00Z',
+    updatedAt: '2026-05-30T00:00:00Z',
+  };
+  return [
+    {
+      ...base,
+      id: 101,
+      templateNodeKey: 'title-node',
+      role: 'TITLE',
+      slotKey: 'title',
+      title: '标题',
+      content: '节点草稿',
+      sortOrder: 10,
+      status: 'USER_FILLED',
+    },
+    {
+      ...base,
+      id: 102,
+      templateNodeKey: 'heading-node',
+      role: 'BODY_HEADING_LEVEL_1',
+      slotKey: 'body',
+      title: '正文标题',
+      content: '一、节点事项',
+      sortOrder: 20,
+      status: 'USER_FILLED',
+    },
+    {
+      ...base,
+      id: 103,
+      templateNodeKey: 'body-node',
+      role: 'BODY',
+      slotKey: 'body',
+      title: '正文',
+      content: '节点正文',
+      sortOrder: 30,
+      status: 'USER_FILLED',
+    },
+  ];
 }
 
 function templateBodyProfile() {
@@ -2076,6 +2488,179 @@ function templateTopColorProfile() {
       },
       ...templateBodyProfile().structures,
     ],
+  };
+}
+
+function manualTemplateProfile() {
+  return {
+    ...templateBodyProfile(),
+    structures: [
+      {
+        structureKey: 'manual-1',
+        structureType: 'UNKNOWN',
+        label: '格式说明',
+        textPreview: '1.标题：方正小标宋简体（二号）',
+        locationType: 'BODY',
+        styleId: null,
+        styleName: null,
+        source: 'paragraph',
+        formatting: templateBodyProfile().structures[0].formatting,
+      },
+    ],
+    templateAnalysis: {
+      templateKind: 'ORDINARY_DOCUMENT',
+      confidence: 0.92,
+      documentTypeCode: 'NOTICE',
+      inferredFields: [],
+      suggestedPlaceholders: [],
+      message: '疑似格式说明文件',
+      source: 'rules',
+      documentKind: 'MANUAL_OR_GUIDE',
+      reasonCodes: ['MANUAL_OR_GUIDE_KEYWORD', 'FORMAT_INSTRUCTION_TEXT'],
+      recommendedWorkflow: 'BLOCK_AUTO_TEMPLATE',
+      blockingWarnings: ['该文件更像公文使用手册或格式说明，不应直接发布为自动套版模板。'],
+    },
+    placeholders: [],
+    validationItems: [],
+  };
+}
+
+function manualDocumentKind() {
+  return {
+    documentKind: 'MANUAL_OR_GUIDE',
+    templateKind: 'ORDINARY_DOCUMENT',
+    confidence: 0.92,
+    documentTypeCode: 'NOTICE',
+    reasonCodes: ['MANUAL_OR_GUIDE_KEYWORD', 'FORMAT_INSTRUCTION_TEXT'],
+    recommendedWorkflow: 'BLOCK_AUTO_TEMPLATE',
+    blockingWarnings: ['该文件更像公文使用手册或格式说明，不应直接发布为自动套版模板。'],
+    message: '疑似格式说明文件',
+    source: 'rules',
+  };
+}
+
+function manualStructureProfile() {
+  return {
+    schemaVersion: 1,
+    sourceFileHash: 'hash-31',
+    extractorVersion: 'document-structure-v1',
+    nodes: [
+      {
+        nodeKey: 'paragraph-0',
+        parentKey: null,
+        nodeType: 'PARAGRAPH',
+        roleSuggestion: 'STATIC_TEXT',
+        text: '1.标题：方正小标宋简体（二号）',
+        textPreview: '1.标题：方正小标宋简体（二号）',
+        orderIndex: 0,
+        path: 'PARAGRAPH/0',
+        formatting: templateBodyProfile().structures[0].formatting,
+        riskCodes: [],
+      },
+    ],
+    styles: [],
+    sections: [],
+    risks: [],
+    createdAt: '2026-05-30T00:00:00Z',
+  };
+}
+
+function mappingStructureProfile() {
+  return {
+    schemaVersion: 1,
+    sourceFileHash: 'hash-31',
+    extractorVersion: 'document-structure-v1',
+    nodes: [
+      {
+        nodeKey: 'title-node',
+        parentKey: null,
+        nodeType: 'PARAGRAPH',
+        roleSuggestion: 'UNKNOWN',
+        text: '关于召开会议的通知',
+        textPreview: '关于召开会议的通知',
+        orderIndex: 10,
+        path: 'PARAGRAPH/10',
+        formatting: templateBodyProfile().structures[0].formatting,
+        riskCodes: [],
+      },
+      {
+        nodeKey: 'date-node',
+        parentKey: null,
+        nodeType: 'PARAGRAPH',
+        roleSuggestion: 'DATE',
+        text: '2026年5月30日',
+        textPreview: '2026年5月30日',
+        orderIndex: 20,
+        path: 'PARAGRAPH/20',
+        formatting: templateBodyProfile().structures[0].formatting,
+        riskCodes: [],
+      },
+    ],
+    styles: [],
+    sections: [],
+    risks: [],
+    createdAt: '2026-05-30T00:00:00Z',
+  };
+}
+
+function styleDocumentKind() {
+  return {
+    documentKind: 'STYLE_TEMPLATE',
+    templateKind: 'STYLE_TEMPLATE',
+    confidence: 0.88,
+    documentTypeCode: 'NOTICE',
+    reasonCodes: ['OFFICIAL_STRUCTURE'],
+    recommendedWorkflow: 'REVIEW_AND_MAP',
+    blockingWarnings: [],
+    message: '可进入结构映射',
+    source: 'rules',
+  };
+}
+
+function renderPreviewFixture(status: string) {
+  return {
+    id: 5,
+    templateVersionId: 31,
+    sourceFileHash: 'hash-31',
+    renderer: 'libreoffice',
+    rendererVersion: null,
+    status,
+    pageCount: 0,
+    storagePath: null,
+    manifest: {
+      schemaVersion: 1,
+      pdfFileName: null,
+      pages: [],
+    },
+    errorCode: null,
+    errorMessage: null,
+    createdAt: '2026-05-30T00:00:00Z',
+    updatedAt: '2026-05-30T00:00:00Z',
+  };
+}
+
+function structureMappingFixture(status: string, items: Array<{
+  nodeKey: string;
+  role: string;
+  slotKey: string;
+  status: string;
+  source: string;
+  confidence: number;
+  notes: string;
+  sortOrder: number;
+}>) {
+  return {
+    mappingProfileId: 7,
+    templateVersionId: 31,
+    versionNo: 1,
+    status,
+    items,
+    validationItems: [],
+    confirmedCount: items.filter((item) => item.status === 'CONFIRMED').length,
+    needsReviewCount: 0,
+    publishedAt: status === 'PUBLISHED' ? '2026-05-30T00:00:00Z' : null,
+    createdAt: '2026-05-30T00:00:00Z',
+    updatedAt: '2026-05-30T00:00:00Z',
   };
 }
 

@@ -1,5 +1,8 @@
 package com.gongwen.assistant.template;
 
+import com.gongwen.assistant.documentstructure.DocumentStructureExtractor;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
 import com.gongwen.assistant.support.DocxTestFactory;
 import com.gongwen.assistant.template.profile.TemplatePlaceholderProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
@@ -168,9 +171,87 @@ class TemplateUploadServiceTest {
         TemplateProfile profile = profileRepository.findByTemplateVersionId(1L).orElseThrow();
         assertThat(profile.placeholders()).isEmpty();
         assertThat(profile.templateAnalysis()).isNotNull();
+        assertThat(profile.templateAnalysis().documentKind()).isEqualTo("STYLE_TEMPLATE");
+        assertThat(profile.templateAnalysis().recommendedWorkflow()).isEqualTo("REVIEW_AND_ADD_PLACEHOLDERS");
         assertThat(profile.templateAnalysis().suggestedPlaceholders())
                 .extracting("field")
                 .contains("标题", "正文");
+    }
+
+    @Test
+    void uploadPersistsDocumentStructureProfileWhenRepositoryIsConfigured() {
+        byte[] content = DocxTestFactory.docxWithOfficialStyles();
+        InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
+        InMemoryTemplateProfileRepository profileRepository = new InMemoryTemplateProfileRepository();
+        InMemoryDocumentStructureProfileRepository structureRepository = new InMemoryDocumentStructureProfileRepository();
+        TemplateUploadService service = new TemplateUploadService(
+                (originalFileName, fileExtension, bytes) -> "storage/templates/notice.docx",
+                versionRepository,
+                profileRepository,
+                new TemplateProfileParser(),
+                new TemplateProperties("storage/templates", 20),
+                new TemplateIntelligenceService(new com.gongwen.assistant.ai.MockModelAdapter()),
+                new InMemoryTemplateRepository(),
+                new DocumentStructureExtractor(),
+                structureRepository
+        );
+
+        service.upload(3L, "notice.docx", DOCX_CONTENT_TYPE, content);
+
+        DocumentStructureProfile structureProfile = structureRepository.findByTemplateVersionId(1L).orElseThrow();
+        assertThat(structureProfile.sourceFileHash()).hasSize(64);
+        assertThat(structureProfile.nodes())
+                .extracting("roleSuggestion")
+                .contains("TITLE", "BODY");
+    }
+
+    @Test
+    void uploadMarksPlaceholderTemplatesWithStableDocumentKind() {
+        byte[] content = DocxTestFactory.docxWithOfficialStyles();
+        InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
+        InMemoryTemplateProfileRepository profileRepository = new InMemoryTemplateProfileRepository();
+        TemplateUploadService service = new TemplateUploadService(
+                (originalFileName, fileExtension, bytes) -> "storage/templates/notice.docx",
+                versionRepository,
+                profileRepository,
+                new TemplateProfileParser(),
+                new TemplateProperties("storage/templates", 20)
+        );
+
+        service.upload(3L, "notice-template.docx", DOCX_CONTENT_TYPE, content);
+
+        TemplateProfile profile = profileRepository.findByTemplateVersionId(1L).orElseThrow();
+        assertThat(profile.templateAnalysis()).isNotNull();
+        assertThat(profile.templateAnalysis().templateKind()).isEqualTo("STANDARD_PLACEHOLDER_TEMPLATE");
+        assertThat(profile.templateAnalysis().documentKind()).isEqualTo("PLACEHOLDER_TEMPLATE");
+        assertThat(profile.templateAnalysis().reasonCodes()).contains("EXPLICIT_PLACEHOLDERS");
+        assertThat(profile.templateAnalysis().blockingWarnings()).isEmpty();
+    }
+
+    @Test
+    void uploadBlocksManualGuideDocumentsFromAutoTemplateFlow() {
+        byte[] content = DocxTestFactory.docxWithManualGuideLikeDocument();
+        InMemoryTemplateVersionRepository versionRepository = new InMemoryTemplateVersionRepository();
+        InMemoryTemplateProfileRepository profileRepository = new InMemoryTemplateProfileRepository();
+        TemplateUploadService service = new TemplateUploadService(
+                (originalFileName, fileExtension, bytes) -> "storage/templates/manual.docx",
+                versionRepository,
+                profileRepository,
+                new TemplateProfileParser(),
+                new TemplateProperties("storage/templates", 20)
+        );
+
+        service.upload(3L, "公文使用手册.docx", DOCX_CONTENT_TYPE, content);
+
+        TemplateProfile profile = profileRepository.findByTemplateVersionId(1L).orElseThrow();
+        assertThat(profile.templateAnalysis()).isNotNull();
+        assertThat(profile.templateAnalysis().documentKind()).isEqualTo("MANUAL_OR_GUIDE");
+        assertThat(profile.templateAnalysis().recommendedWorkflow()).isEqualTo("BLOCK_AUTO_TEMPLATE");
+        assertThat(profile.templateAnalysis().reasonCodes())
+                .contains("MANUAL_OR_GUIDE_KEYWORD", "FORMAT_INSTRUCTION_TEXT");
+        assertThat(profile.templateAnalysis().blockingWarnings())
+                .contains("该文件更像公文使用手册或格式说明，不应直接发布为自动套版模板。");
+        assertThat(profile.templateAnalysis().suggestedPlaceholders()).isEmpty();
     }
 
     @Test
@@ -280,6 +361,37 @@ class TemplateUploadServiceTest {
         @Override
         public Optional<TemplateProfile> findByTemplateVersionId(long templateVersionId) {
             return Optional.ofNullable(profiles.get(templateVersionId));
+        }
+    }
+
+    private static class InMemoryDocumentStructureProfileRepository implements DocumentStructureProfileRepository {
+        private final Map<Long, DocumentStructureProfile> profiles = new HashMap<>();
+
+        @Override
+        public void save(long templateVersionId, DocumentStructureProfile profile) {
+            profiles.put(templateVersionId, profile);
+        }
+
+        @Override
+        public Optional<DocumentStructureProfile> findByTemplateVersionId(long templateVersionId) {
+            return Optional.ofNullable(profiles.get(templateVersionId));
+        }
+    }
+
+    private static class InMemoryTemplateRepository implements TemplateRepository {
+        @Override
+        public TemplateSummary create(String templateName, String documentTypeCode) {
+            return new TemplateSummary(1L, templateName, documentTypeCode, "ACTIVE");
+        }
+
+        @Override
+        public List<TemplateSummary> findAll(String documentTypeCode) {
+            return List.of();
+        }
+
+        @Override
+        public Optional<TemplateSummary> findById(long id) {
+            return Optional.of(new TemplateSummary(id, "测试模板", "NOTICE", "ACTIVE"));
         }
     }
 }

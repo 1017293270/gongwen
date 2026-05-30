@@ -80,6 +80,43 @@ class TemplateProfileParserTest {
     }
 
     @Test
+    void parsesEastAsiaAndLatinFontsSeparatelyForChineseText() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithEastAsiaAndLatinFonts());
+
+        TemplateStructureProfile bodyStructure = profile.structures().stream()
+                .filter(structure -> "BODY".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(bodyStructure.formatting().fontFamily()).isEqualTo("FangSong");
+        assertThat(bodyStructure.formatting().eastAsiaFontFamily()).isEqualTo("FangSong");
+        assertThat(bodyStructure.formatting().latinFontFamily()).isEqualTo("Times New Roman");
+    }
+
+    @Test
+    void parsesStructuredLineSpacingForExactAndAutoRules() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithStructuredLineSpacing());
+
+        TemplateStructureProfile titleStructure = profile.structures().stream()
+                .filter(structure -> "TITLE".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(titleStructure.formatting().spacingBetween()).isNull();
+        assertThat(titleStructure.formatting().lineSpacing().mode()).isEqualTo("EXACT");
+        assertThat(titleStructure.formatting().lineSpacing().valueTwips()).isEqualTo(590);
+        assertThat(titleStructure.formatting().lineSpacing().multipleHundred()).isNull();
+
+        TemplateStructureProfile bodyStructure = profile.structures().stream()
+                .filter(structure -> "BODY".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(bodyStructure.formatting().spacingBetween()).isEqualTo(150);
+        assertThat(bodyStructure.formatting().lineSpacing().mode()).isEqualTo("AUTO");
+        assertThat(bodyStructure.formatting().lineSpacing().multipleHundred()).isEqualTo(150);
+        assertThat(bodyStructure.formatting().lineSpacing().valueTwips()).isNull();
+    }
+
+    @Test
     void classifiesReferenceNoticeSemanticSlotsWithoutTreatingAllBodyStyleParagraphsAsBody() {
         TemplateProfile profile = parser.parse(DocxTestFactory.docxWithNoticeReferenceSkeleton());
 
@@ -111,6 +148,23 @@ class TemplateProfileParserTest {
                 .filter(structure -> "BODY".equals(structure.structureType()))
                 .map(TemplateStructureProfile::textPreview))
                 .doesNotContain("附件：会议议题征集表", "示例单位办公室", "2026年5月27日");
+    }
+
+    @Test
+    void doesNotTreatManualFormattingInstructionsAsOfficialDocumentSlots() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithManualGuideLikeDocument());
+
+        assertThat(profile.structures())
+                .extracting(TemplateStructureProfile::textPreview)
+                .contains("1.标题：方正小标宋简体（二号）", "2.正文：方正仿宋三号，首行缩进2字符");
+        assertThat(profile.structures())
+                .filteredOn(structure -> structure.textPreview().contains("方正小标宋"))
+                .extracting(TemplateStructureProfile::structureType)
+                .doesNotContain("TITLE");
+        assertThat(profile.structures())
+                .filteredOn(structure -> structure.textPreview().contains("方正仿宋"))
+                .extracting(TemplateStructureProfile::structureType)
+                .doesNotContain("BODY");
     }
 
     @Test

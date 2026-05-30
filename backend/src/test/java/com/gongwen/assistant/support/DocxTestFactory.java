@@ -4,6 +4,7 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
+import org.apache.poi.xwpf.usermodel.LineSpacingRule;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.wp.usermodel.HeaderFooterType;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
@@ -164,6 +165,53 @@ public final class DocxTestFactory {
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to create notice reference docx", exception);
         }
+    }
+
+    public static byte[] docxWithEastAsiaAndLatinFonts() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph body = document.createParagraph();
+            XWPFRun run = body.createRun();
+            run.setFontFamily("Times New Roman", XWPFRun.FontCharRange.ascii);
+            run.setFontFamily("Times New Roman", XWPFRun.FontCharRange.hAnsi);
+            run.setFontFamily("FangSong", XWPFRun.FontCharRange.eastAsia);
+            run.setFontSize(16);
+            run.setText("{{正文}}ABC");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create eastAsia font docx", exception);
+        }
+    }
+
+    public static byte[] docxWithStructuredLineSpacing() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph title = document.createParagraph();
+            title.setSpacingBetween(29.5, LineSpacingRule.EXACT);
+            title.createRun().setText("{{标题}}");
+
+            XWPFParagraph body = document.createParagraph();
+            body.setSpacingBetween(1.5, LineSpacingRule.AUTO);
+            body.createRun().setText("{{正文}}");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create structured line spacing docx", exception);
+        }
+    }
+
+    public static byte[] docxWithManualGuideLikeDocument() {
+        return docxWithParagraphs(
+                "高新发展公文使用手册",
+                "一、公文格式说明",
+                "1.标题：方正小标宋简体（二号）",
+                "2.正文：方正仿宋三号，首行缩进2字符",
+                "3.附件：附件说明应位于正文之后",
+                "本手册用于说明通知、请示、报告等文种的写作规范。"
+        );
     }
 
     public static byte[] docxWithNoticeReferenceSkeleton() {

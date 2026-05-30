@@ -1,5 +1,6 @@
 import type {
   DraftBlock,
+  DraftNode,
   DraftDetail,
   TemplateProfile,
   TemplateStructureFormatting,
@@ -21,6 +22,10 @@ export function deriveWorkbenchNodes(
     return [];
   }
 
+  if (draft.nodes?.length) {
+    return nodesFromDraftNodes(draft.nodes);
+  }
+
   const templateNodes = profile?.structures?.length
     ? nodesFromTemplateProfile(draft.blocks, profile, overrides)
     : [];
@@ -30,6 +35,144 @@ export function deriveWorkbenchNodes(
   }
 
   return nodesFromDraftBlocks(draft.blocks);
+}
+
+function nodesFromDraftNodes(draftNodes: DraftNode[]) {
+  const nodes: WorkbenchNode[] = [];
+  const sortedNodes = [...draftNodes].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  let pendingHeading: DraftNode | null = null;
+
+  for (const draftNode of sortedNodes) {
+    if (draftNode.role.startsWith('BODY_HEADING_LEVEL_')) {
+      if (pendingHeading) {
+        nodes.push(bodyNodeFromDraftNode(pendingHeading, pendingHeading, null));
+      }
+      pendingHeading = draftNode;
+      continue;
+    }
+
+    if (draftNode.role === 'BODY') {
+      nodes.push(bodyNodeFromDraftNode(draftNode, pendingHeading, draftNode));
+      pendingHeading = null;
+      continue;
+    }
+
+    if (pendingHeading) {
+      nodes.push(bodyNodeFromDraftNode(pendingHeading, pendingHeading, null));
+      pendingHeading = null;
+    }
+
+    nodes.push({
+      nodeId: `draft-node:${draftNode.id}`,
+      nodeType: mapStructureType(draftNode.role),
+      draftNodeId: draftNode.id,
+      templateNodeKey: draftNode.templateNodeKey,
+      sortOrder: draftNode.sortOrder,
+      label: draftNode.title || draftNodeLabel(draftNode),
+      content: draftNode.content,
+      status: draftNode.status,
+      source: sourceFromDraftNodeStatus(draftNode.status),
+      locked: draftNode.status === 'LOCKED',
+      formatting: formattingFromDraftNode(draftNode),
+    });
+  }
+
+  if (pendingHeading) {
+    nodes.push(bodyNodeFromDraftNode(pendingHeading, pendingHeading, null));
+  }
+
+  return nodes;
+}
+
+function bodyNodeFromDraftNode(
+  displayNode: DraftNode,
+  headingNode: DraftNode | null,
+  bodyNode: DraftNode | null,
+): WorkbenchNode {
+  const node = bodyNode ?? displayNode;
+  const heading = headingNode?.content || undefined;
+  const content = bodyNode ? bodyNode.content : '';
+  return {
+    nodeId: `draft-node:${node.id}`,
+    nodeType: 'BODY_SECTION',
+    draftNodeId: bodyNode?.id,
+    headingDraftNodeId: headingNode?.id,
+    templateNodeKey: node.templateNodeKey,
+    role: bodyNode?.role ?? headingNode?.role ?? 'BODY',
+    sortOrder: displayNode.sortOrder,
+    label: stripBodyPrefix(heading ?? bodyNode?.title ?? displayNode.title ?? '正文'),
+    heading,
+    content,
+    status: combinedDraftNodeStatus(headingNode, bodyNode),
+    source: sourceFromDraftNodeStatus(node.status),
+    locked: node.status === 'LOCKED' || headingNode?.status === 'LOCKED',
+    formatting: formattingFromDraftNode(node),
+  };
+}
+
+function combinedDraftNodeStatus(headingNode: DraftNode | null, bodyNode: DraftNode | null) {
+  if (bodyNode?.status) {
+    return bodyNode.status;
+  }
+  return headingNode?.status;
+}
+
+function sourceFromDraftNodeStatus(status: string): WorkbenchNode['source'] {
+  if (status === 'AI_GENERATED') {
+    return 'AI';
+  }
+  if (status === 'USER_FILLED' || status === 'USER_MODIFIED_AFTER_AI') {
+    return 'USER';
+  }
+  return 'DRAFT';
+}
+
+function formattingFromDraftNode(node: DraftNode): Partial<TemplateStructureFormatting> {
+  const override = node.formatOverride;
+  return {
+    fontFamily: override?.eastAsiaFont ?? null,
+    eastAsiaFontFamily: override?.eastAsiaFont ?? null,
+    latinFontFamily: override?.latinFont ?? null,
+    fontSizeHalfPoints: override?.fontSizePt ? Math.round(override.fontSizePt * 2) : null,
+    bold: override?.bold ?? null,
+    alignment: override?.alignment ?? null,
+    indentationFirstLine: override?.firstLineIndentTwip ?? null,
+    lineSpacing: override?.lineSpacingRule || override?.lineSpacingTwip ? {
+      mode: override.lineSpacingRule ?? 'AUTO',
+      valueTwips: override.lineSpacingTwip ?? null,
+      multipleHundred: null,
+    } : null,
+    spacingBefore: override?.spacingBeforeTwip ?? null,
+    spacingAfter: override?.spacingAfterTwip ?? null,
+  };
+}
+
+function draftNodeLabel(node: DraftNode) {
+  return switchRoleLabel(node.role, node.content || node.title || '结构节点');
+}
+
+function switchRoleLabel(role: string, fallback: string) {
+  switch (role) {
+    case 'TITLE':
+      return '标题';
+    case 'RECIPIENT':
+      return '主送';
+    case 'BODY':
+      return '正文';
+    case 'BODY_HEADING_LEVEL_1':
+      return fallback;
+    case 'ATTACHMENT_NOTE':
+    case 'ATTACHMENT_CONTENT':
+      return '附件';
+    case 'SIGNATURE':
+      return '落款';
+    case 'DATE':
+      return '日期';
+    case 'STATIC_TEXT':
+      return fallback;
+    default:
+      return fallback;
+  }
 }
 
 export function bodyNodeLabel(node: WorkbenchNode, index: number) {
@@ -340,6 +483,8 @@ function mapStructureType(type: string): WorkbenchNodeType {
     case 'RECIPIENT':
       return 'RECIPIENT';
     case 'ATTACHMENT':
+    case 'ATTACHMENT_NOTE':
+    case 'ATTACHMENT_CONTENT':
       return 'ATTACHMENT';
     case 'SIGNATURE':
       return 'SIGNATURE';

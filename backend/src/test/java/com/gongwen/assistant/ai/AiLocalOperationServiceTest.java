@@ -6,6 +6,9 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftNotFoundException;
 import com.gongwen.assistant.draft.DraftRepository;
 import com.gongwen.assistant.draft.DraftService;
+import com.gongwen.assistant.draft.node.DraftNode;
+import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
+import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialDto;
 import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.material.MaterialSaveCommand;
@@ -14,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -22,6 +26,7 @@ class AiLocalOperationServiceTest {
     private final InMemoryDraftRepository draftRepository = new InMemoryDraftRepository();
     private final InMemoryMaterialRepository materialRepository = new InMemoryMaterialRepository();
     private final InMemoryTraceRepository traceRepository = new InMemoryTraceRepository();
+    private final InMemoryDraftNodeRepository draftNodeRepository = new InMemoryDraftNodeRepository();
 
     @Test
     void generatesSuggestionWithoutSavingDraftBlocks() {
@@ -70,13 +75,43 @@ class AiLocalOperationServiceTest {
         assertThat(draftRepository.replaceCalls).isZero();
     }
 
+    @Test
+    void targetsDraftNodeBeforeLegacyBlockAndDoesNotSaveSuggestion() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "旧块正文", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(12L, draft.id(), "BODY", "正文", "节点正文", 30));
+        AiLocalOperationService service = newService();
+
+        AiLocalOperationResponse response = service.generateSuggestion(draft.id(), new AiLocalOperationRequest(
+                null,
+                12L,
+                "BODY",
+                "正文",
+                "节点正文",
+                AiLocalOperationType.REWRITE,
+                "突出责任"
+        ));
+
+        assertThat(response.targetBlockId()).isNull();
+        assertThat(response.targetNodeId()).isEqualTo(12L);
+        assertThat(response.targetNodeRole()).isEqualTo("BODY");
+        assertThat(response.suggestionText()).contains("REWRITE", "节点正文", "突出责任");
+        assertThat(draftRepository.replaceCalls).isZero();
+        assertThat(draftNodeRepository.updateCalls).isZero();
+        assertThat(traceRepository.saved.inputSummary()).contains("targetNodeId=12", "targetNodeRole=BODY", "operationType=REWRITE");
+        assertThat(traceRepository.saved.inputSummary()).doesNotContain("节点正文");
+    }
+
     private AiLocalOperationService newService() {
         return new AiLocalOperationService(
                 new DraftService(draftRepository),
                 materialRepository,
                 new PromptBuilder(),
                 new LocalOperationModelAdapter(),
-                traceRepository
+                traceRepository,
+                draftNodeRepository
         );
     }
 
@@ -167,6 +202,55 @@ class AiLocalOperationServiceTest {
                 sorted.add(new DraftBlockDto(blockId++, block.blockType(), block.content(), block.sortOrder()));
             }
             return sorted;
+        }
+    }
+
+    private static DraftNode draftNode(long id, long draftId, String role, String title, String content, int sortOrder) {
+        return new DraftNode(
+                id,
+                draftId,
+                1L,
+                "node-" + id,
+                null,
+                "PARAGRAPH",
+                role,
+                role.toLowerCase(),
+                title,
+                content,
+                sortOrder,
+                "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                null,
+                null
+        );
+    }
+
+    private static final class InMemoryDraftNodeRepository implements DraftNodeRepository {
+        private List<DraftNode> nodes = List.of();
+        private int updateCalls;
+
+        @Override
+        public List<DraftNode> findByDraftId(long draftId) {
+            return nodes.stream()
+                    .filter(node -> node.draftId() == draftId)
+                    .toList();
+        }
+
+        @Override
+        public boolean existsByDraftId(long draftId) {
+            return !findByDraftId(draftId).isEmpty();
+        }
+
+        @Override
+        public List<DraftNode> replaceForDraft(long draftId, List<DraftNode> nodes) {
+            this.nodes = nodes;
+            return nodes;
+        }
+
+        @Override
+        public Optional<DraftNode> updateContent(long draftId, long nodeId, String content, String status) {
+            updateCalls++;
+            return Optional.empty();
         }
     }
 }

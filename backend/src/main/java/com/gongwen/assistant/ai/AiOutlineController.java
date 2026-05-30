@@ -64,12 +64,15 @@ public class AiOutlineController {
             case "AI_OUTLINE_INSTRUCTION_TOO_LONG",
                  "AI_PARAGRAPH_HEADING_REQUIRED",
                  "AI_PARAGRAPH_INSTRUCTION_TOO_LONG",
+                 "AI_PARAGRAPH_NODE_ROLE_UNSUPPORTED",
                  "AI_LOCAL_TARGET_REQUIRED",
                  "AI_LOCAL_OPERATION_REQUIRED",
                  "AI_LOCAL_INSTRUCTION_TOO_LONG",
                  "AI_LOCAL_TARGET_NOT_FOUND",
                  "AI_LOCAL_TARGET_NOT_BODY",
-                 "AI_LOCAL_TARGET_EMPTY" -> HttpStatus.BAD_REQUEST;
+                 "AI_LOCAL_TARGET_EMPTY",
+                 "AI_LOCAL_TARGET_LOCKED",
+                 "AI_NODE_TARGET_NOT_FOUND" -> HttpStatus.BAD_REQUEST;
             case "AI_MODEL_UNAVAILABLE", "AI_RESPONSE_INVALID" -> HttpStatus.BAD_GATEWAY;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };

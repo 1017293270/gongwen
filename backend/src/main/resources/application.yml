@@ -34,6 +34,12 @@ gongwen:
     max-file-size-bytes: ${GONGWEN_MATERIAL_MAX_FILE_SIZE_BYTES:20971520}
   export:
     storage-dir: ${GONGWEN_EXPORT_STORAGE_DIR:storage/exports}
+  render-preview:
+    storage-dir: ${GONGWEN_RENDER_PREVIEW_STORAGE_DIR:storage/previews}
+    renderer: ${GONGWEN_RENDER_PREVIEW_RENDERER:libreoffice}
+    libre-office-path: ${GONGWEN_LIBREOFFICE_PATH:soffice}
+    dpi: ${GONGWEN_RENDER_PREVIEW_DPI:150}
+    timeout-seconds: ${GONGWEN_RENDER_PREVIEW_TIMEOUT_SECONDS:60}
   security:
     bootstrap-admin:
       username: ${GONGWEN_BOOTSTRAP_ADMIN_USERNAME:admin}

@@ -6,6 +6,9 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftNotFoundException;
 import com.gongwen.assistant.draft.DraftRepository;
 import com.gongwen.assistant.draft.DraftService;
+import com.gongwen.assistant.draft.node.DraftNode;
+import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
+import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialDto;
 import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.material.MaterialSaveCommand;
@@ -14,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,6 +25,7 @@ class AiParagraphServiceTest {
     private final InMemoryDraftRepository draftRepository = new InMemoryDraftRepository();
     private final InMemoryMaterialRepository materialRepository = new InMemoryMaterialRepository();
     private final InMemoryTraceRepository traceRepository = new InMemoryTraceRepository();
+    private final InMemoryDraftNodeRepository draftNodeRepository = new InMemoryDraftNodeRepository();
 
     @Test
     void generatesParagraphAndSavesItAsDraftBlock() {
@@ -95,6 +100,62 @@ class AiParagraphServiceTest {
                 .isEqualTo("二、工作安排：说明安排。");
     }
 
+    @Test
+    void writesGeneratedParagraphToTargetDraftNodeWithoutChangingRole() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(10L, draft.id(), "BODY", "正文", "", 30));
+        AiParagraphService service = newService();
+
+        AiParagraphResponse response = service.generateParagraph(draft.id(), new AiParagraphRequest(
+                "一、主要事项",
+                List.of("节点化生成"),
+                "",
+                30,
+                10L,
+                "BODY",
+                "正文",
+                "旧节点内容"
+        ));
+
+        assertThat(response.node()).isNotNull();
+        assertThat(response.node().id()).isEqualTo(10L);
+        assertThat(response.node().role()).isEqualTo("BODY");
+        assertThat(response.node().status()).isEqualTo("AI_GENERATED");
+        assertThat(response.node().content()).contains("一、主要事项", "节点化生成");
+        assertThat(draftNodeRepository.updatedRole).isEqualTo("BODY");
+        assertThat(traceRepository.saved.inputSummary()).contains("nodeId=10", "nodeRole=BODY", "nodeContextChars=");
+        assertThat(traceRepository.saved.inputSummary()).doesNotContain("旧节点内容");
+        assertThat(traceRepository.saved.outputSummary()).contains("nodeId=10", "nodeRole=BODY");
+    }
+
+    @Test
+    void rejectsProtectedTargetNodeForParagraphGeneration() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(11L, draft.id(), "TITLE", "标题", "测试通知", 10));
+        AiParagraphService service = newService();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.generateParagraph(draft.id(), new AiParagraphRequest(
+                "一、主要事项",
+                List.of("不得改标题"),
+                "",
+                30,
+                11L,
+                "TITLE",
+                "标题",
+                "测试通知"
+        )))
+                .isInstanceOf(AiOutlineException.class)
+                .hasMessageContaining("段落生成不能直接改写标题");
+
+        assertThat(draftNodeRepository.updateCalls).isZero();
+    }
+
     private AiParagraphService newService() {
         return newService(new ParagraphModelAdapter());
     }
@@ -105,7 +166,8 @@ class AiParagraphServiceTest {
                 materialRepository,
                 new PromptBuilder(),
                 modelAdapter,
-                traceRepository
+                traceRepository,
+                draftNodeRepository
         );
     }
 
@@ -224,6 +286,85 @@ class AiParagraphServiceTest {
                 sorted.add(new DraftBlockDto(blockId++, block.blockType(), block.content(), block.sortOrder()));
             }
             return sorted;
+        }
+    }
+
+    private static DraftNode draftNode(long id, long draftId, String role, String title, String content, int sortOrder) {
+        return new DraftNode(
+                id,
+                draftId,
+                1L,
+                "node-" + id,
+                null,
+                "PARAGRAPH",
+                role,
+                role.toLowerCase(),
+                title,
+                content,
+                sortOrder,
+                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                null,
+                null
+        );
+    }
+
+    private static final class InMemoryDraftNodeRepository implements DraftNodeRepository {
+        private List<DraftNode> nodes = List.of();
+        private int updateCalls;
+        private String updatedRole;
+
+        @Override
+        public List<DraftNode> findByDraftId(long draftId) {
+            return nodes.stream()
+                    .filter(node -> node.draftId() == draftId)
+                    .toList();
+        }
+
+        @Override
+        public boolean existsByDraftId(long draftId) {
+            return !findByDraftId(draftId).isEmpty();
+        }
+
+        @Override
+        public List<DraftNode> replaceForDraft(long draftId, List<DraftNode> nodes) {
+            this.nodes = nodes;
+            return nodes;
+        }
+
+        @Override
+        public Optional<DraftNode> updateContent(long draftId, long nodeId, String content, String status) {
+            updateCalls++;
+            Optional<DraftNode> existing = findByDraftId(draftId).stream()
+                    .filter(node -> node.id() == nodeId)
+                    .findFirst();
+            existing.ifPresent(node -> updatedRole = node.role());
+            DraftNode updated = existing
+                    .map(node -> new DraftNode(
+                            node.id(),
+                            node.draftId(),
+                            node.structureMappingProfileId(),
+                            node.templateNodeKey(),
+                            node.parentTemplateNodeKey(),
+                            node.nodeType(),
+                            node.role(),
+                            node.slotKey(),
+                            node.title(),
+                            content,
+                            node.sortOrder(),
+                            status,
+                            node.formatOverride(),
+                            node.createdAt(),
+                            node.updatedAt()
+                    ))
+                    .orElse(null);
+            if (updated == null) {
+                return Optional.empty();
+            }
+            nodes = nodes.stream()
+                    .map(node -> node.id() == nodeId ? updated : node)
+                    .toList();
+            return Optional.of(updated);
         }
     }
 }

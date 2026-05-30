@@ -1,6 +1,7 @@
 import type {
   AiLocalOperation,
   AiLocalOperationType,
+  AiNodeRequestContext,
   AiOutline,
   AiParagraph,
   AiOutlineSection,
@@ -11,7 +12,10 @@ import type {
   AuthUser,
   CreateDocumentTypeRequest,
   Department,
+  DocumentRenderPreview,
+  DocumentStructureProfile,
   DocumentType,
+  DraftNode,
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
@@ -19,7 +23,10 @@ import type {
   ExportRecordSummary,
   Material,
   QualityCheckResult,
+  StructureMappingItem,
+  StructureMappingProfile,
   TemplateProfile,
+  TemplateDocumentKind,
   TemplateStructureFormatting,
   TemplateStructureFormattingOverrides,
   TemplateSummary,
@@ -265,6 +272,24 @@ export function saveDraftBlocks(draftId: number, blocks: DraftBlockUpdate[]) {
   });
 }
 
+export function initializeDraftNodes(draftId: number) {
+  return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes/initialize`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function listDraftNodes(draftId: number) {
+  return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes`);
+}
+
+export function saveDraftNode(draftId: number, nodeId: number, content: string, status: string) {
+  return requestJson<DraftNode>(`/api/drafts/${draftId}/nodes/${nodeId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ content, status }),
+  });
+}
+
 export function updateDraftTemplateVersion(draftId: number, templateVersionId: number | null) {
   return requestJson<DraftDetail>(`/api/drafts/${draftId}/template-version`, {
     method: 'PUT',
@@ -303,6 +328,51 @@ export function uploadTemplateVersion(templateId: number, file: File) {
 
 export function getTemplateProfile(templateVersionId: number) {
   return requestJson<TemplateProfile>(`/api/templates/versions/${templateVersionId}/profile`);
+}
+
+export function getDocumentStructureProfile(templateVersionId: number) {
+  return requestJson<DocumentStructureProfile>(`/api/templates/versions/${templateVersionId}/structure-profile`);
+}
+
+export function getTemplateDocumentKind(templateVersionId: number) {
+  return requestJson<TemplateDocumentKind>(`/api/templates/versions/${templateVersionId}/document-kind`);
+}
+
+export function getRenderPreview(templateVersionId: number) {
+  return requestJson<DocumentRenderPreview>(`/api/templates/versions/${templateVersionId}/render-preview`);
+}
+
+export function requestRenderPreview(templateVersionId: number) {
+  return requestJson<DocumentRenderPreview>(`/api/templates/versions/${templateVersionId}/render-preview`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function getRenderPreviewPageUrl(previewId: number, pageNumber: number) {
+  return `${apiBaseUrl()}/api/render-previews/${previewId}/pages/${pageNumber}`;
+}
+
+export function getStructureMapping(templateVersionId: number) {
+  return requestJson<StructureMappingProfile>(`/api/templates/versions/${templateVersionId}/structure-mapping`);
+}
+
+export function saveStructureMappingDraft(
+  templateVersionId: number,
+  baseMappingProfileId: number | null,
+  items: StructureMappingItem[],
+) {
+  return requestJson<StructureMappingProfile>(`/api/templates/versions/${templateVersionId}/structure-mapping/draft`, {
+    method: 'PUT',
+    body: JSON.stringify({ baseMappingProfileId, items }),
+  });
+}
+
+export function publishStructureMapping(templateVersionId: number, adminOverride = false) {
+  return requestJson<StructureMappingProfile>(`/api/templates/versions/${templateVersionId}/structure-mapping/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ adminOverride }),
+  });
 }
 
 export function getTemplateStructureFormatting(templateVersionId: number) {
@@ -346,8 +416,11 @@ export function generateDraftParagraph(
   section: AiOutlineSection,
   instruction: string,
   sortOrder: number,
-  signal?: AbortSignal,
+  nodeContextOrSignal?: AiNodeRequestContext | AbortSignal,
+  maybeSignal?: AbortSignal,
 ) {
+  const signal = isAbortSignal(nodeContextOrSignal) ? nodeContextOrSignal : maybeSignal;
+  const nodeContext = isAbortSignal(nodeContextOrSignal) ? undefined : nodeContextOrSignal;
   return requestJson<AiParagraph>(`/api/drafts/${draftId}/ai/paragraph`, {
     method: 'POST',
     signal,
@@ -356,26 +429,32 @@ export function generateDraftParagraph(
       points: section.points,
       instruction,
       sortOrder,
+      ...nodeContext,
     }),
   });
 }
 
 export function generateLocalOperation(
   draftId: number,
-  targetBlockId: number,
+  target: number | (AiNodeRequestContext & { targetBlockId?: number }),
   operationType: AiLocalOperationType,
   instruction: string,
   signal?: AbortSignal,
 ) {
+  const targetPayload = typeof target === 'number' ? { targetBlockId: target } : target;
   return requestJson<AiLocalOperation>(`/api/drafts/${draftId}/ai/local-operation`, {
     method: 'POST',
     signal,
     body: JSON.stringify({
-      targetBlockId,
+      ...targetPayload,
       operationType,
       instruction,
     }),
   });
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return typeof value === 'object' && value !== null && 'aborted' in value && 'addEventListener' in value;
 }
 
 export function runQualityCheck(draftId: number, signal?: AbortSignal) {

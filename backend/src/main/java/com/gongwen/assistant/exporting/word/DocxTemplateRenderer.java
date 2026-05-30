@@ -1,9 +1,11 @@
 package com.gongwen.assistant.exporting.word;
 
 import com.gongwen.assistant.template.parser.DocxPlaceholderParser;
+import com.gongwen.assistant.template.profile.TemplateLineSpacingProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
 import com.gongwen.assistant.template.profile.TemplateStructureProfile;
+import org.apache.poi.xwpf.usermodel.LineSpacingRule;
 import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -287,7 +289,9 @@ public class DocxTemplateRenderer {
         if (formatting.spacingAfter() != null) {
             paragraph.setSpacingAfter(formatting.spacingAfter());
         }
-        if (formatting.spacingBetween() != null) {
+        if (formatting.lineSpacing() != null) {
+            applyLineSpacing(paragraph, formatting.lineSpacing());
+        } else if (formatting.spacingBetween() != null) {
             paragraph.setSpacingBetween(formatting.spacingBetween() / 100.0d);
         }
 
@@ -296,8 +300,38 @@ public class DocxTemplateRenderer {
         }
     }
 
+    private void applyLineSpacing(XWPFParagraph paragraph, TemplateLineSpacingProfile lineSpacing) {
+        LineSpacingRule rule = toLineSpacingRule(lineSpacing.mode());
+        if (rule == LineSpacingRule.AUTO && lineSpacing.multipleHundred() != null) {
+            paragraph.setSpacingBetween(lineSpacing.multipleHundred() / 100.0d, rule);
+        } else if (lineSpacing.valueTwips() != null) {
+            paragraph.setSpacingBetween(lineSpacing.valueTwips() / 20.0d, rule);
+        }
+    }
+
+    private LineSpacingRule toLineSpacingRule(String mode) {
+        if (mode == null || mode.isBlank()) {
+            return LineSpacingRule.AUTO;
+        }
+        return switch (mode.trim().toUpperCase()) {
+            case "EXACT" -> LineSpacingRule.EXACT;
+            case "AT_LEAST" -> LineSpacingRule.AT_LEAST;
+            default -> LineSpacingRule.AUTO;
+        };
+    }
+
     private void applyRunFormatting(XWPFRun run, TemplateStructureFormattingProfile formatting) {
-        if (formatting.fontFamily() != null && !formatting.fontFamily().isBlank()) {
+        boolean appliedSpecificFonts = false;
+        if (formatting.eastAsiaFontFamily() != null && !formatting.eastAsiaFontFamily().isBlank()) {
+            run.setFontFamily(formatting.eastAsiaFontFamily(), XWPFRun.FontCharRange.eastAsia);
+            appliedSpecificFonts = true;
+        }
+        if (formatting.latinFontFamily() != null && !formatting.latinFontFamily().isBlank()) {
+            run.setFontFamily(formatting.latinFontFamily(), XWPFRun.FontCharRange.ascii);
+            run.setFontFamily(formatting.latinFontFamily(), XWPFRun.FontCharRange.hAnsi);
+            appliedSpecificFonts = true;
+        }
+        if (!appliedSpecificFonts && formatting.fontFamily() != null && !formatting.fontFamily().isBlank()) {
             run.setFontFamily(formatting.fontFamily());
         }
         if (formatting.fontSizeHalfPoints() != null && formatting.fontSizeHalfPoints() > 0) {
