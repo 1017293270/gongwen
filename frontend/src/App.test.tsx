@@ -813,6 +813,74 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '运行质检确认' })).toBeEnabled();
   });
 
+  it('saves a selected node format override and marks preview as outdated', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('节点格式草稿'), templateVersionId: 9 };
+    const nodeRows = sampleDraftNodes();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/103/format-override') && init?.method === 'PUT') {
+        const payload = JSON.parse(String(init.body));
+        expect(payload).toEqual(expect.objectContaining({
+          eastAsiaFont: 'KaiTi',
+          fontSizePt: 18,
+          alignment: 'CENTER',
+          firstLineIndentTwip: 560,
+        }));
+        return Promise.resolve(jsonResponse({
+          ...nodeRows[2],
+          status: 'FORMAT_OVERRIDDEN',
+          formatOverride: {
+            ...nodeRows[2].formatOverride,
+            eastAsiaFont: 'KaiTi',
+            fontSizePt: 18,
+            alignment: 'CENTER',
+            firstLineIndentTwip: 560,
+          },
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+
+    await userEvent.type(screen.getByLabelText('中文字体'), 'KaiTi');
+    await userEvent.clear(screen.getByLabelText('字号'));
+    await userEvent.type(screen.getByLabelText('字号'), '18');
+    await userEvent.selectOptions(screen.getByLabelText('对齐方式'), 'CENTER');
+    await userEvent.clear(screen.getByLabelText('首行缩进'));
+    await userEvent.type(screen.getByLabelText('首行缩进'), '560');
+    await userEvent.click(screen.getByRole('button', { name: '保存格式' }));
+
+    expect(await screen.findByText('真实预览待刷新')).toBeInTheDocument();
+    const editor = await within(screen.getByLabelText('公文预览')).findByLabelText(/编辑段落：节点事项/) as HTMLTextAreaElement;
+    expect(editor.style.fontFamily).toContain('KaiTi');
+    expect(editor.style.fontSize).toBe('18pt');
+    expect(editor.style.textAlign).toBe('center');
+  });
+
   it('expands the selected paragraph editor to fit its content', async () => {
     Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
       configurable: true,

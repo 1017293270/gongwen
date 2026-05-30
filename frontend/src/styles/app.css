@@ -2275,6 +2275,40 @@ textarea.field {
   padding-top: var(--space-3);
 }
 
+.node-format-panel {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-3);
+}
+
+.node-format-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.node-format-checkbox {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.node-format-checkbox input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+}
+
+.node-format-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .quality-check {
   display: grid;
   gap: var(--space-3);
@@ -3427,6 +3461,7 @@ button.template-card:disabled {
   .template-profile-grid,
   .template-parse-workspace,
   .template-kind-grid,
+  .node-format-grid,
   .template-structure-item,
   .template-dimension-grid {
     grid-template-columns: 1fr;

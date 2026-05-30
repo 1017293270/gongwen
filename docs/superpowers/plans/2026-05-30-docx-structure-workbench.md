@@ -63,7 +63,7 @@ Completion evidence format:
 | T10 | 已完成 | Backend AI Agent | T8 | node-aware AI operations | 未提交（T10 实现） | `.\gradlew.bat --no-daemon --console=plain compileTestJava`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.ai.PromptBuilderTest" --tests "com.gongwen.assistant.ai.AiOutlineServiceTest" --tests "com.gongwen.assistant.ai.AiParagraphServiceTest" --tests "com.gongwen.assistant.ai.AiLocalOperationServiceTest"` | full backend test skipped per lightweight-test instruction; frontend routing still deferred to T11 |
 | T11 | 已完成 | Frontend AI Agent | T9, T10 | right panel context follows selected node | 未提交（T11 实现） | `npm test -- src/App.test.tsx`; `npm run build` | browser screenshot not captured because Browser/node_repl tooling unavailable; focused tests cover node action switching and node-metadata request routing |
 | T12 | 已完成 | Backend Format Agent | T8 | draft node format override backend | 未提交（T12 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"` | export/preview consumers still deferred to T14/T15; frontend format panel deferred to T13 |
-| T13 | 未开始 | Frontend Format Agent | T9, T12 | node-level font and format panel |  |  |  |
+| T13 | 已完成 | Frontend Format Agent | T9, T12 | node-level font and format panel | 未提交（T13 实现） | `npm test -- src/App.test.tsx`; `npm run build` | Browser screenshot not captured because Browser/node_repl tooling unavailable; true DOCX render regeneration remains deferred to T15 |
 | T14 | 未开始 | Backend Export Agent | T6, T8, T12 | export consumes mapping, nodes, and format merge |  |  |  |
 | T15 | 未开始 | Frontend Export Agent | T11, T13, T14 | preview refresh and export status flow |  |  |  |
 | T16 | 未开始 | QA Agent | T1-T15 | fixture suite, regression tests, and docs sync |  |  |  |
@@ -87,6 +87,7 @@ Completion evidence format:
 | 2026-05-31 | T10 | Codex Backend AI Agent | 未提交（T10 实现） | `.\gradlew.bat --no-daemon --console=plain compileTestJava`; `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.ai.PromptBuilderTest" --tests "com.gongwen.assistant.ai.AiOutlineServiceTest" --tests "com.gongwen.assistant.ai.AiParagraphServiceTest" --tests "com.gongwen.assistant.ai.AiLocalOperationServiceTest"` | pass; AI requests now accept optional node metadata, outline returns node-level suggestions without applying changes, paragraph generation can write a target `DraftNode`, and local operation targets nodes before legacy blocks | first focused run exposed a null-node compatibility bug in old paragraph requests; fixed and reran passing; full backend test skipped per lightweight-test instruction |
 | 2026-05-31 | T11 | Codex Frontend AI Agent | 未提交（T11 实现） | `npm test -- src/App.test.tsx`; `npm run build` | pass; right-panel AI context now follows the selected workbench node, local operation requests send `nodeId/nodeRole/nodeTitle/nodeContext` for persisted nodes, and legacy `targetBlockId` paragraph fallback remains compatible | visual browser screenshot not captured because Browser/node_repl tooling was unavailable; full frontend suite beyond `App.test.tsx` skipped per lightweight-test instruction |
 | 2026-05-31 | T12 | Codex Backend Format Agent | 未提交（T12 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeFormatOverrideTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest" --tests "com.gongwen.assistant.template.profile.TemplateEffectiveFormattingServiceTest"` | pass; draft nodes can save and clear local format overrides, endpoints enforce draft access through `DraftService`, and formatting merge priority is covered in `TemplateEffectiveFormattingServiceTest` | first RED run failed on missing service/merge/repository methods as expected; full backend suite skipped per lightweight-test instruction |
+| 2026-05-31 | T13 | Codex Frontend Format Agent | 未提交（T13 实现） | `npm test -- src/App.test.tsx`; `npm run build` | pass; right panel now has a node format panel, saves T12 format overrides, merges saved formatting into the structured editor immediately, and marks true preview as outdated | first frontend RED run failed on missing `中文字体` control as expected; full frontend suite beyond `App.test.tsx` skipped per lightweight-test instruction |
 
 ## Agent File Boundaries
 
@@ -951,16 +952,16 @@ T12 completion note:
 
 **Dependencies:** T9, T12
 
-- [ ] Add frontend type for node format override matching backend fields.
-- [ ] Add API client methods to save override and restore template default.
-- [ ] Add right-panel format section for selected node.
-- [ ] Include controls for Chinese font, latin font, size, alignment, line spacing, first-line indent, before/after spacing, bold.
-- [ ] Immediately update center structured editor using CSS approximation after save.
-- [ ] Mark true preview status as outdated after format change.
-- [ ] Disable restricted controls for locked template-critical nodes unless user has permission.
-- [ ] Add tests for changing a node font and showing preview outdated state.
-- [ ] Run frontend tests and build.
-- [ ] Update Progress Board row T13 and Progress Log.
+- [x] Add frontend type for node format override matching backend fields.
+- [x] Add API client methods to save override and restore template default.
+- [x] Add right-panel format section for selected node.
+- [x] Include controls for Chinese font, latin font, size, alignment, line spacing, first-line indent, before/after spacing, bold.
+- [x] Immediately update center structured editor using CSS approximation after save.
+- [x] Mark true preview status as outdated after format change.
+- [x] Disable restricted controls for locked template-critical nodes unless user has permission.
+- [x] Add tests for changing a node font and showing preview outdated state.
+- [x] Run frontend tests and build.
+- [x] Update Progress Board row T13 and Progress Log.
 
 **Verification:**
 
@@ -971,6 +972,13 @@ npm run build
 ```
 
 **Completion note required:** list supported format controls and restricted controls.
+
+T13 completion note:
+
+- Supported controls: Chinese font (`eastAsiaFont`), latin font (`latinFont`), font size (`fontSizePt`), bold, alignment, line spacing rule, line spacing value, first-line indent, spacing before, and spacing after.
+- Restricted controls: the whole node format panel is disabled when no persisted draft node is selected, when the selected node is locked, or when the workbench has no loaded draft. This keeps template-critical or static/locked nodes from draft-local formatting edits until a permission model is added.
+- Saving calls T12's `PUT /api/drafts/{draftId}/nodes/{nodeId}/format-override`, updates the local `DraftNode`, immediately merges CSS approximation into the center structured editor, and marks "真实预览待刷新".
+- Restoring calls T12's `DELETE /api/drafts/{draftId}/nodes/{nodeId}/format-override` and also marks true preview as outdated.
 
 ## Task T14: Export Consumes Mapping, Nodes, And Format Merge
 

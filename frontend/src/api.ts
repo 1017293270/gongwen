@@ -16,6 +16,7 @@ import type {
   DocumentStructureProfile,
   DocumentType,
   DraftNode,
+  DraftNodeFormatOverride,
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
@@ -287,6 +288,23 @@ export function saveDraftNode(draftId: number, nodeId: number, content: string, 
   return requestJson<DraftNode>(`/api/drafts/${draftId}/nodes/${nodeId}`, {
     method: 'PUT',
     body: JSON.stringify({ content, status }),
+  });
+}
+
+export function saveDraftNodeFormatOverride(
+  draftId: number,
+  nodeId: number,
+  formatOverride: DraftNodeFormatOverride,
+) {
+  return requestJson<DraftNode>(`/api/drafts/${draftId}/nodes/${nodeId}/format-override`, {
+    method: 'PUT',
+    body: JSON.stringify(formatOverride),
+  });
+}
+
+export function restoreDraftNodeFormatOverride(draftId: number, nodeId: number) {
+  return requestJson<DraftNode>(`/api/drafts/${draftId}/nodes/${nodeId}/format-override`, {
+    method: 'DELETE',
   });
 }
 

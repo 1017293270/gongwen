@@ -71,9 +71,11 @@ import {
   resetUserPassword,
   publishStructureMapping,
   requestRenderPreview,
+  restoreDraftNodeFormatOverride,
   retryExportRecord,
   runQualityCheck,
   saveDraftNode,
+  saveDraftNodeFormatOverride,
   saveDraftBlocks,
   saveStructureMappingDraft,
   testAiProviderConnection,
@@ -97,6 +99,7 @@ import {
   TextareaField,
   TextField,
 } from './components/ui';
+import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
 import type {
   AiLocalOperation,
   AiLocalOperationType,
@@ -110,6 +113,7 @@ import type {
   DocumentStructureProfile,
   DocumentType,
   DraftNode,
+  DraftNodeFormatOverride,
   DraftBlock,
   DraftBlockUpdate,
   DraftDetail,
@@ -355,6 +359,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [localOperationStatus, setLocalOperationStatus] = useState<LocalOperationStatus>('idle');
   const [localOperationError, setLocalOperationError] = useState('');
   const [localOperationSuggestion, setLocalOperationSuggestion] = useState<AiLocalOperation | null>(null);
+  const [nodeFormatStatus, setNodeFormatStatus] = useState<NodeFormatPanelStatus>('idle');
+  const [nodeFormatError, setNodeFormatError] = useState('');
+  const [renderPreviewOutdated, setRenderPreviewOutdated] = useState(false);
   const [qualityCheck, setQualityCheck] = useState<QualityCheckResult | null>(null);
   const [qualityCheckStatus, setQualityCheckStatus] = useState<QualityCheckStatus>('idle');
   const [qualityCheckError, setQualityCheckError] = useState('');
@@ -761,6 +768,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       ?? bodyBlocks.find((block) => block.sortOrder === selectedBodyNode.sortOrder)
       ?? null
     : null;
+  const selectedDraftNode = selectedNode?.draftNodeId
+    ? draftNodes.find((node) => node.id === selectedNode.draftNodeId) ?? null
+    : null;
+  const selectedNodeFormatDisabled = !draft || !selectedNode?.draftNodeId || Boolean(selectedNode.locked);
+  const selectedNodeFormatLabel = selectedNode
+    ? selectedNode.label || workbenchNodeRoleLabel(selectedNode.nodeType)
+    : '未选择';
   const selectedNodeAiContext = aiNodeContextForWorkbenchNode(selectedNode);
   const selectedNodeActionKind = aiActionKindForWorkbenchNode(selectedNode);
   const selectedLocalOperationOptions = useMemo(
@@ -794,6 +808,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const attachmentPreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'ATTACHMENT');
   const signaturePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'SIGNATURE');
   const datePreviewStyle = structurePreviewStyle(selectedTemplateProfile, selectedTemplateOverrides, 'DATE');
+  const titleNodePreviewStyle = mergePreviewStyle(titlePreviewStyle, titleNode?.formatting);
+  const recipientNodePreviewStyle = mergePreviewStyle(recipientPreviewStyle, recipientNode?.formatting);
+  const attachmentNodePreviewStyle = mergePreviewStyle(attachmentPreviewStyle, attachmentNode?.formatting);
+  const signatureNodePreviewStyle = mergePreviewStyle(signaturePreviewStyle, signatureNode?.formatting);
+  const dateNodePreviewStyle = mergePreviewStyle(datePreviewStyle, dateNode?.formatting);
   const templateHeaderStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['HEADER']);
   const templateTopStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['UNIT', 'META']);
   const templateFooterStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['FOOTER']);
@@ -816,6 +835,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   useEffect(() => {
     setLocalOperationError('');
     setLocalOperationSuggestion(null);
+    setNodeFormatStatus('idle');
+    setNodeFormatError('');
   }, [selectedNodeId]);
 
   function handleSidebarNavigate(view: AppView) {
@@ -1592,6 +1613,54 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
+  async function handleSaveNodeFormatOverride(formatOverride: DraftNodeFormatOverride) {
+    if (!draft || !selectedNode?.draftNodeId) {
+      setNodeFormatStatus('error');
+      setNodeFormatError('请先选择可编辑结构节点');
+      return;
+    }
+    try {
+      setNodeFormatStatus('saving');
+      setNodeFormatError('');
+      const updatedNode = await saveDraftNodeFormatOverride(draft.id, selectedNode.draftNodeId, formatOverride);
+      syncGeneratedDraftNodes(undefined, updatedNode);
+      setRenderPreviewOutdated(true);
+      setNodeFormatStatus('saved');
+      setStatus('saved');
+      setStatusMessage('节点格式已保存');
+      showToast({ title: '节点格式已保存', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '节点格式保存失败';
+      setNodeFormatStatus('error');
+      setNodeFormatError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleRestoreNodeFormatOverride() {
+    if (!draft || !selectedNode?.draftNodeId) {
+      setNodeFormatStatus('error');
+      setNodeFormatError('请先选择可编辑结构节点');
+      return;
+    }
+    try {
+      setNodeFormatStatus('restoring');
+      setNodeFormatError('');
+      const updatedNode = await restoreDraftNodeFormatOverride(draft.id, selectedNode.draftNodeId);
+      syncGeneratedDraftNodes(undefined, updatedNode);
+      setRenderPreviewOutdated(true);
+      setNodeFormatStatus('restored');
+      setStatus('saved');
+      setStatusMessage('已恢复模板默认格式');
+      showToast({ title: '已恢复模板默认格式', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '恢复模板默认格式失败';
+      setNodeFormatStatus('error');
+      setNodeFormatError(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
   function handleDiscardLocalOperation() {
     setLocalOperationSuggestion(null);
     setLocalOperationStatus('idle');
@@ -1979,22 +2048,22 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   aria-label="编辑节点：标题"
                   className="document-title-editor"
                   onChange={(event) => updateWorkbenchNodeContent(titleNode, event.target.value)}
-                  style={titlePreviewStyle}
+                  style={titleNodePreviewStyle}
                   value={title}
                 />
               ) : (
-                <h2 className="document-title" style={titlePreviewStyle}>{title}</h2>
+                <h2 className="document-title" style={titleNodePreviewStyle}>{title}</h2>
               )}
               {selectedNodeId === recipientNode?.nodeId ? (
                 <input
                   aria-label="编辑节点：主送"
                   className="document-inline-editor"
                   onChange={(event) => updateWorkbenchNodeContent(recipientNode, event.target.value)}
-                  style={recipientPreviewStyle}
+                  style={recipientNodePreviewStyle}
                   value={recipient}
                 />
               ) : (
-                <p style={recipientPreviewStyle}>{recipient}：</p>
+                <p style={recipientNodePreviewStyle}>{recipient}：</p>
               )}
               {bodySectionNodes.length > 0 ? bodySectionNodes.map((node, index) => (
                 selectedNodeId === node.nodeId ? (
@@ -2004,7 +2073,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                     ref={(element) => {
                       paragraphRefs.current[node.nodeId] = element;
                     }}
-                    style={node.formatting ? formattingToCss(node.formatting) : bodyPreviewStyle}
+                    style={mergePreviewStyle(bodyPreviewStyle, node.formatting)}
                     tabIndex={-1}
                   >
                     <input
@@ -2026,7 +2095,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                           syncParagraphEditorHeight(element);
                         }
                       }}
-                      style={node.formatting ? formattingToCss(node.formatting) : bodyPreviewStyle}
+                      style={mergePreviewStyle(bodyPreviewStyle, node.formatting)}
                       value={node.content}
                     />
                     <Button icon={<Trash2 aria-hidden="true" />} onClick={() => removeBodyNode(node)} variant="ghost">
@@ -2042,7 +2111,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                     ref={(element) => {
                       paragraphRefs.current[node.nodeId] = element;
                     }}
-                    style={node.formatting ? formattingToCss(node.formatting) : bodyPreviewStyle}
+                    style={mergePreviewStyle(bodyPreviewStyle, node.formatting)}
                     type="button"
                   >
                     <span className="visually-hidden">选择正文结构：</span>
@@ -2056,17 +2125,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   aria-label="编辑节点：附件"
                   className="document-inline-editor"
                   onChange={(event) => updateWorkbenchNodeContent(attachmentNode, event.target.value)}
-                  style={attachmentPreviewStyle}
+                  style={attachmentNodePreviewStyle}
                   value={attachment}
                 />
-              ) : <p style={attachmentPreviewStyle}>附件：{attachment}</p>)}
-              <p className="signature" style={signaturePreviewStyle}>
+              ) : <p style={attachmentNodePreviewStyle}>附件：{attachment}</p>)}
+              <p className="signature" style={signatureNodePreviewStyle}>
                 {selectedNodeId === signatureNode?.nodeId ? (
                   <input
                     aria-label="编辑节点：落款"
                     className="document-inline-editor"
                     onChange={(event) => updateWorkbenchNodeContent(signatureNode, event.target.value)}
-                    style={signaturePreviewStyle}
+                    style={signatureNodePreviewStyle}
                     value={signature}
                   />
                 ) : <span>{signature}</span>}
@@ -2076,10 +2145,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                     aria-label="编辑节点：日期"
                     className="document-inline-editor"
                     onChange={(event) => updateWorkbenchNodeContent(dateNode, event.target.value)}
-                    style={datePreviewStyle}
+                    style={dateNodePreviewStyle}
                     value={date}
                   />
-                ) : <span style={datePreviewStyle}>{date}</span>}
+                ) : <span style={dateNodePreviewStyle}>{date}</span>}
               </p>
               {templateUnknownStructures.length > 0 && (
                 <div className="document-template-region document-template-extra" aria-label="模板未映射结构">
@@ -2190,6 +2259,16 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               {exportError && <StatusMessage title={exportError} tone="warning" />}
               {exportStatus === 'success' && !exportError && <StatusMessage title="已生成 Word 文件，可打开和模板对比。" tone="success" />}
             </div>
+            <NodeFormatPanel
+              disabled={selectedNodeFormatDisabled}
+              error={nodeFormatError}
+              formatOverride={selectedDraftNode?.formatOverride ?? null}
+              nodeLabel={selectedNodeFormatLabel}
+              onRestore={() => void handleRestoreNodeFormatOverride()}
+              onSave={(formatOverride) => void handleSaveNodeFormatOverride(formatOverride)}
+              previewOutdated={renderPreviewOutdated}
+              status={nodeFormatStatus}
+            />
             </div>
             <div className="local-operation" aria-label="局部段落操作">
               <div className="local-operation-header">
@@ -6368,6 +6447,16 @@ function structurePreviewStyle(
     return {};
   }
   return formattingToCss({ ...structure.formatting, ...(overrides[structure.structureKey] ?? {}) });
+}
+
+function mergePreviewStyle(
+  baseStyle: CSSProperties,
+  formatting: Partial<TemplateStructureFormatting> | undefined,
+): CSSProperties {
+  if (!formatting) {
+    return baseStyle;
+  }
+  return { ...baseStyle, ...formattingToCss(formatting) };
 }
 
 function templateStructuresByType(

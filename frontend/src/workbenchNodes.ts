@@ -139,8 +139,8 @@ function formattingFromDraftNode(node: DraftNode): Partial<TemplateStructureForm
     indentationFirstLine: override?.firstLineIndentTwip ?? null,
     lineSpacing: override?.lineSpacingRule || override?.lineSpacingTwip ? {
       mode: override.lineSpacingRule ?? 'AUTO',
-      valueTwips: override.lineSpacingTwip ?? null,
-      multipleHundred: null,
+      valueTwips: override.lineSpacingRule === 'AUTO' ? null : override.lineSpacingTwip ?? null,
+      multipleHundred: override.lineSpacingRule === 'AUTO' || !override.lineSpacingRule ? override.lineSpacingTwip ?? null : null,
     } : null,
     spacingBefore: override?.spacingBeforeTwip ?? null,
     spacingAfter: override?.spacingAfterTwip ?? null,
