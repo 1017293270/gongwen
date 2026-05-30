@@ -19,6 +19,10 @@ import com.gongwen.assistant.material.MaterialDto;
 import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.material.MaterialSaveCommand;
 import com.gongwen.assistant.template.profile.TemplateProfile;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingItem;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
+import com.gongwen.assistant.template.profile.TemplateAnalysisProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
@@ -31,6 +35,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -229,6 +234,74 @@ class QualityCheckServiceTest {
                 .contains("TEMPLATE_DATE_ALIGNMENT_RISK");
     }
 
+    @Test
+    void addsTemplateErrorsWhenPublishedStructureMappingIsMissing() {
+        long templateVersionId = 44L;
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "缺少映射", List.of(
+                new DraftBlockUpdateRequest("TITLE", "缺少映射", 10),
+                new DraftBlockUpdateRequest("RECIPIENT", "各部门", 20),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "第一段正文", 30),
+                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 90),
+                new DraftBlockUpdateRequest("DATE", "2026年5月29日", 100)
+        ));
+        draftRepository.updateTemplateVersion(draft.id(), templateVersionId);
+        QualityCheckService service = newServiceWithStructureMapping(
+                formattingProfile(
+                        structure("title-1", "TITLE", "CENTER", 0, 0),
+                        structure("body-1", "BODY", "LEFT", 560, 360)
+                ),
+                null
+        );
+
+        QualityCheckResponse response = service.runCheck(draft.id());
+
+        assertThat(response.exportBlocked()).isTrue();
+        assertThat(response.items()).extracting(QualityCheckItem::code)
+                .contains("STRUCTURE_MAPPING_REQUIRED");
+    }
+
+    @Test
+    void addsTemplateErrorsWhenDocumentKindBlocksAutoTemplate() {
+        long templateVersionId = 45L;
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "格式说明", List.of(
+                new DraftBlockUpdateRequest("TITLE", "格式说明", 10),
+                new DraftBlockUpdateRequest("RECIPIENT", "各部门", 20),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "第一段正文", 30),
+                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 90),
+                new DraftBlockUpdateRequest("DATE", "2026年5月29日", 100)
+        ));
+        draftRepository.updateTemplateVersion(draft.id(), templateVersionId);
+        TemplateProfile profile = formattingProfile(
+                structure("title-1", "TITLE", "CENTER", 0, 0),
+                structure("body-1", "BODY", "LEFT", 560, 360)
+        ).withTemplateAnalysis(new TemplateAnalysisProfile(
+                "MANUAL_OR_GUIDE",
+                0.98d,
+                "NOTICE",
+                List.of(),
+                List.of(),
+                "manual",
+                "TEST",
+                "MANUAL_OR_GUIDE",
+                List.of("FORMAT_GUIDE"),
+                "BLOCK_AUTO_TEMPLATE",
+                List.of("manual")
+        ));
+        QualityCheckService service = newServiceWithStructureMapping(
+                profile,
+                publishedMapping(templateVersionId, 66L,
+                        mappingItem("title-1", "TITLE", "TITLE", 10),
+                        mappingItem("body-1", "BODY", "BODY_PARAGRAPH", 20)
+                )
+        );
+
+        QualityCheckResponse response = service.runCheck(draft.id());
+
+        assertThat(response.exportBlocked()).isTrue();
+        assertThat(response.items()).extracting(QualityCheckItem::code)
+                .contains("TEMPLATE_DOCUMENT_KIND_BLOCKED");
+    }
+
     private QualityCheckService newService() {
         return new QualityCheckService(
                 new DraftService(draftRepository),
@@ -257,6 +330,24 @@ class QualityCheckServiceTest {
                 new FixedTemplateProfileRepository(profile),
                 new FixedTemplateStructureFormattingRepository(overrides),
                 new TemplateEffectiveFormattingService()
+        );
+    }
+
+    private QualityCheckService newServiceWithStructureMapping(
+            TemplateProfile profile,
+            StructureMappingProfile mapping
+    ) {
+        return new QualityCheckService(
+                new DraftService(draftRepository),
+                materialRepository,
+                new PromptBuilder(),
+                new QualityModelAdapter(),
+                traceRepository,
+                qualityCheckRepository,
+                new FixedTemplateProfileRepository(profile),
+                emptyTemplateStructureFormattingRepository,
+                new TemplateEffectiveFormattingService(),
+                new FixedStructureMappingRepository(mapping)
         );
     }
 
@@ -300,6 +391,30 @@ class QualityCheckServiceTest {
                         0
                 )
         );
+    }
+
+    private static StructureMappingProfile publishedMapping(
+            long templateVersionId,
+            long mappingProfileId,
+            StructureMappingItem... items
+    ) {
+        return new StructureMappingProfile(
+                mappingProfileId,
+                templateVersionId,
+                1,
+                "PUBLISHED",
+                List.of(items),
+                List.of(),
+                0,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private static StructureMappingItem mappingItem(String nodeKey, String role, String slotKey, int sortOrder) {
+        return new StructureMappingItem(nodeKey, role, slotKey, "CONFIRMED", "USER", 1.0d, "", sortOrder);
     }
 
     private static class QualityModelAdapter implements ModelAdapter {
@@ -499,6 +614,30 @@ class QualityCheckServiceTest {
                 String structureKey,
                 TemplateStructureFormattingProfile formatting
         ) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private record FixedStructureMappingRepository(StructureMappingProfile mapping) implements StructureMappingRepository {
+        @Override
+        public StructureMappingProfile save(StructureMappingProfile profile, com.gongwen.assistant.security.CurrentUser currentUser) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<StructureMappingProfile> findLatest(long templateVersionId) {
+            return Optional.ofNullable(mapping);
+        }
+
+        @Override
+        public Optional<StructureMappingProfile> findLatestByStatus(long templateVersionId, String status) {
+            return Optional.ofNullable(mapping)
+                    .filter(profile -> profile.templateVersionId() == templateVersionId)
+                    .filter(profile -> status.equals(profile.status()));
+        }
+
+        @Override
+        public int nextVersionNo(long templateVersionId) {
             throw new UnsupportedOperationException();
         }
     }

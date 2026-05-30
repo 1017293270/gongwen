@@ -4,6 +4,15 @@ import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftBlockUpdateRequest;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftRepository;
+import com.gongwen.assistant.documentstructure.DocumentNode;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingItem;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
+import com.gongwen.assistant.draft.node.DraftNode;
+import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
+import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import com.gongwen.assistant.quality.QualityCheckItem;
 import com.gongwen.assistant.quality.QualityCheckRecord;
@@ -14,7 +23,9 @@ import com.gongwen.assistant.template.TemplateRepository;
 import com.gongwen.assistant.template.TemplateSummary;
 import com.gongwen.assistant.template.TemplateVersion;
 import com.gongwen.assistant.template.TemplateVersionRepository;
+import com.gongwen.assistant.template.profile.TemplateAnalysisProfile;
 import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
+import com.gongwen.assistant.template.profile.TemplateLineSpacingProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
@@ -270,6 +281,211 @@ class DraftWordExportServiceTest {
     }
 
     @Test
+    void exportsFromDraftNodesAndMergesDraftNodeFormattingWithoutMutatingTemplateDefaults() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE, PLACEHOLDER_BODY);
+        Path templatePath = tempDir.resolve("node-export-template.docx");
+        Files.write(templatePath, templateBytes);
+        long draftId = 31L;
+        long templateVersionId = 9L;
+        long mappingProfileId = 55L;
+        TemplateStructureFormattingProfile templateBodyFormatting = new TemplateStructureFormattingProfile(
+                "FangSong",
+                32,
+                false,
+                "LEFT",
+                420,
+                360,
+                0,
+                0,
+                null,
+                "FangSong",
+                "Times New Roman",
+                new TemplateLineSpacingProfile("AUTO", null, 180)
+        );
+        TemplateProfile profile = new TemplateProfile(
+                1,
+                List.of(
+                        structure("title-1", "TITLE", "CENTER", 0, 0),
+                        new TemplateStructureProfile(
+                                "body-1",
+                                "BODY",
+                                "Body",
+                                "Body preview",
+                                "PARAGRAPH",
+                                null,
+                                null,
+                                "PROFILE",
+                                templateBodyFormatting
+                        )
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("title-1", "TITLE", "TITLE", 10),
+                mappingItem("body-1", "BODY", "BODY_PARAGRAPH", 20)
+        );
+        List<DraftNode> nodes = List.of(
+                draftNode(101L, draftId, mappingProfileId, "title-1", "TITLE", "TITLE", "节点标题", 10, DraftNodeFormatOverride.empty()),
+                draftNode(
+                        102L,
+                        draftId,
+                        mappingProfileId,
+                        "body-1",
+                        "BODY",
+                        "BODY_PARAGRAPH",
+                        "节点正文第一段",
+                        20,
+                        new DraftNodeFormatOverride("KaiTi", "Arial", 18.0, null, null, 560, "AUTO", 150, null, null)
+                )
+        );
+        CapturingWordExportService wordExportService = new CapturingWordExportService();
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Legacy draft")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                wordExportService,
+                new FixedQualityCheckRepository(qualityCheck(false, "")),
+                null,
+                new FixedDraftNodeRepository(nodes),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("title-1", "body-1"))
+        );
+
+        service.exportDraft(draftId);
+
+        assertThat(wordExportService.lastRequest.values().get("标题")).isEqualTo("节点标题");
+        assertThat(wordExportService.lastRequest.values().get("正文"))
+                .contains("节点正文第一段")
+                .doesNotContain("Meeting time", "Headquarters conference room");
+        ExportFormattingContext formatting = wordExportService.lastRequest.formatting();
+        assertThat(formatting.body().eastAsiaFontFamily()).isEqualTo("KaiTi");
+        assertThat(formatting.body().latinFontFamily()).isEqualTo("Arial");
+        assertThat(formatting.body().fontSizeHalfPoints()).isEqualTo(36);
+        assertThat(formatting.body().indentationFirstLine()).isEqualTo(560);
+        assertThat(formatting.body().lineSpacing().mode()).isEqualTo("AUTO");
+        assertThat(formatting.body().lineSpacing().multipleHundred()).isEqualTo(150);
+        assertThat(templateBodyFormatting.eastAsiaFontFamily()).isEqualTo("FangSong");
+        assertThat(templateBodyFormatting.lineSpacing().multipleHundred()).isEqualTo(180);
+        assertThat(wordExportService.lastRequest.traceSnapshot().structureMappingProfileId()).isEqualTo(mappingProfileId);
+        assertThat(wordExportService.lastRequest.traceSnapshot().structureMappingVersion()).isEqualTo(1);
+        assertThat(wordExportService.lastRequest.traceSnapshot().structureProfileSnapshot()).isNotNull();
+        assertThat(wordExportService.lastRequest.traceSnapshot().mappingProfileSnapshot()).isSameAs(mapping);
+        assertThat(wordExportService.lastRequest.traceSnapshot().formattingSnapshot()).isSameAs(formatting);
+        assertThat(wordExportService.lastRequest.traceSnapshot().nodeSnapshot()).isInstanceOf(List.class);
+    }
+
+    @Test
+    void blocksExportWhenPublishedMappingIsMissing() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE);
+        Path templatePath = tempDir.resolve("missing-mapping-template.docx");
+        Files.write(templatePath, templateBytes);
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(32L, 9L, "Missing mapping")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(emptyProfile()),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                new FixedQualityCheckRepository(qualityCheck(false, "")),
+                null,
+                new FixedDraftNodeRepository(List.of()),
+                new FixedStructureMappingRepository(null),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("title-1", "body-1"))
+        );
+
+        assertThatThrownBy(() -> service.exportDraft(32L))
+                .isInstanceOf(WordExportException.class)
+                .satisfies(error -> assertThat(((WordExportException) error).errorCode())
+                        .isEqualTo("STRUCTURE_MAPPING_REQUIRED"));
+    }
+
+    @Test
+    void blocksExportWhenDocumentKindDisallowsAutoTemplate() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE);
+        Path templatePath = tempDir.resolve("manual-template.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = emptyProfile().withTemplateAnalysis(new TemplateAnalysisProfile(
+                "MANUAL_OR_GUIDE",
+                0.99d,
+                "NOTICE",
+                List.of(),
+                List.of(),
+                "manual",
+                "TEST",
+                "MANUAL_OR_GUIDE",
+                List.of("FORMAT_GUIDE"),
+                "BLOCK_AUTO_TEMPLATE",
+                List.of("manual")
+        ));
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(33L, 9L, "Manual kind")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                new FixedQualityCheckRepository(qualityCheck(false, "")),
+                null,
+                new FixedDraftNodeRepository(List.of()),
+                new FixedStructureMappingRepository(publishedMapping(9L, 56L,
+                        mappingItem("title-1", "TITLE", "TITLE", 10),
+                        mappingItem("body-1", "BODY", "BODY_PARAGRAPH", 20)
+                )),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("title-1", "body-1"))
+        );
+
+        assertThatThrownBy(() -> service.exportDraft(33L))
+                .isInstanceOf(WordExportException.class)
+                .satisfies(error -> assertThat(((WordExportException) error).errorCode())
+                        .isEqualTo("DOCUMENT_KIND_EXPORT_BLOCKED"));
+    }
+
+    @Test
+    void blocksExportWhenRequiredMappedSlotIsEmpty() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE, PLACEHOLDER_BODY);
+        Path templatePath = tempDir.resolve("empty-node-template.docx");
+        Files.write(templatePath, templateBytes);
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(34L, 9L, "Empty node")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(emptyProfile()),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                new FixedQualityCheckRepository(qualityCheck(false, "")),
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(201L, 34L, 57L, "title-1", "TITLE", "TITLE", "节点标题", 10, DraftNodeFormatOverride.empty()),
+                        draftNode(202L, 34L, 57L, "body-1", "BODY", "BODY_PARAGRAPH", "", 20, DraftNodeFormatOverride.empty())
+                )),
+                new FixedStructureMappingRepository(publishedMapping(9L, 57L,
+                        mappingItem("title-1", "TITLE", "TITLE", 10),
+                        mappingItem("body-1", "BODY", "BODY_PARAGRAPH", 20)
+                )),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("title-1", "body-1"))
+        );
+
+        assertThatThrownBy(() -> service.exportDraft(34L))
+                .isInstanceOf(WordExportException.class)
+                .satisfies(error -> {
+                    WordExportException exception = (WordExportException) error;
+                    assertThat(exception.errorCode()).isEqualTo("EXPORT_REQUIRED_SLOT_EMPTY");
+                    assertThat(exception.getMessage()).contains("BODY");
+                });
+    }
+
+    @Test
     void blocksExportWhenLatestQualityCheckBlocksExport() throws Exception {
         byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE);
         Path templatePath = tempDir.resolve("quality-blocked-template.docx");
@@ -375,6 +591,107 @@ class DraftWordExportServiceTest {
 
     private static TemplateProfile emptyProfile() {
         return new TemplateProfile(1, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+    }
+
+    private static TemplateStructureProfile structure(
+            String key,
+            String type,
+            String alignment,
+            Integer indentationFirstLine,
+            Integer spacingBetween
+    ) {
+        return new TemplateStructureProfile(
+                key,
+                type,
+                type,
+                type + " preview",
+                "PARAGRAPH",
+                null,
+                null,
+                "PROFILE",
+                new TemplateStructureFormattingProfile(
+                        "FangSong",
+                        32,
+                        false,
+                        alignment,
+                        indentationFirstLine,
+                        spacingBetween,
+                        0,
+                        0
+                )
+        );
+    }
+
+    private static StructureMappingProfile publishedMapping(
+            long templateVersionId,
+            long mappingProfileId,
+            StructureMappingItem... items
+    ) {
+        return new StructureMappingProfile(
+                mappingProfileId,
+                templateVersionId,
+                1,
+                "PUBLISHED",
+                List.of(items),
+                List.of(),
+                0,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private static StructureMappingItem mappingItem(String nodeKey, String role, String slotKey, int sortOrder) {
+        return new StructureMappingItem(nodeKey, role, slotKey, "CONFIRMED", "USER", 1.0d, "", sortOrder);
+    }
+
+    private static DraftNode draftNode(
+            long id,
+            long draftId,
+            long mappingProfileId,
+            String nodeKey,
+            String role,
+            String slotKey,
+            String content,
+            int sortOrder,
+            DraftNodeFormatOverride formatOverride
+    ) {
+        return new DraftNode(
+                id,
+                draftId,
+                mappingProfileId,
+                nodeKey,
+                null,
+                "PARAGRAPH",
+                role,
+                slotKey,
+                role,
+                content,
+                sortOrder,
+                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
+                formatOverride,
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private static DocumentStructureProfile documentStructureProfile(String... nodeKeys) {
+        List<DocumentNode> nodes = List.of(nodeKeys).stream()
+                .map(nodeKey -> new DocumentNode(
+                        nodeKey,
+                        null,
+                        "PARAGRAPH",
+                        "UNKNOWN",
+                        nodeKey,
+                        nodeKey,
+                        List.of(nodeKeys).indexOf(nodeKey),
+                        "/" + nodeKey,
+                        null,
+                        List.of()
+                ))
+                .toList();
+        return new DocumentStructureProfile(1, "hash", "document-structure-v1", nodes, List.of(), List.of(), List.of(), Instant.now());
     }
 
     private static QualityCheckResponse qualityCheck(boolean exportBlocked, String message) {
@@ -566,6 +883,68 @@ class DraftWordExportServiceTest {
         @Override
         public Optional<QualityCheckResponse> findLatestByDraftId(long draftId) {
             return Optional.ofNullable(response);
+        }
+    }
+
+    private record FixedDraftNodeRepository(List<DraftNode> nodes) implements DraftNodeRepository {
+        @Override
+        public List<DraftNode> findByDraftId(long draftId) {
+            return nodes.stream()
+                    .filter(node -> node.draftId() == draftId)
+                    .toList();
+        }
+
+        @Override
+        public boolean existsByDraftId(long draftId) {
+            return !findByDraftId(draftId).isEmpty();
+        }
+
+        @Override
+        public List<DraftNode> replaceForDraft(long draftId, List<DraftNode> nodes) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<DraftNode> updateContent(long draftId, long nodeId, String content, String status) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private record FixedStructureMappingRepository(StructureMappingProfile mapping) implements StructureMappingRepository {
+        @Override
+        public StructureMappingProfile save(StructureMappingProfile profile, com.gongwen.assistant.security.CurrentUser currentUser) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<StructureMappingProfile> findLatest(long templateVersionId) {
+            return Optional.ofNullable(mapping);
+        }
+
+        @Override
+        public Optional<StructureMappingProfile> findLatestByStatus(long templateVersionId, String status) {
+            return Optional.ofNullable(mapping)
+                    .filter(profile -> profile.templateVersionId() == templateVersionId)
+                    .filter(profile -> status.equals(profile.status()));
+        }
+
+        @Override
+        public int nextVersionNo(long templateVersionId) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private record FixedDocumentStructureProfileRepository(
+            DocumentStructureProfile profile
+    ) implements DocumentStructureProfileRepository {
+        @Override
+        public void save(long templateVersionId, DocumentStructureProfile profile) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<DocumentStructureProfile> findByTemplateVersionId(long templateVersionId) {
+            return Optional.ofNullable(profile);
         }
     }
 

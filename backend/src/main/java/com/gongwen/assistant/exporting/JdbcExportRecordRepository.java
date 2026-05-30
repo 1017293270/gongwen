@@ -1,6 +1,9 @@
 package com.gongwen.assistant.exporting;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gongwen.assistant.security.CurrentUser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -11,9 +14,16 @@ import java.util.Optional;
 @Repository
 public class JdbcExportRecordRepository implements ExportRecordRepository {
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
     public JdbcExportRecordRepository(JdbcTemplate jdbcTemplate) {
+        this(jdbcTemplate, new ObjectMapper());
+    }
+
+    @Autowired
+    public JdbcExportRecordRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -31,8 +41,14 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
                             file_path,
                             status,
                             error_code,
-                            error_message
-                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            error_message,
+                            structure_mapping_profile_id,
+                            structure_mapping_version,
+                            structure_profile_snapshot_json,
+                            mapping_profile_snapshot_json,
+                            formatting_snapshot_json,
+                            node_snapshot_json
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), cast(? as jsonb))
                         """,
                 record.templateId(),
                 record.templateVersionId(),
@@ -45,7 +61,13 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
                 record.filePath(),
                 record.status(),
                 record.errorCode(),
-                record.errorMessage());
+                record.errorMessage(),
+                record.traceSnapshot().structureMappingProfileId(),
+                record.traceSnapshot().structureMappingVersion(),
+                toJson(record.traceSnapshot().structureProfileSnapshot()),
+                toJson(record.traceSnapshot().mappingProfileSnapshot()),
+                toJson(record.traceSnapshot().formattingSnapshot()),
+                toJson(record.traceSnapshot().nodeSnapshot()));
     }
 
     @Override
@@ -168,5 +190,16 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
             return new Object[]{recordId};
         }
         return new Object[]{recordId, currentUser.id()};
+    }
+
+    private String toJson(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("Unable to serialize export trace snapshot", exception);
+        }
     }
 }

@@ -3,6 +3,12 @@ package com.gongwen.assistant.exporting;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftRepository;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
+import com.gongwen.assistant.draft.node.DraftNode;
+import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.quality.QualityCheckItem;
 import com.gongwen.assistant.quality.QualityCheckRepository;
 import com.gongwen.assistant.quality.QualityCheckResponse;
@@ -18,6 +24,7 @@ import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
+import com.gongwen.assistant.template.profile.TemplateStructureProfile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +36,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -40,6 +49,9 @@ public class DraftWordExportService {
     private static final String PLACEHOLDER_SIGNATURE = "\u843d\u6b3e";
     private static final String PLACEHOLDER_DATE = "\u65e5\u671f";
     private static final String PLACEHOLDER_BODY = "\u6b63\u6587";
+    private static final Set<String> DISALLOWED_DOCUMENT_KINDS =
+            Set.of("MANUAL_OR_GUIDE", "POLICY_OR_REGULATION", "ORDINARY_DOCUMENT");
+    private static final Set<String> REQUIRED_MAPPING_ROLES = Set.of("TITLE", "BODY");
     private static final Pattern CHINESE_DATE_LINE_PATTERN = Pattern.compile("^\\d{4}\u5e74\\d{1,2}\u6708\\d{1,2}\u65e5$");
 
     private final DraftRepository draftRepository;
@@ -51,6 +63,9 @@ public class DraftWordExportService {
     private final WordExportService wordExportService;
     private final QualityCheckRepository qualityCheckRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final DraftNodeRepository draftNodeRepository;
+    private final StructureMappingRepository structureMappingRepository;
+    private final DocumentStructureProfileRepository documentStructureProfileRepository;
 
     public DraftWordExportService(
             DraftRepository draftRepository,
@@ -70,6 +85,36 @@ public class DraftWordExportService {
                 templateEffectiveFormattingService,
                 wordExportService,
                 null,
+                null,
+                null,
+                null,
+                null
+        );
+    }
+
+    public DraftWordExportService(
+            DraftRepository draftRepository,
+            TemplateVersionRepository templateVersionRepository,
+            TemplateRepository templateRepository,
+            TemplateProfileRepository templateProfileRepository,
+            TemplateStructureFormattingRepository templateStructureFormattingRepository,
+            TemplateEffectiveFormattingService templateEffectiveFormattingService,
+            WordExportService wordExportService,
+            QualityCheckRepository qualityCheckRepository,
+            CurrentUserProvider currentUserProvider
+    ) {
+        this(
+                draftRepository,
+                templateVersionRepository,
+                templateRepository,
+                templateProfileRepository,
+                templateStructureFormattingRepository,
+                templateEffectiveFormattingService,
+                wordExportService,
+                qualityCheckRepository,
+                currentUserProvider,
+                null,
+                null,
                 null
         );
     }
@@ -84,7 +129,10 @@ public class DraftWordExportService {
             TemplateEffectiveFormattingService templateEffectiveFormattingService,
             WordExportService wordExportService,
             QualityCheckRepository qualityCheckRepository,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            DraftNodeRepository draftNodeRepository,
+            StructureMappingRepository structureMappingRepository,
+            DocumentStructureProfileRepository documentStructureProfileRepository
     ) {
         this.draftRepository = draftRepository;
         this.templateVersionRepository = templateVersionRepository;
@@ -95,6 +143,9 @@ public class DraftWordExportService {
         this.wordExportService = wordExportService;
         this.qualityCheckRepository = qualityCheckRepository;
         this.currentUserProvider = currentUserProvider;
+        this.draftNodeRepository = draftNodeRepository;
+        this.structureMappingRepository = structureMappingRepository;
+        this.documentStructureProfileRepository = documentStructureProfileRepository;
     }
 
     public WordExportResult exportDraft(long draftId) {
@@ -127,7 +178,15 @@ public class DraftWordExportService {
                 .orElse(new TemplateSummary(version.templateId(), "\u516c\u6587\u6a21\u677f", draft.documentTypeCode(), "ACTIVE"));
 
         TemplateProfile profile = templateProfile(templateVersionId);
+        ensureDocumentKindAllowsExport(profile);
+        ExportStructureContext structureContext = exportStructureContext(templateVersionId);
         ensureQualityCheckAllowsExport(draft.id());
+        List<DraftNode> draftNodes = draftNodes(draft.id());
+        Map<String, TemplateStructureFormattingProfile> structureOverrides =
+                templateStructureFormattingRepository.findOverrides(templateVersionId);
+        ExportFormattingContext formattingContext = exportFormattingContext(profile, structureOverrides, draftNodes);
+        Map<String, String> values = draftValues(draft, draftNodes);
+        ensureRequiredSlots(values, structureContext.mappingProfile());
 
         return wordExportService.export(readTemplateBytes(version.filePath()), WordExportRequest.draftExport(
                 template.templateName(),
@@ -137,9 +196,10 @@ public class DraftWordExportService {
                 draft.id(),
                 currentUser == null ? null : currentUser.id(),
                 currentUser == null ? null : currentUser.departmentId(),
-                draftValues(draft),
-                exportFormattingContext(templateVersionId, profile),
-                profile
+                values,
+                formattingContext,
+                profile,
+                traceSnapshot(structureContext, formattingContext, draftNodes)
         ));
     }
 
@@ -181,10 +241,122 @@ public class DraftWordExportService {
                 ));
     }
 
-    private ExportFormattingContext exportFormattingContext(long templateVersionId, TemplateProfile profile) {
-        Map<String, TemplateStructureFormattingProfile> overrides =
-                templateStructureFormattingRepository.findOverrides(templateVersionId);
-        return templateEffectiveFormattingService.resolve(profile, overrides);
+    private void ensureDocumentKindAllowsExport(TemplateProfile profile) {
+        if (profile == null || profile.templateAnalysis() == null) {
+            return;
+        }
+        String documentKind = profile.templateAnalysis().documentKind();
+        if (!DISALLOWED_DOCUMENT_KINDS.contains(documentKind)) {
+            return;
+        }
+        String warning = profile.templateAnalysis().blockingWarnings().stream()
+                .findFirst()
+                .orElse("该文件类型不允许直接自动套版导出。");
+        throw new WordExportException(
+                "DOCUMENT_KIND_EXPORT_BLOCKED",
+                "导出已阻断：" + warning,
+                null
+        );
+    }
+
+    private ExportStructureContext exportStructureContext(long templateVersionId) {
+        if (structureMappingRepository == null) {
+            return ExportStructureContext.EMPTY;
+        }
+        StructureMappingProfile mapping = structureMappingRepository
+                .findLatestByStatus(templateVersionId, "PUBLISHED")
+                .orElseThrow(() -> new WordExportException(
+                        "STRUCTURE_MAPPING_REQUIRED",
+                        "发布映射前必须确认模板结构映射。",
+                        null
+                ));
+        DocumentStructureProfile structureProfile = documentStructureProfileRepository == null
+                ? null
+                : documentStructureProfileRepository.findByTemplateVersionId(templateVersionId).orElse(null);
+        ensureRequiredMappingRoles(mapping);
+        return new ExportStructureContext(structureProfile, mapping);
+    }
+
+    private void ensureRequiredMappingRoles(StructureMappingProfile mapping) {
+        Set<String> confirmedRoles = mapping.items().stream()
+                .filter(item -> "CONFIRMED".equalsIgnoreCase(item.status()))
+                .map(item -> normalizeRole(item.role()))
+                .collect(Collectors.toSet());
+        List<String> missing = REQUIRED_MAPPING_ROLES.stream()
+                .filter(role -> !confirmedRoles.contains(role))
+                .sorted()
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new WordExportException(
+                    "STRUCTURE_MAPPING_REQUIRED_SLOT_MISSING",
+                    "发布映射缺少必需结构槽位：" + String.join(", ", missing),
+                    null
+            );
+        }
+    }
+
+    private List<DraftNode> draftNodes(long draftId) {
+        if (draftNodeRepository == null) {
+            return List.of();
+        }
+        return draftNodeRepository.findByDraftId(draftId).stream()
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+    }
+
+    private ExportFormattingContext exportFormattingContext(
+            TemplateProfile profile,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides,
+            List<DraftNode> draftNodes
+    ) {
+        Map<String, TemplateStructureFormattingProfile> safeOverrides =
+                structureOverrides == null ? Map.of() : structureOverrides;
+        ExportFormattingContext base = templateEffectiveFormattingService.resolve(profile, safeOverrides);
+        if (draftNodes == null || draftNodes.isEmpty()) {
+            return base;
+        }
+        return new ExportFormattingContext(
+                nodeFormatting(profile, safeOverrides, base.title(), draftNodes, "TITLE"),
+                nodeFormatting(profile, safeOverrides, base.recipient(), draftNodes, "RECIPIENT"),
+                nodeFormatting(profile, safeOverrides, base.body(), draftNodes, "BODY"),
+                nodeFormatting(profile, safeOverrides, base.signature(), draftNodes, "SIGNATURE"),
+                nodeFormatting(profile, safeOverrides, base.date(), draftNodes, "DATE")
+        );
+    }
+
+    private TemplateStructureFormattingProfile nodeFormatting(
+            TemplateProfile profile,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides,
+            TemplateStructureFormattingProfile baseSlotFormatting,
+            List<DraftNode> draftNodes,
+            String role
+    ) {
+        Optional<DraftNode> node = draftNodes.stream()
+                .filter(candidate -> role.equals(normalizeRole(candidate.role())))
+                .findFirst();
+        if (node.isEmpty()) {
+            return baseSlotFormatting;
+        }
+        TemplateStructureFormattingProfile original = structureFormatting(profile, node.get().templateNodeKey())
+                .orElse(baseSlotFormatting);
+        TemplateStructureFormattingProfile merged = templateEffectiveFormattingService.resolveDraftNodeFormatting(
+                null,
+                null,
+                original,
+                structureOverrides.get(node.get().templateNodeKey()),
+                node.get().formatOverride()
+        );
+        return merged == null ? baseSlotFormatting : merged;
+    }
+
+    private Optional<TemplateStructureFormattingProfile> structureFormatting(TemplateProfile profile, String nodeKey) {
+        if (profile == null || nodeKey == null || nodeKey.isBlank()) {
+            return Optional.empty();
+        }
+        return profile.structures().stream()
+                .filter(structure -> nodeKey.equals(structure.structureKey()))
+                .findFirst()
+                .map(TemplateStructureProfile::formatting);
     }
 
     private byte[] readTemplateBytes(String filePath) {
@@ -197,6 +369,13 @@ public class DraftWordExportService {
                     exception
             );
         }
+    }
+
+    private Map<String, String> draftValues(DraftDetailDto draft, List<DraftNode> nodes) {
+        if (nodes != null && !nodes.isEmpty()) {
+            return draftNodeValues(draft, nodes);
+        }
+        return draftValues(draft);
     }
 
     private Map<String, String> draftValues(DraftDetailDto draft) {
@@ -223,6 +402,116 @@ public class DraftWordExportService {
         putValue(values, "DATE", PLACEHOLDER_DATE, firstNonBlank(date, cleanedBody.date()));
         putValue(values, "BODY_PARAGRAPH", PLACEHOLDER_BODY, cleanedBody.body());
         return values;
+    }
+
+    private Map<String, String> draftNodeValues(DraftDetailDto draft, List<DraftNode> nodes) {
+        Map<String, String> values = new HashMap<>();
+        List<DraftNode> sortedNodes = nodes.stream()
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        String title = firstNodeValue(sortedNodes, "TITLE", draft.title());
+        String recipient = firstNodeValue(sortedNodes, "RECIPIENT", "");
+        String attachment = joinedNodeValues(sortedNodes, Set.of("ATTACHMENT_NOTE", "ATTACHMENT"));
+        String signature = firstNodeValue(sortedNodes, "SIGNATURE", "");
+        String date = firstNodeValue(sortedNodes, "DATE", "");
+        List<String> bodyLines = sortedNodes.stream()
+                .filter(this::isBodyNode)
+                .map(DraftNode::content)
+                .filter(content -> content != null && !content.isBlank())
+                .flatMap(content -> content.lines())
+                .toList();
+        CleanedBody cleanedBody = cleanBodyLines(bodyLines, recipient, attachment, signature, date);
+
+        putValue(values, "TITLE", PLACEHOLDER_TITLE, title);
+        putValue(values, "RECIPIENT", PLACEHOLDER_RECIPIENT, firstNonBlank(recipient, cleanedBody.recipient()));
+        putValue(values, "ATTACHMENT", PLACEHOLDER_ATTACHMENT, firstNonBlank(attachment, cleanedBody.attachment()));
+        putValue(values, "SIGNATURE", PLACEHOLDER_SIGNATURE, firstNonBlank(signature, cleanedBody.signature()));
+        putValue(values, "DATE", PLACEHOLDER_DATE, firstNonBlank(date, cleanedBody.date()));
+        putValue(values, "BODY_PARAGRAPH", PLACEHOLDER_BODY, cleanedBody.body());
+        return values;
+    }
+
+    private String firstNodeValue(List<DraftNode> nodes, String role, String fallback) {
+        return nodes.stream()
+                .filter(node -> role.equals(normalizeRole(node.role())))
+                .map(DraftNode::content)
+                .filter(content -> content != null && !content.isBlank())
+                .findFirst()
+                .orElse(fallback);
+    }
+
+    private String joinedNodeValues(List<DraftNode> nodes, Set<String> roles) {
+        return nodes.stream()
+                .filter(node -> roles.contains(normalizeRole(node.role())))
+                .map(DraftNode::content)
+                .filter(content -> content != null && !content.isBlank())
+                .collect(Collectors.joining("\n"));
+    }
+
+    private boolean isBodyNode(DraftNode node) {
+        String role = normalizeRole(node.role());
+        return "BODY".equals(role) || role.startsWith("BODY_HEADING");
+    }
+
+    private void ensureRequiredSlots(Map<String, String> values, StructureMappingProfile mapping) {
+        if (mapping == null) {
+            return;
+        }
+        List<String> emptySlots = REQUIRED_MAPPING_ROLES.stream()
+                .filter(role -> isBlank(valueForRequiredRole(values, role)))
+                .sorted()
+                .toList();
+        if (!emptySlots.isEmpty()) {
+            throw new WordExportException(
+                    "EXPORT_REQUIRED_SLOT_EMPTY",
+                    "导出必填结构槽位为空：" + String.join(", ", emptySlots),
+                    null
+            );
+        }
+    }
+
+    private String valueForRequiredRole(Map<String, String> values, String role) {
+        if ("TITLE".equals(role)) {
+            return values.get("TITLE");
+        }
+        if ("BODY".equals(role)) {
+            return values.get("BODY_PARAGRAPH");
+        }
+        return values.get(role);
+    }
+
+    private ExportTraceSnapshot traceSnapshot(
+            ExportStructureContext structureContext,
+            ExportFormattingContext formatting,
+            List<DraftNode> nodes
+    ) {
+        StructureMappingProfile mapping = structureContext.mappingProfile();
+        return new ExportTraceSnapshot(
+                mapping == null ? null : mapping.mappingProfileId(),
+                mapping == null ? null : mapping.versionNo(),
+                structureContext.structureProfile(),
+                mapping,
+                formatting,
+                nodeSnapshots(nodes)
+        );
+    }
+
+    private List<ExportNodeSnapshot> nodeSnapshots(List<DraftNode> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return List.of();
+        }
+        return nodes.stream()
+                .map(node -> new ExportNodeSnapshot(
+                        node.id(),
+                        node.templateNodeKey(),
+                        node.role(),
+                        node.slotKey(),
+                        node.status(),
+                        node.content() == null ? 0 : node.content().length(),
+                        !isBlank(node.content()),
+                        node.formatOverride()
+                ))
+                .toList();
     }
 
     private String blockValue(DraftDetailDto draft, String blockType, String fallback) {
@@ -339,6 +628,10 @@ public class DraftWordExportService {
         return value == null || value.isBlank();
     }
 
+    private String normalizeRole(String role) {
+        return role == null || role.isBlank() ? "UNKNOWN" : role.strip().toUpperCase();
+    }
+
     private void putValue(Map<String, String> values, String blockType, String placeholder, String content) {
         String normalizedContent = content == null ? "" : content;
         values.put(placeholder, normalizedContent);
@@ -346,5 +639,24 @@ public class DraftWordExportService {
     }
 
     private record CleanedBody(String body, String recipient, String attachment, String signature, String date) {
+    }
+
+    private record ExportStructureContext(
+            DocumentStructureProfile structureProfile,
+            StructureMappingProfile mappingProfile
+    ) {
+        private static final ExportStructureContext EMPTY = new ExportStructureContext(null, null);
+    }
+
+    private record ExportNodeSnapshot(
+            long nodeId,
+            String templateNodeKey,
+            String role,
+            String slotKey,
+            String status,
+            int contentLength,
+            boolean hasContent,
+            Object formatOverride
+    ) {
     }
 }

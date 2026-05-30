@@ -14,6 +14,8 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import com.gongwen.assistant.material.MaterialRepository;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
 import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
 import com.gongwen.assistant.template.profile.TemplatePlaceholderProfile;
 import com.gongwen.assistant.template.profile.TemplateProfile;
@@ -31,10 +33,15 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class QualityCheckService {
     private static final List<String> REQUIRED_BLOCK_TYPES = List.of("TITLE", "RECIPIENT", "SIGNATURE", "DATE");
+    private static final Set<String> DISALLOWED_DOCUMENT_KINDS =
+            Set.of("MANUAL_OR_GUIDE", "POLICY_OR_REGULATION", "ORDINARY_DOCUMENT");
+    private static final Set<String> REQUIRED_MAPPING_ROLES = Set.of("TITLE", "BODY");
 
     private final DraftService draftService;
     private final MaterialRepository materialRepository;
@@ -45,8 +52,8 @@ public class QualityCheckService {
     private final TemplateProfileRepository templateProfileRepository;
     private final TemplateStructureFormattingRepository templateStructureFormattingRepository;
     private final TemplateEffectiveFormattingService templateEffectiveFormattingService;
+    private final StructureMappingRepository structureMappingRepository;
 
-    @Autowired
     public QualityCheckService(
             DraftService draftService,
             MaterialRepository materialRepository,
@@ -58,6 +65,33 @@ public class QualityCheckService {
             TemplateStructureFormattingRepository templateStructureFormattingRepository,
             TemplateEffectiveFormattingService templateEffectiveFormattingService
     ) {
+        this(
+                draftService,
+                materialRepository,
+                promptBuilder,
+                modelAdapter,
+                traceRepository,
+                qualityCheckRepository,
+                templateProfileRepository,
+                templateStructureFormattingRepository,
+                templateEffectiveFormattingService,
+                null
+        );
+    }
+
+    @Autowired
+    public QualityCheckService(
+            DraftService draftService,
+            MaterialRepository materialRepository,
+            PromptBuilder promptBuilder,
+            ModelAdapter modelAdapter,
+            AiGenerationTraceRepository traceRepository,
+            QualityCheckRepository qualityCheckRepository,
+            TemplateProfileRepository templateProfileRepository,
+            TemplateStructureFormattingRepository templateStructureFormattingRepository,
+            TemplateEffectiveFormattingService templateEffectiveFormattingService,
+            StructureMappingRepository structureMappingRepository
+    ) {
         this.draftService = draftService;
         this.materialRepository = materialRepository;
         this.promptBuilder = promptBuilder;
@@ -67,6 +101,7 @@ public class QualityCheckService {
         this.templateProfileRepository = templateProfileRepository;
         this.templateStructureFormattingRepository = templateStructureFormattingRepository;
         this.templateEffectiveFormattingService = templateEffectiveFormattingService;
+        this.structureMappingRepository = structureMappingRepository;
     }
 
     public QualityCheckResponse runCheck(long draftId) {
@@ -201,6 +236,8 @@ public class QualityCheckService {
             ));
         }
         List<QualityCheckItem> items = new ArrayList<>();
+        items.addAll(documentKindItems(profile));
+        items.addAll(structureMappingItems(draft.templateVersionId()));
         for (TemplatePlaceholderProfile placeholder : profile.placeholders()) {
             String blockType = blockTypeForPlaceholder(placeholder.key());
             if (blockType == null) {
@@ -254,6 +291,67 @@ public class QualityCheckService {
         }
         items.addAll(formattingRiskItems(profile, draft.templateVersionId()));
         return items;
+    }
+
+    private List<QualityCheckItem> documentKindItems(TemplateProfile profile) {
+        if (profile.templateAnalysis() == null) {
+            return List.of();
+        }
+        String documentKind = profile.templateAnalysis().documentKind();
+        if (!DISALLOWED_DOCUMENT_KINDS.contains(documentKind)) {
+            return List.of();
+        }
+        String warning = profile.templateAnalysis().blockingWarnings().stream()
+                .findFirst()
+                .orElse("该文件类型不允许直接自动套版导出。");
+        return List.of(new QualityCheckItem(
+                "ERROR",
+                "TEMPLATE",
+                "TEMPLATE_DOCUMENT_KIND_BLOCKED",
+                "当前文件类型不允许直接作为自动套版模板：" + warning,
+                null,
+                null,
+                "请回到模板解析工作台，改用结构映射流程或更换模板文件。"
+        ));
+    }
+
+    private List<QualityCheckItem> structureMappingItems(Long templateVersionId) {
+        if (templateVersionId == null || structureMappingRepository == null) {
+            return List.of();
+        }
+        Optional<StructureMappingProfile> mapping =
+                structureMappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED");
+        if (mapping.isEmpty()) {
+            return List.of(new QualityCheckItem(
+                    "ERROR",
+                    "TEMPLATE_MAPPING",
+                    "STRUCTURE_MAPPING_REQUIRED",
+                    "模板结构映射尚未发布，不能确认标题和正文槽位。",
+                    null,
+                    null,
+                    "请先在模板解析工作台确认并发布结构映射。"
+            ));
+        }
+        Set<String> confirmedRoles = mapping.get().items().stream()
+                .filter(item -> "CONFIRMED".equalsIgnoreCase(item.status()))
+                .map(item -> normalizeRole(item.role()))
+                .collect(Collectors.toSet());
+        List<String> missing = REQUIRED_MAPPING_ROLES.stream()
+                .filter(role -> !confirmedRoles.contains(role))
+                .sorted()
+                .toList();
+        if (missing.isEmpty()) {
+            return List.of();
+        }
+        return List.of(new QualityCheckItem(
+                "ERROR",
+                "TEMPLATE_MAPPING",
+                "STRUCTURE_MAPPING_REQUIRED_SLOT_MISSING",
+                "已发布结构映射缺少必需槽位：" + String.join(", ", missing),
+                null,
+                null,
+                "请补齐标题和正文映射后重新发布。"
+        ));
     }
 
     private List<QualityCheckItem> formattingRiskItems(TemplateProfile profile, Long templateVersionId) {
@@ -435,6 +533,10 @@ public class QualityCheckService {
 
     private String normalizeAlignment(String alignment) {
         return alignment == null ? "" : alignment.strip();
+    }
+
+    private String normalizeRole(String role) {
+        return role == null || role.isBlank() ? "UNKNOWN" : role.strip().toUpperCase();
     }
 
     private List<AiQualitySuggestion> requireAiSuggestions(AiQualityReviewResponse aiResponse) {

@@ -12,10 +12,15 @@ public record ExportRecord(
         String filePath,
         String status,
         String errorCode,
-        String errorMessage
+        String errorMessage,
+        ExportTraceSnapshot traceSnapshot
 ) {
+    public ExportRecord {
+        traceSnapshot = traceSnapshot == null ? ExportTraceSnapshot.EMPTY : traceSnapshot;
+    }
+
     public static ExportRecord success(String templateName, int templateVersion, String fileName) {
-        return new ExportRecord(null, null, templateName, templateVersion, null, null, null, fileName, null, "SUCCESS", null, null);
+        return new ExportRecord(null, null, templateName, templateVersion, null, null, null, fileName, null, "SUCCESS", null, null, null);
     }
 
     public static ExportRecord success(WordExportRequest request, String fileName, String filePath) {
@@ -31,12 +36,13 @@ public record ExportRecord(
                 filePath,
                 "SUCCESS",
                 null,
-                null
+                null,
+                request.traceSnapshot()
         );
     }
 
     public static ExportRecord failure(String templateName, int templateVersion, String fileName, String errorCode, String errorMessage) {
-        return new ExportRecord(null, null, templateName, templateVersion, null, null, null, fileName, null, "FAILED", errorCode, errorMessage);
+        return new ExportRecord(null, null, templateName, templateVersion, null, null, null, fileName, null, "FAILED", errorCode, errorMessage, null);
     }
 
     public static ExportRecord failure(WordExportRequest request, String fileName, String errorCode, String errorMessage) {
@@ -52,7 +58,8 @@ public record ExportRecord(
                 null,
                 "FAILED",
                 errorCode,
-                errorMessage
+                errorMessage,
+                request.traceSnapshot()
         );
     }
 }

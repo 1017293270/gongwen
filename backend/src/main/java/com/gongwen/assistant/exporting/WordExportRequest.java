@@ -15,10 +15,12 @@ public record WordExportRequest(
         Long departmentId,
         Map<String, String> values,
         ExportFormattingContext formatting,
-        TemplateProfile templateProfile
+        TemplateProfile templateProfile,
+        ExportTraceSnapshot traceSnapshot
 ) {
     public WordExportRequest {
         formatting = formatting == null ? ExportFormattingContext.EMPTY : formatting;
+        traceSnapshot = traceSnapshot == null ? ExportTraceSnapshot.EMPTY : traceSnapshot;
     }
 
     public WordExportRequest(
@@ -27,11 +29,11 @@ public record WordExportRequest(
             Map<String, String> values,
             ExportFormattingContext formatting
     ) {
-        this(templateName, templateVersion, null, null, null, null, null, values, formatting, null);
+        this(templateName, templateVersion, null, null, null, null, null, values, formatting, null, null);
     }
 
     public WordExportRequest(String templateName, int templateVersion, Map<String, String> values) {
-        this(templateName, templateVersion, null, null, null, null, null, values, null, null);
+        this(templateName, templateVersion, null, null, null, null, null, values, null, null, null);
     }
 
     public static WordExportRequest draftExport(
@@ -46,6 +48,34 @@ public record WordExportRequest(
             ExportFormattingContext formatting,
             TemplateProfile templateProfile
     ) {
+        return draftExport(
+                templateName,
+                templateVersion,
+                templateId,
+                templateVersionId,
+                draftId,
+                exportedBy,
+                departmentId,
+                values,
+                formatting,
+                templateProfile,
+                null
+        );
+    }
+
+    public static WordExportRequest draftExport(
+            String templateName,
+            int templateVersion,
+            Long templateId,
+            Long templateVersionId,
+            Long draftId,
+            Long exportedBy,
+            Long departmentId,
+            Map<String, String> values,
+            ExportFormattingContext formatting,
+            TemplateProfile templateProfile,
+            ExportTraceSnapshot traceSnapshot
+    ) {
         return new WordExportRequest(
                 templateName,
                 templateVersion,
@@ -56,7 +86,8 @@ public record WordExportRequest(
                 departmentId,
                 values,
                 formatting,
-                templateProfile
+                templateProfile,
+                traceSnapshot
         );
     }
 }
