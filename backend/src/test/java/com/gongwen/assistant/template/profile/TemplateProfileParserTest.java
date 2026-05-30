@@ -80,6 +80,34 @@ class TemplateProfileParserTest {
     }
 
     @Test
+    void classifiesReferenceNoticeSemanticSlotsWithoutTreatingAllBodyStyleParagraphsAsBody() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithNoticeReferenceFormatting());
+
+        assertThat(profile.structures())
+                .extracting(TemplateStructureProfile::structureType)
+                .containsSubsequence("UNIT", "META", "TITLE", "RECIPIENT", "BODY", "BODY", "ATTACHMENT", "SIGNATURE", "DATE");
+
+        TemplateStructureProfile recipient = profile.structures().stream()
+                .filter(structure -> "RECIPIENT".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(recipient.textPreview()).isEqualTo("各部门、各直属单位：");
+        assertThat(recipient.formatting().indentationFirstLine()).isNull();
+
+        TemplateStructureProfile body = profile.structures().stream()
+                .filter(structure -> "BODY".equals(structure.structureType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(body.textPreview()).contains("现将有关事项通知如下");
+        assertThat(body.formatting().indentationFirstLine()).isEqualTo(635);
+
+        assertThat(profile.structures().stream()
+                .filter(structure -> "BODY".equals(structure.structureType()))
+                .map(TemplateStructureProfile::textPreview))
+                .doesNotContain("附件：会议议题征集表", "示例单位办公室", "2026年5月27日");
+    }
+
+    @Test
     void parsesTablePlaceholders() {
         TemplateProfile profile = parser.parse(DocxTestFactory.docxWithTableCell("附件：{{附件}}"));
 

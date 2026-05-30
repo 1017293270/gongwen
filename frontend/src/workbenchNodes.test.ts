@@ -97,4 +97,70 @@ describe('deriveWorkbenchNodes', () => {
     });
     expect(composeBodySectionContent(nodes[0], nodes[0].content)).toBe('一、会议时间\n2026年6月5日上午10:00。');
   });
+
+  it('does not turn reference recipient attachment signature and date paragraphs into body nodes', () => {
+    const referenceProfile = {
+      ...profile(),
+      structures: [
+        {
+          ...profile().structures[0],
+          structureKey: 'title',
+          structureType: 'TITLE',
+          textPreview: '关于召开2026年第二季度行政办公例会的通知',
+          formatting: { ...profile().structures[0].formatting, alignment: 'CENTER', indentationFirstLine: null },
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-recipient',
+          textPreview: '各部门、各直属单位：',
+          formatting: { ...profile().structures[0].formatting, indentationFirstLine: null },
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-intro',
+          textPreview: '为统筹推进近期重点工作，现将有关事项通知如下：',
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-heading',
+          textPreview: '一、会议时间',
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-content',
+          textPreview: '2026年6月3日（星期三）上午9:30。',
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-attachment',
+          textPreview: '附件：会议议题征集表',
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-signature',
+          textPreview: '示例单位办公室',
+          formatting: { ...profile().structures[0].formatting, alignment: 'RIGHT', indentationFirstLine: null },
+        },
+        {
+          ...profile().structures[0],
+          structureKey: 'body-date',
+          textPreview: '2026年5月27日',
+          formatting: { ...profile().structures[0].formatting, alignment: 'RIGHT', indentationFirstLine: null },
+        },
+      ],
+    } satisfies TemplateProfile;
+
+    const nodes = deriveWorkbenchNodes(draft([]), referenceProfile, {});
+
+    const bodyNodes = nodes.filter((node) => node.nodeType === 'BODY_SECTION');
+    expect(bodyNodes).toHaveLength(2);
+    expect(bodyNodes.map((node) => node.content || node.heading)).toEqual([
+      '为统筹推进近期重点工作，现将有关事项通知如下：',
+      '2026年6月3日（星期三）上午9:30。',
+    ]);
+    expect(nodes.find((node) => node.nodeType === 'RECIPIENT')).toMatchObject({ content: '各部门、各直属单位：' });
+    expect(nodes.find((node) => node.nodeType === 'ATTACHMENT')).toMatchObject({ content: '附件：会议议题征集表' });
+    expect(nodes.find((node) => node.nodeType === 'SIGNATURE')).toMatchObject({ content: '示例单位办公室' });
+    expect(nodes.find((node) => node.nodeType === 'DATE')).toMatchObject({ content: '2026年5月27日' });
+  });
 });

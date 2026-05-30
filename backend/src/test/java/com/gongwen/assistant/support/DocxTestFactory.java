@@ -109,6 +109,78 @@ public final class DocxTestFactory {
         }
     }
 
+    public static byte[] docxWithNoticeReferenceFormatting() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            XWPFParagraph unit = document.createParagraph();
+            unit.setStyle("GongwenUnit");
+            unit.setAlignment(ParagraphAlignment.CENTER);
+            XWPFRun unitRun = unit.createRun();
+            unitRun.setFontFamily("SimSun");
+            unitRun.setFontSize(18);
+            unitRun.setBold(true);
+            unitRun.setText("示例单位文件");
+
+            XWPFParagraph meta = document.createParagraph();
+            meta.setStyle("GongwenMeta");
+            meta.setAlignment(ParagraphAlignment.CENTER);
+            XWPFRun metaRun = meta.createRun();
+            metaRun.setFontFamily("FangSong");
+            metaRun.setFontSize(14);
+            metaRun.setText("示例办〔2026〕5号");
+
+            XWPFParagraph title = document.createParagraph();
+            title.setStyle("GongwenTitle");
+            title.setAlignment(ParagraphAlignment.CENTER);
+            title.setSpacingAfter(360);
+            XWPFRun titleRun = title.createRun();
+            titleRun.setFontFamily("SimSun");
+            titleRun.setFontSize(22);
+            titleRun.setBold(true);
+            titleRun.setText("关于召开2026年第二季度行政办公例会的通知");
+
+            XWPFParagraph recipient = bodyParagraph(document, 0, 120, ParagraphAlignment.LEFT);
+            recipient.createRun().setText("各部门、各直属单位：");
+
+            XWPFParagraph intro = bodyParagraph(document, 635, 0, ParagraphAlignment.LEFT);
+            intro.createRun().setText("为统筹推进近期重点工作，现将有关事项通知如下：");
+
+            XWPFParagraph heading = bodyParagraph(document, 635, 0, ParagraphAlignment.LEFT);
+            heading.createRun().setText("一、会议时间");
+
+            XWPFParagraph attachment = bodyParagraph(document, 635, 480, ParagraphAlignment.LEFT);
+            attachment.createRun().setText("附件：会议议题征集表");
+
+            XWPFParagraph signature = bodyParagraph(document, 0, 0, ParagraphAlignment.RIGHT);
+            signature.createRun().setText("示例单位办公室");
+
+            XWPFParagraph date = bodyParagraph(document, 0, 0, ParagraphAlignment.RIGHT);
+            date.createRun().setText("2026年5月27日");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create notice reference docx", exception);
+        }
+    }
+
+    private static XWPFParagraph bodyParagraph(
+            XWPFDocument document,
+            int firstLineIndent,
+            int spacingAfter,
+            ParagraphAlignment alignment
+    ) {
+        XWPFParagraph paragraph = document.createParagraph();
+        paragraph.setStyle("GongwenBody");
+        paragraph.setAlignment(alignment);
+        paragraph.setIndentationFirstLine(firstLineIndent);
+        paragraph.setSpacingAfter(spacingAfter);
+        XWPFRun run = paragraph.createRun();
+        run.setFontFamily("FangSong");
+        run.setFontSize(16);
+        return paragraph;
+    }
+
     public static String readText(byte[] docxBytes) {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes))) {
             StringBuilder text = new StringBuilder();

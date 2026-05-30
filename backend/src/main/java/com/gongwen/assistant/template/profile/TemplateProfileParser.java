@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
 public class TemplateProfileParser {
     private static final int SCHEMA_VERSION = 1;
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{\\{\\s*([^{}]+?)\\s*}}");
+    private static final Pattern CHINESE_DATE_LINE_PATTERN = Pattern.compile("^\\d{4}年\\d{1,2}月\\d{1,2}日$");
 
     public TemplateProfile parse(byte[] docxBytes) {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes))) {
@@ -47,10 +48,7 @@ public class TemplateProfileParser {
 
     private List<TemplateStructureProfile> parseStructures(XWPFDocument document) {
         List<TemplateStructureProfile> structures = new ArrayList<>();
-        for (int index = 0; index < document.getParagraphs().size(); index++) {
-            XWPFParagraph paragraph = document.getParagraphs().get(index);
-            addStructure(structures, paragraph, "PARAGRAPH", "paragraph-" + index);
-        }
+        addMainParagraphStructures(structures, document.getParagraphs());
         for (int tableIndex = 0; tableIndex < document.getTables().size(); tableIndex++) {
             XWPFTable table = document.getTables().get(tableIndex);
             int cellIndex = 0;
@@ -93,6 +91,40 @@ public class TemplateProfileParser {
         return structures;
     }
 
+    private void addMainParagraphStructures(List<TemplateStructureProfile> structures, List<XWPFParagraph> paragraphs) {
+        boolean seenTitle = false;
+        boolean seenBody = false;
+        boolean seenRecipient = false;
+        for (int index = 0; index < paragraphs.size(); index++) {
+            XWPFParagraph paragraph = paragraphs.get(index);
+            String text = normalizeText(paragraph.getText());
+            if (text.isBlank()) {
+                continue;
+            }
+            String inferredType = inferStructureType(paragraph, text, "PARAGRAPH");
+            String type = refineMainParagraphType(
+                    inferredType,
+                    text,
+                    paragraph,
+                    paragraphs,
+                    index,
+                    seenTitle,
+                    seenBody,
+                    seenRecipient
+            );
+            addStructure(structures, paragraph, "PARAGRAPH", "paragraph-" + index, type);
+            if ("TITLE".equals(type)) {
+                seenTitle = true;
+            }
+            if ("BODY".equals(type)) {
+                seenBody = true;
+            }
+            if ("RECIPIENT".equals(type)) {
+                seenRecipient = true;
+            }
+        }
+    }
+
     private void addStructure(
             List<TemplateStructureProfile> structures,
             XWPFParagraph paragraph,
@@ -104,6 +136,20 @@ public class TemplateProfileParser {
             return;
         }
         String type = inferStructureType(paragraph, text, locationType);
+        addStructure(structures, paragraph, locationType, paragraphKey, type);
+    }
+
+    private void addStructure(
+            List<TemplateStructureProfile> structures,
+            XWPFParagraph paragraph,
+            String locationType,
+            String paragraphKey,
+            String type
+    ) {
+        String text = normalizeText(paragraph.getText());
+        if (text.isBlank()) {
+            return;
+        }
         structures.add(new TemplateStructureProfile(
                 paragraphKey,
                 type,
@@ -145,9 +191,6 @@ public class TemplateProfileParser {
         if (containsAny(raw, "主送", "recipient", "{{主送")) {
             return "RECIPIENT";
         }
-        if (containsAny(raw, "正文", "body", "{{正文")) {
-            return "BODY";
-        }
         if (containsAny(raw, "附件", "attachment", "{{附件")) {
             return "ATTACHMENT";
         }
@@ -160,6 +203,9 @@ public class TemplateProfileParser {
         if (containsAny(raw, "文号", "meta", "〔", "号")) {
             return "META";
         }
+        if (containsAny(raw, "正文", "body", "{{正文")) {
+            return "BODY";
+        }
         if (containsAny(raw, "机关", "单位", "unit")) {
             return "UNIT";
         }
@@ -167,6 +213,77 @@ public class TemplateProfileParser {
             return "TABLE";
         }
         return "UNKNOWN";
+    }
+
+    private String refineMainParagraphType(
+            String inferredType,
+            String text,
+            XWPFParagraph paragraph,
+            List<XWPFParagraph> paragraphs,
+            int index,
+            boolean seenTitle,
+            boolean seenBody,
+            boolean seenRecipient
+    ) {
+        if (isDateLine(text) && isRightAligned(paragraph)) {
+            return "DATE";
+        }
+        if (isAttachmentLine(text)) {
+            return "ATTACHMENT";
+        }
+        if (isLikelySignatureLine(text, paragraph, paragraphs, index, seenBody)) {
+            return "SIGNATURE";
+        }
+        if (isLikelyRecipientLine(text, seenTitle, seenBody, seenRecipient)) {
+            return "RECIPIENT";
+        }
+        return inferredType;
+    }
+
+    private boolean isLikelyRecipientLine(String text, boolean seenTitle, boolean seenBody, boolean seenRecipient) {
+        String normalized = text.strip();
+        return seenTitle
+                && !seenBody
+                && !seenRecipient
+                && normalized.length() <= 80
+                && (normalized.endsWith("：") || normalized.endsWith(":"));
+    }
+
+    private boolean isAttachmentLine(String text) {
+        String normalized = text.strip();
+        return normalized.startsWith("附件：") || normalized.startsWith("附件:");
+    }
+
+    private boolean isDateLine(String text) {
+        return CHINESE_DATE_LINE_PATTERN.matcher(text.strip()).matches();
+    }
+
+    private boolean isLikelySignatureLine(
+            String text,
+            XWPFParagraph paragraph,
+            List<XWPFParagraph> paragraphs,
+            int index,
+            boolean seenBody
+    ) {
+        if (!seenBody || text.length() > 40 || isDateLine(text) || !isRightAligned(paragraph)) {
+            return false;
+        }
+        String nextText = nextNonBlankText(paragraphs, index);
+        return nextText != null && isDateLine(nextText);
+    }
+
+    private boolean isRightAligned(XWPFParagraph paragraph) {
+        return paragraph.getAlignment() != null && "RIGHT".equals(paragraph.getAlignment().name());
+    }
+
+    private String nextNonBlankText(List<XWPFParagraph> paragraphs, int index) {
+        for (int cursor = index + 1; cursor < paragraphs.size(); cursor++) {
+            String text = normalizeText(paragraphs.get(cursor).getText());
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+        return null;
     }
 
     private String structureLabel(String type) {

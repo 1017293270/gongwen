@@ -74,12 +74,17 @@ function nodesFromTemplateProfile(
   const nodes: WorkbenchNode[] = [];
   const structures = [...profile.structures].sort((a, b) => aSortOrder(a) - aSortOrder(b));
   let pendingBody: WorkbenchNode | null = null;
+  let seenTitle = false;
+  let seenBody = false;
+  let seenRecipient = false;
 
-  for (const structure of structures) {
+  for (let index = 0; index < structures.length; index += 1) {
+    const structure = structures[index];
     const text = (structure.textPreview ?? '').trim();
     const formatting = mergeFormatting(structure.formatting, overrides[structure.structureKey]);
+    const structureType = semanticStructureType(structure, structures, index, seenTitle, seenBody, seenRecipient);
 
-    if (structure.structureType === 'BODY') {
+    if (structureType === 'BODY') {
       if (isBodyHeadingText(text)) {
         if (pendingBody) {
           nodes.push(pendingBody);
@@ -111,6 +116,7 @@ function nodesFromTemplateProfile(
           formatting,
         });
       }
+      seenBody = true;
       continue;
     }
 
@@ -121,15 +127,21 @@ function nodesFromTemplateProfile(
 
     nodes.push({
       nodeId: `template:${structure.structureKey}`,
-      nodeType: mapStructureType(structure.structureType),
+      nodeType: mapStructureType(structureType),
       templateStructureKey: structure.structureKey,
       sortOrder: aSortOrder(structure),
       label: structure.label || stripTemplateBraces(text) || '模板结构',
       content: stripTemplateBraces(text),
       source: 'TEMPLATE',
-      locked: structure.structureType === 'HEADER' || structure.structureType === 'FOOTER',
+      locked: structureType === 'HEADER' || structureType === 'FOOTER',
       formatting,
     });
+    if (structureType === 'TITLE') {
+      seenTitle = true;
+    }
+    if (structureType === 'RECIPIENT') {
+      seenRecipient = true;
+    }
   }
 
   if (pendingBody) {
@@ -243,6 +255,75 @@ function stripBodyPrefix(text: string) {
 
 function stripTemplateBraces(text: string) {
   return text.replace(/\{\{([^}]+)\}\}/g, '$1').trim();
+}
+
+function semanticStructureType(
+  structure: TemplateProfile['structures'][number],
+  structures: TemplateProfile['structures'],
+  index: number,
+  seenTitle: boolean,
+  seenBody: boolean,
+  seenRecipient: boolean,
+) {
+  const type = structure.structureType;
+  if (type !== 'BODY') {
+    return type;
+  }
+
+  const text = stripTemplateBraces(structure.textPreview ?? '').trim();
+  if (isDateLine(text) && isRightAlignedStructure(structure)) {
+    return 'DATE';
+  }
+  if (isAttachmentLine(text)) {
+    return 'ATTACHMENT';
+  }
+  if (isLikelySignatureLine(text, structure, structures, index, seenBody)) {
+    return 'SIGNATURE';
+  }
+  if (isLikelyRecipientLine(text, seenTitle, seenBody, seenRecipient)) {
+    return 'RECIPIENT';
+  }
+  return type;
+}
+
+function isLikelyRecipientLine(text: string, seenTitle: boolean, seenBody: boolean, seenRecipient: boolean) {
+  return seenTitle && !seenBody && !seenRecipient && text.length <= 80 && /[:：]$/.test(text);
+}
+
+function isAttachmentLine(text: string) {
+  return /^附件[:：]/.test(text);
+}
+
+function isDateLine(text: string) {
+  return /^\d{4}年\d{1,2}月\d{1,2}日$/.test(text);
+}
+
+function isLikelySignatureLine(
+  text: string,
+  structure: TemplateProfile['structures'][number],
+  structures: TemplateProfile['structures'],
+  index: number,
+  seenBody: boolean,
+) {
+  if (!seenBody || text.length > 40 || isDateLine(text) || !isRightAlignedStructure(structure)) {
+    return false;
+  }
+  const nextText = nextNonBlankText(structures, index);
+  return nextText ? isDateLine(nextText) : false;
+}
+
+function isRightAlignedStructure(structure: TemplateProfile['structures'][number]) {
+  return structure.formatting?.alignment?.toUpperCase() === 'RIGHT';
+}
+
+function nextNonBlankText(structures: TemplateProfile['structures'], index: number) {
+  for (let cursor = index + 1; cursor < structures.length; cursor += 1) {
+    const text = stripTemplateBraces(structures[cursor].textPreview ?? '').trim();
+    if (text) {
+      return text;
+    }
+  }
+  return '';
 }
 
 function mergeFormatting(

@@ -22,6 +22,7 @@ public final class TemplateEffectiveFormattingService {
     private static final List<String> BODY_TYPES = List.of("BODY");
     private static final List<String> SIGNATURE_TYPES = List.of("SIGNATURE");
     private static final List<String> DATE_TYPES = List.of("DATE");
+    private static final String BODY_TYPE = "BODY";
 
     public ExportFormattingContext resolve(
             TemplateProfile profile,
@@ -46,12 +47,16 @@ public final class TemplateEffectiveFormattingService {
             List<String> supportedStructureTypes
     ) {
         TemplateStructureProfile firstMatch = null;
+        TemplateStructureProfile preferredDefaultMatch = null;
         for (TemplateStructureProfile structure : profile.structures()) {
             if (!supportedStructureTypes.contains(structure.structureType())) {
                 continue;
             }
             if (firstMatch == null) {
                 firstMatch = structure;
+            }
+            if (preferredDefaultMatch == null && isPreferredDefaultMatch(structure, supportedStructureTypes)) {
+                preferredDefaultMatch = structure;
             }
             if (overrides.containsKey(structure.structureKey())) {
                 return merge(structure.formatting(), overrides.get(structure.structureKey()));
@@ -60,7 +65,21 @@ public final class TemplateEffectiveFormattingService {
         if (firstMatch == null) {
             return null;
         }
-        return merge(firstMatch.formatting(), overrides.get(firstMatch.structureKey()));
+        TemplateStructureProfile selected = preferredDefaultMatch == null ? firstMatch : preferredDefaultMatch;
+        return merge(selected.formatting(), overrides.get(selected.structureKey()));
+    }
+
+    private boolean isPreferredDefaultMatch(
+            TemplateStructureProfile structure,
+            List<String> supportedStructureTypes
+    ) {
+        if (!supportedStructureTypes.contains(BODY_TYPE)) {
+            return false;
+        }
+        TemplateStructureFormattingProfile formatting = structure.formatting();
+        return formatting != null
+                && formatting.indentationFirstLine() != null
+                && formatting.indentationFirstLine() > 0;
     }
 
     private TemplateStructureFormattingProfile merge(

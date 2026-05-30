@@ -103,6 +103,21 @@ class TemplateEffectiveFormattingServiceTest {
     }
 
     @Test
+    void resolvesBodyFormattingFromIndentedBodyWhenFirstBodyLikeStructureIsRecipient() {
+        TemplateProfile profile = templateProfileWithStructures(
+                structure("paragraph-3", "BODY", formatting("FangSong", 32, false, "LEFT", null, null, 0, 120)),
+                structure("paragraph-4", "BODY", formatting("FangSong", 32, false, "LEFT", 635, null, 0, 0)),
+                structure("paragraph-5", "BODY", formatting("FangSong", 32, false, "LEFT", 635, null, 0, 0))
+        );
+
+        ExportFormattingContext context = service.resolve(profile, Map.of());
+
+        assertThat(context.body()).isNotNull();
+        assertThat(context.body().indentationFirstLine()).isEqualTo(635);
+        assertThat(context.body().spacingAfter()).isEqualTo(0);
+    }
+
+    @Test
     void ignoresBlankStringOverridesWhenMergingFormatting() {
         TemplateProfile profile = templateProfileWithStructures(
                 structure("title-1", "TITLE", formatting("FangSong", 44, true, "CENTER", 0, 0, 0, 240))
