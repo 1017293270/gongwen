@@ -259,6 +259,89 @@
 - 导出前阻断测试。
 - 文档和任务状态更新。
 
+## P10E DOCX 结构闭环维护方案
+
+目标：维护“原稿 DOCX -> 结构事实 -> 结构映射 -> DraftNode -> 工作台结构化预览 -> 导出 Word”的闭环，确保未编辑时三者严格对应，编辑时只替换目标节点。
+
+P10E 已进入维护和样本扩展阶段，不应再推翻现有结构。后续 Agent 按以下边界协同：
+
+### Agent A 后端结构
+
+范围：
+
+- 增强 `DocumentStructureExtractor` 的事实抽取能力。
+- 补正文段落、表格单元格段落、页眉页脚、编号、图片、风险节点等 fixtures。
+- 不把语义判断重新混入事实层。
+
+交付必须说明：
+
+- 新增了哪些 fact node 类型或风险码。
+- 是否影响 `DocumentStructureProfile.extractorVersion`。
+- 是否需要迁移或兼容旧 profile。
+
+### Agent B 后端语义
+
+范围：
+
+- 修改 `DocumentSemanticSuggester` 的角色建议。
+- 增强通知、请示、报告、讲话稿等文种启发式规则。
+- 不删除、不跳过、不重排事实节点。
+
+交付必须说明：
+
+- 哪些文本从 `UNKNOWN` 变为建议角色。
+- 哪些误判被降级。
+- 对发布映射必填槽位的影响。
+
+### Agent C 后端 Draft/Export
+
+范围：
+
+- 维护 `DraftNodeService` 初始化和重建逻辑。
+- 维护 `DocxNodeReplacementRenderer` 和 `DraftWordExportService` 原位替换导出。
+- 保持 `UNKNOWN` 节点作为 review 节点，只有 `IGNORE` 可跳过草稿节点。
+
+交付必须说明：
+
+- 是否仍默认走 `ORIGINAL_NODE_REPLACEMENT`。
+- 是否影响旧 `DraftBlock` fallback。
+- 是否影响 `export_record.export_strategy`。
+
+### Agent D 前端 Workbench
+
+范围：
+
+- 维护 `WorkbenchPreview` 和 `WorkbenchStructureTree`。
+- 中间纸面区按持久化节点顺序渲染结构化编辑预览。
+- 不再硬编码为“标题、主送、正文、落款、日期”的固定顺序。
+
+交付必须说明：
+
+- 哪些节点可编辑、哪些节点锁定、哪些节点仅 review。
+- 是否影响“从原稿重建结构”和“保留编辑重建”。
+- 是否影响真实预览刷新状态。
+
+### Agent E QA/文档
+
+范围：
+
+- 维护 `docs/DOCX_ROUNDTRIP_TEST_CASES.md`。
+- 每新增一种文种样例，都补“无编辑闭环”和“编辑单节点”验收用例。
+- 运行自动化和浏览器人工验收，记录无法运行的原因。
+
+P10E DOCX 链路最低验证集：
+
+```powershell
+cd backend
+$env:JAVA_HOME='C:\Users\10172\.jdks\ms-21.0.11'
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
+.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.integration.DocxCompleteStructurePipelineTest"
+
+cd ..\frontend
+npm test -- src/components/workbench/WorkbenchPreview.test.tsx src/workbenchNodes.test.ts src/App.test.tsx
+npm run build
+```
+
 ## 每个 Agent 的交付格式
 
 ```text

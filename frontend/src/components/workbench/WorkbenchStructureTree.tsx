@@ -14,7 +14,7 @@ type WorkbenchStructureTreeProps = {
   reinitializeMessage: string;
   onSelectNode: (nodeId: string) => void;
   onRemoveBodyNode: (node: WorkbenchNode) => void;
-  onReinitialize: () => void;
+  onReinitialize: (preserveUserEditedNodes: boolean) => void;
 };
 
 export function WorkbenchStructureTree({
@@ -36,17 +36,27 @@ export function WorkbenchStructureTree({
           <span className="paragraph-count">{nodes.length} 节点</span>
         </div>
         <div className="workbench-structure-actions">
-          <p>按当前已发布映射重新生成节点，可保留用户已编辑内容。</p>
-          <Button
-            disabled={!canReinitialize || reinitializeStatus === 'running'}
-            icon={<RotateCcw aria-hidden="true" />}
-            isLoading={reinitializeStatus === 'running'}
-            loadingLabel="正在重建结构"
-            onClick={onReinitialize}
-            variant="secondary"
-          >
-            从原稿重建结构
-          </Button>
+          <p>按当前已发布映射重新生成节点。默认使用原稿内容覆盖旧节点；需要保留已有编辑时可单独选择。</p>
+          <div className="workbench-structure-action-row">
+            <Button
+              disabled={!canReinitialize || reinitializeStatus === 'running'}
+              icon={<RotateCcw aria-hidden="true" />}
+              isLoading={reinitializeStatus === 'running'}
+              loadingLabel="正在重建结构"
+              onClick={() => onReinitialize(false)}
+              variant="secondary"
+            >
+              从原稿重建结构
+            </Button>
+            <Button
+              disabled={!canReinitialize || reinitializeStatus === 'running'}
+              icon={<RotateCcw aria-hidden="true" />}
+              onClick={() => onReinitialize(true)}
+              variant="ghost"
+            >
+              保留编辑重建
+            </Button>
+          </div>
         </div>
         {reinitializeMessage && (
           <StatusMessage

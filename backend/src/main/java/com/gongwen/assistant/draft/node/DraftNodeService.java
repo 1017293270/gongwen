@@ -32,7 +32,7 @@ public class DraftNodeService {
             "FORMAT_OVERRIDDEN",
             "LOCKED"
     );
-    private static final Set<String> SKIPPED_ROLES = Set.of("UNKNOWN", "IGNORE");
+    private static final Set<String> SKIPPED_ROLES = Set.of("IGNORE");
     private static final Set<String> PRESERVABLE_REINITIALIZE_STATUSES = Set.of(
             "USER_FILLED",
             "AI_GENERATED",
@@ -103,14 +103,13 @@ public class DraftNodeService {
     ) {
         Map<String, DocumentNode> sourceNodes = structureProfile.nodes().stream()
                 .collect(Collectors.toMap(DocumentNode::nodeKey, Function.identity()));
-        List<StructureMappingItem> confirmedItems = mapping.items().stream()
-                .filter(item -> "CONFIRMED".equals(item.status()))
-                .filter(item -> !SKIPPED_ROLES.contains(item.role()))
+        List<StructureMappingItem> sourceItems = mapping.items().stream()
+                .filter(this::shouldCreateDraftNode)
                 .sorted(Comparator.comparingInt(StructureMappingItem::sortOrder))
                 .toList();
-        Map<String, Long> confirmedRoleCounts = confirmedItems.stream()
+        Map<String, Long> sourceRoleCounts = sourceItems.stream()
                 .collect(Collectors.groupingBy(StructureMappingItem::role, Collectors.counting()));
-        Map<String, String> legacyContent = legacyBlockContent(draft, confirmedRoleCounts);
+        Map<String, String> legacyContent = legacyBlockContent(draft, sourceRoleCounts);
         Map<Integer, String> legacyBodyBySortOrder = legacyBodyBySortOrder(draft);
         Map<String, DraftNode> existingByKeyAndRole = existingNodes.stream()
                 .collect(Collectors.toMap(
@@ -118,7 +117,7 @@ public class DraftNodeService {
                         Function.identity(),
                         (first, ignored) -> first
                 ));
-        return confirmedItems.stream()
+        return sourceItems.stream()
                 .map(item -> toDraftNode(
                         draftId,
                         mapping.mappingProfileId(),
@@ -193,7 +192,7 @@ public class DraftNodeService {
                 title,
                 content,
                 item.sortOrder(),
-                initialStatus(item.role(), content),
+                initialStatus(item, content),
                 DraftNodeFormatOverride.empty(),
                 null,
                 null
@@ -223,10 +222,7 @@ public class DraftNodeService {
             String legacy = legacyContent.getOrDefault(role, "");
             return source.isBlank() ? legacy : source;
         }
-        if ("STATIC_TEXT".equals(role)) {
-            return source;
-        }
-        return "";
+        return source;
     }
 
     private String legacyBodyBySortOrder(StructureMappingItem item, Map<Integer, String> legacyBodyBySortOrder) {
@@ -288,8 +284,8 @@ public class DraftNodeService {
             case "ATTACHMENT_NOTE", "ATTACHMENT_CONTENT" -> "附件";
             case "SIGNATURE" -> "落款";
             case "DATE" -> "日期";
-            case "STATIC_TEXT" -> textPreview(sourceNode);
-            default -> role;
+            case "STATIC_TEXT", "UNKNOWN" -> textPreview(sourceNode);
+            default -> textPreview(sourceNode).isBlank() ? role : textPreview(sourceNode);
         };
     }
 
@@ -301,11 +297,28 @@ public class DraftNodeService {
         return preview == null || preview.isBlank() ? sourceNode.text() : preview;
     }
 
-    private String initialStatus(String role, String content) {
-        if ("STATIC_TEXT".equals(role)) {
+    private boolean shouldCreateDraftNode(StructureMappingItem item) {
+        return item != null
+                && !"IGNORED".equals(item.status())
+                && !SKIPPED_ROLES.contains(item.role());
+    }
+
+    private String initialStatus(StructureMappingItem item, String content) {
+        if ("UNKNOWN".equals(item.role()) || "NEEDS_REVIEW".equals(item.status())) {
+            return "NEEDS_REVIEW";
+        }
+        if ("STATIC_TEXT".equals(item.role()) || !isEditableDraftRole(item.role())) {
             return "LOCKED";
         }
         return content == null || content.isBlank() ? "EMPTY" : "USER_FILLED";
+    }
+
+    private boolean isEditableDraftRole(String role) {
+        return "BODY".equals(role)
+                || role.startsWith("BODY_HEADING_LEVEL_")
+                || isEditableSourceRole(role)
+                || "ATTACHMENT_NOTE".equals(role)
+                || "ATTACHMENT_CONTENT".equals(role);
     }
 
     private Map<String, String> legacyBlockContent(DraftDetailDto draft, Map<String, Long> confirmedRoleCounts) {

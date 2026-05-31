@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -177,12 +178,214 @@ class DocxCompleteStructurePipelineTest {
         }
     }
 
+    @Test
+    void noEditSpeechReferenceKeepsSourceNodesDraftNodesAndExportAligned() throws Exception {
+        SpeechPipeline pipeline = speechPipeline(this::allSourceItems);
+
+        List<DraftNodeDto> initialized = pipeline.nodeService().initializeNodes(pipeline.draftId());
+        List<DocumentNode> sourceNodes = nonIgnoredNodes(pipeline.structure(), pipeline.published());
+
+        assertThat(initialized).extracting(DraftNodeDto::templateNodeKey)
+                .containsExactlyElementsOf(sourceNodes.stream().map(DocumentNode::nodeKey).toList());
+        assertThat(initialized).extracting(DraftNodeDto::content)
+                .containsExactlyElementsOf(sourceNodes.stream().map(node -> node.text().strip()).toList());
+        assertThat(initialized).extracting(DraftNodeDto::role)
+                .contains("UNKNOWN", "STATIC_TEXT");
+
+        WordExportResult exported = pipeline.exportService().exportDraft(pipeline.draftId());
+
+        assertThat(pipeline.exports().savedRecord.traceSnapshot().strategy()).isEqualTo("ORIGINAL_NODE_REPLACEMENT");
+        assertThat(structuralTexts(exported.content())).containsExactlyElementsOf(structuralTexts(pipeline.sourceDocx()));
+    }
+
+    @Test
+    void editedSpeechReferenceReplacesOnlyMappedEditableNodesAndKeepsStaticFacts() throws Exception {
+        SpeechPipeline pipeline = speechPipeline(this::allSourceItems);
+        List<DraftNodeDto> initialized = pipeline.nodeService().initializeNodes(pipeline.draftId());
+
+        DraftNodeDto title = firstNode(initialized, "TITLE");
+        DraftNodeDto firstBody = firstNode(initialized, "BODY");
+        pipeline.nodeService().updateNode(pipeline.draftId(), title.id(), new UpdateDraftNodeRequest("闭环测试标题", "USER_MODIFIED_AFTER_AI"));
+        pipeline.nodeService().updateNode(pipeline.draftId(), firstBody.id(), new UpdateDraftNodeRequest("闭环测试正文", "USER_MODIFIED_AFTER_AI"));
+
+        WordExportResult exported = pipeline.exportService().exportDraft(pipeline.draftId());
+        List<String> exportedTexts = structuralTexts(exported.content());
+
+        assertThat(pipeline.exports().savedRecord.traceSnapshot().strategy()).isEqualTo("ORIGINAL_NODE_REPLACEMENT");
+        assertThat(exportedTexts).contains("闭环测试标题", "闭环测试正文");
+        assertThat(exportedTexts).contains(
+                "政务会议讲话稿测试样例",
+                "文档类型",
+                "内部测试资料",
+                "测试文档 | 讲话稿范文示例"
+        );
+        assertThat(exportedTexts).doesNotContain("在全区重点工作推进会上的讲话");
+    }
+
+    @Test
+    void ignoredSpeechReferenceNodeIsSkippedFromDraftNodesAndClearedOnlyInExport() throws Exception {
+        SpeechPipeline pipeline = speechPipeline(structure -> allSourceItems(structure).stream()
+                .map(item -> nodeText(structure, item.nodeKey()).equals("结束语")
+                        ? new StructureMappingItem(item.nodeKey(), "IGNORE", "", "CONFIRMED", "USER", 1.0d, "", item.sortOrder())
+                        : item)
+                .toList());
+
+        List<DraftNodeDto> initialized = pipeline.nodeService().initializeNodes(pipeline.draftId());
+        WordExportResult exported = pipeline.exportService().exportDraft(pipeline.draftId());
+        List<String> exportedTexts = structuralTexts(exported.content());
+
+        assertThat(initialized).extracting(DraftNodeDto::templateNodeKey)
+                .doesNotContain(nodeKeyByText(pipeline.structure(), "结束语"));
+        assertThat(exportedTexts).doesNotContain("结束语");
+        assertThat(exportedTexts).contains("在全区重点工作推进会上的讲话", "我就讲这些，谢谢大家。");
+        assertThat(exportedTexts).hasSize(structuralTexts(pipeline.sourceDocx()).size());
+    }
+
     private String roleByText(DocumentStructureProfile profile, String text) {
         return profile.nodes().stream()
                 .filter(node -> text.equals(node.text()))
                 .findFirst()
                 .orElseThrow()
                 .roleSuggestion();
+    }
+
+    private SpeechPipeline speechPipeline(Function<DocumentStructureProfile, List<StructureMappingItem>> mappingFactory) throws Exception {
+        byte[] sourceDocx = DocxTestFactory.speechReferenceDocument();
+        InMemoryTemplateVersionRepository versions = new InMemoryTemplateVersionRepository();
+        InMemoryTemplateProfileRepository profiles = new InMemoryTemplateProfileRepository();
+        InMemoryDocumentStructureProfileRepository structures = new InMemoryDocumentStructureProfileRepository();
+        InMemoryTemplateRepository templates = new InMemoryTemplateRepository();
+        TemplateUploadService uploadService = new TemplateUploadService(
+                (originalFileName, fileExtension, content) -> {
+                    Path target = tempDir.resolve("closure-" + originalFileName);
+                    Files.write(target, content);
+                    return target.toString();
+                },
+                versions,
+                profiles,
+                new TemplateProfileParser(),
+                new TemplateProperties(tempDir.toString(), 20),
+                new TemplateIntelligenceService(new MockModelAdapter()),
+                templates,
+                new DocumentStructureExtractor(),
+                structures,
+                new DocumentSemanticSuggester()
+        );
+
+        TemplateUploadResponse upload = uploadService.upload(3L, "讲话稿范文.docx", DOCX_CONTENT_TYPE, sourceDocx);
+        long templateVersionId = upload.templateVersionId();
+        DocumentStructureProfile structure = structures.findByTemplateVersionId(templateVersionId).orElseThrow();
+        InMemoryStructureMappingRepository mappings = new InMemoryStructureMappingRepository();
+        StructureMappingService mappingService = new StructureMappingService(
+                mappings,
+                structures,
+                profiles,
+                new FixedCurrentUserProvider()
+        );
+        mappingService.saveDraft(templateVersionId, new SaveStructureMappingRequest(null, mappingFactory.apply(structure)));
+        StructureMappingProfile published = mappingService.publish(templateVersionId, new PublishStructureMappingRequest(false));
+        assertThat(published.status()).isEqualTo("PUBLISHED");
+
+        long draftId = 5L;
+        FixedDraftRepository drafts = new FixedDraftRepository(new DraftDetailDto(
+                draftId,
+                "SPEECH",
+                "讲话稿草稿",
+                "DRAFT",
+                templateVersionId,
+                List.of()
+        ));
+        InMemoryDraftNodeRepository draftNodes = new InMemoryDraftNodeRepository();
+        DraftNodeService nodeService = new DraftNodeService(
+                new DraftService(drafts),
+                draftNodes,
+                mappings,
+                structures
+        );
+        InMemoryExportRecordRepository exports = new InMemoryExportRecordRepository();
+        DraftWordExportService exportService = new DraftWordExportService(
+                drafts,
+                versions,
+                templates,
+                profiles,
+                new EmptyTemplateStructureFormattingRepository(),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(exports),
+                null,
+                draftNodes,
+                mappings,
+                structures
+        );
+        return new SpeechPipeline(sourceDocx, structure, published, nodeService, exportService, exports, draftId);
+    }
+
+    private List<StructureMappingItem> allSourceItems(DocumentStructureProfile structure) {
+        return structure.nodes().stream()
+                .sorted(Comparator.comparingInt(DocumentNode::orderIndex))
+                .map(node -> {
+                    String role = node.roleSuggestion();
+                    String normalizedRole = role == null || role.isBlank() ? "UNKNOWN" : role;
+                    String status = "UNKNOWN".equals(normalizedRole) ? "NEEDS_REVIEW" : "CONFIRMED";
+                    return new StructureMappingItem(
+                            node.nodeKey(),
+                            normalizedRole,
+                            slotKeyFor(normalizedRole),
+                            status,
+                            "USER",
+                            "UNKNOWN".equals(normalizedRole) ? 0.3d : 1.0d,
+                            "",
+                            node.orderIndex()
+                    );
+                })
+                .toList();
+    }
+
+    private List<DocumentNode> nonIgnoredNodes(DocumentStructureProfile structure, StructureMappingProfile mapping) {
+        Set<String> ignoredKeys = mapping.items().stream()
+                .filter(item -> "IGNORE".equals(item.role()))
+                .map(StructureMappingItem::nodeKey)
+                .collect(java.util.stream.Collectors.toSet());
+        return structure.nodes().stream()
+                .filter(node -> !ignoredKeys.contains(node.nodeKey()))
+                .sorted(Comparator.comparingInt(DocumentNode::orderIndex))
+                .toList();
+    }
+
+    private String nodeText(DocumentStructureProfile structure, String nodeKey) {
+        return structure.nodes().stream()
+                .filter(node -> node.nodeKey().equals(nodeKey))
+                .findFirst()
+                .orElseThrow()
+                .text();
+    }
+
+    private String nodeKeyByText(DocumentStructureProfile structure, String text) {
+        return structure.nodes().stream()
+                .filter(node -> text.equals(node.text()))
+                .findFirst()
+                .orElseThrow()
+                .nodeKey();
+    }
+
+    private List<String> structuralTexts(byte[] docxBytes) throws Exception {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes))) {
+            List<String> texts = new ArrayList<>();
+            document.getParagraphs().stream()
+                    .map(paragraph -> paragraph.getText().strip())
+                    .forEach(texts::add);
+            document.getTables().forEach(table -> table.getRows().forEach(row -> row.getTableCells().forEach(cell ->
+                    cell.getParagraphs().stream()
+                            .map(paragraph -> paragraph.getText().strip())
+                            .forEach(texts::add)
+            )));
+            document.getHeaderList().forEach(header -> header.getParagraphs().stream()
+                    .map(paragraph -> paragraph.getText().strip())
+                    .forEach(texts::add));
+            document.getFooterList().forEach(footer -> footer.getParagraphs().stream()
+                    .map(paragraph -> paragraph.getText().strip())
+                    .forEach(texts::add));
+            return texts;
+        }
     }
 
     private List<StructureMappingItem> confirmedEditableItems(DocumentStructureProfile structure) {
@@ -229,6 +432,17 @@ class DocxCompleteStructurePipelineTest {
                 .filter(node -> role.equals(node.role()))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private record SpeechPipeline(
+            byte[] sourceDocx,
+            DocumentStructureProfile structure,
+            StructureMappingProfile published,
+            DraftNodeService nodeService,
+            DraftWordExportService exportService,
+            InMemoryExportRecordRepository exports,
+            long draftId
+    ) {
     }
 
     private static final class FixedCurrentUserProvider extends CurrentUserProvider {

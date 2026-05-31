@@ -1519,6 +1519,12 @@ textarea.field {
   line-height: var(--leading-body);
 }
 
+.workbench-structure-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .node-status-badge {
   display: inline-flex;
   min-height: 22px;
@@ -1914,6 +1920,47 @@ textarea.field {
 .document-node-content {
   display: block;
   white-space: pre-wrap;
+}
+
+.document-static-node {
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.document-static-node:hover {
+  border-color: var(--color-border-subtle);
+  background: var(--color-bg-muted);
+}
+
+.document-static-node:focus-visible {
+  outline: 2px solid rgba(var(--rgb-accent), 0.45);
+  outline-offset: 2px;
+}
+
+.document-static-node-header,
+.document-static-node-footer {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.document-static-node-header {
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding-bottom: var(--space-2);
+}
+
+.document-static-node-footer {
+  margin-top: var(--space-8);
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-2);
 }
 
 .document-heading-editor {

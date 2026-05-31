@@ -1082,14 +1082,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }));
   }
 
-  async function handleReinitializeDraftNodes() {
+  async function handleReinitializeDraftNodes(preserveUserEditedNodes = false) {
     if (!draft) {
       return;
     }
     try {
       setReinitializeNodeStatus('running');
-      setReinitializeNodeMessage('正在按当前映射重建结构节点');
-      const nextNodes = await reinitializeDraftNodes(draft.id, true);
+      setReinitializeNodeMessage(preserveUserEditedNodes ? '正在保留编辑并重建结构节点' : '正在按原稿覆盖重建结构节点');
+      const nextNodes = await reinitializeDraftNodes(draft.id, preserveUserEditedNodes);
       setDraftNodes(nextNodes);
       setDraft((currentDraft) => currentDraft ? { ...currentDraft, nodes: nextNodes } : currentDraft);
       setDirtyDraftNodeIds(new Set());
@@ -1104,10 +1104,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setExportError('');
       setLocalOperationSuggestion(null);
       setReinitializeNodeStatus('success');
-      setReinitializeNodeMessage('结构节点已按原稿重建');
+      setReinitializeNodeMessage(preserveUserEditedNodes ? '结构节点已重建，并保留已编辑内容' : '结构节点已按原稿重建');
       setStatus('idle');
-      setStatusMessage('结构节点已按原稿重建，真实预览待刷新');
-      showToast({ title: '结构节点已按原稿重建', tone: 'success' });
+      setStatusMessage(preserveUserEditedNodes ? '结构节点已重建并保留编辑，真实预览待刷新' : '结构节点已按原稿重建，真实预览待刷新');
+      showToast({ title: preserveUserEditedNodes ? '结构节点已重建，并保留已编辑内容' : '结构节点已按原稿重建', tone: 'success' });
     } catch (error) {
       const message = error instanceof Error ? error.message : '结构重建失败';
       setReinitializeNodeStatus('error');
@@ -1965,7 +1965,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               bodySectionNodes={bodySectionNodes}
               canReinitialize={Boolean(draft?.templateVersionId) && status !== 'loading'}
               nodes={workbenchNodes}
-              onReinitialize={() => void handleReinitializeDraftNodes()}
+              onReinitialize={(preserveUserEditedNodes) => void handleReinitializeDraftNodes(preserveUserEditedNodes)}
               onRemoveBodyNode={removeBodyNode}
               onSelectNode={selectNode}
               reinitializeMessage={reinitializeNodeMessage}
@@ -2036,6 +2036,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               date={date}
               dateNode={dateNode}
               dateStyle={dateNodePreviewStyle}
+              nodes={workbenchNodes}
               onRemoveBodyNode={removeBodyNode}
               onSelectNode={(nodeId) => selectNode(nodeId, false)}
               onUpdateAttachment={(content) => updateWorkbenchNodeContent(attachmentNode, content)}

@@ -102,6 +102,34 @@ class DraftNodeServiceTest {
     }
 
     @Test
+    void initializesAllNonIgnoredReferenceNodesSoNoEditPreviewMatchesOriginalOrder() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(emptyDraftWithTemplate());
+        DraftNodeService service = service(
+                draftService,
+                new InMemoryDraftNodeRepository(),
+                referenceMappingWithUnconfirmedOriginalNodes(),
+                referenceStructureProfileWithUnconfirmedOriginalNodes()
+        );
+
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+
+        assertThat(initialized).extracting(DraftNodeDto::templateNodeKey)
+                .containsExactly("reference-title", "reference-subtitle", "reference-body", "reference-footer");
+        assertThat(initialized).extracting(DraftNodeDto::role)
+                .containsExactly("TITLE", "UNKNOWN", "BODY", "STATIC_TEXT");
+        assertThat(initialized).extracting(DraftNodeDto::content)
+                .containsExactly(
+                        "在全区重点工作推进会上的讲话",
+                        "政务会议讲话稿测试样例",
+                        "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。",
+                        "测试文档 | 讲话稿范文示例"
+                );
+        assertThat(initialized).extracting(DraftNodeDto::status)
+                .containsExactly("USER_FILLED", "NEEDS_REVIEW", "USER_FILLED", "LOCKED");
+    }
+
+    @Test
     void initializesEachBodyNodeFromItsOwnSourceTextInsteadOfDuplicatingLegacyBody() {
         DraftService draftService = mock(DraftService.class);
         when(draftService.getDraft(5L)).thenReturn(draftWithTemplateAndOneLegacyBody());
@@ -150,6 +178,38 @@ class DraftNodeServiceTest {
                 .filteredOn(node -> node.templateNodeKey().equals(edited.templateNodeKey()))
                 .extracting(DraftNodeDto::content)
                 .containsExactly("用户改过的第一段");
+    }
+
+    @Test
+    void reinitializeReplacesUserEditedNodesFromSourceWhenPreserveIsDisabled() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(emptyDraftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(
+                draftService,
+                repository,
+                multiBodyPublishedMapping(),
+                multiBodyStructureProfile()
+        );
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+        DraftNodeDto edited = initialized.stream()
+                .filter(node -> "BODY".equals(node.role()))
+                .findFirst()
+                .orElseThrow();
+        service.updateNode(5L, edited.id(), new UpdateDraftNodeRequest(
+                "用户改过的第一段",
+                "USER_MODIFIED_AFTER_AI"
+        ));
+
+        List<DraftNodeDto> reinitialized = service.reinitializeNodes(
+                5L,
+                new ReinitializeDraftNodesRequest("FROM_SOURCE_DOCUMENT", false)
+        );
+
+        assertThat(reinitialized)
+                .filteredOn(node -> node.templateNodeKey().equals(edited.templateNodeKey()))
+                .extracting(DraftNodeDto::content)
+                .containsExactly("第一段源正文");
     }
 
     @Test
@@ -318,6 +378,28 @@ class DraftNodeServiceTest {
         );
     }
 
+    private StructureMappingProfile referenceMappingWithUnconfirmedOriginalNodes() {
+        return new StructureMappingProfile(
+                24L,
+                9L,
+                2,
+                "PUBLISHED",
+                List.of(
+                        item("reference-title", "TITLE", 10),
+                        new StructureMappingItem("reference-subtitle", "UNKNOWN", "", "NEEDS_REVIEW", "RULE", 0.3, "", 20),
+                        item("reference-body", "BODY", 30),
+                        new StructureMappingItem("reference-footer", "STATIC_TEXT", "", "CONFIRMED", "RULE", 0.8, "", 40),
+                        new StructureMappingItem("reference-ignored", "IGNORE", "", "CONFIRMED", "USER", 1, "", 50)
+                ),
+                List.of(),
+                3,
+                1,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
     private StructureMappingProfile multiBodyPublishedMapping() {
         return new StructureMappingProfile(
                 23L,
@@ -372,6 +454,25 @@ class DraftNodeServiceTest {
                         node("reference-date", "DATE", "2026年5月30日", 20),
                         node("reference-recipient", "RECIPIENT", "同志们：", 30),
                         node("reference-body", "BODY", "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。", 40)
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
+    }
+
+    private DocumentStructureProfile referenceStructureProfileWithUnconfirmedOriginalNodes() {
+        return new DocumentStructureProfile(
+                1,
+                "hash",
+                "document-structure-v1",
+                List.of(
+                        node("reference-title", "TITLE", "在全区重点工作推进会上的讲话", 10),
+                        node("reference-subtitle", "UNKNOWN", "政务会议讲话稿测试样例", 20),
+                        node("reference-body", "BODY", "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。", 30),
+                        node("reference-footer", "FOOTER_PARAGRAPH", "测试文档 | 讲话稿范文示例", 40),
+                        node("reference-ignored", "PARAGRAPH", "忽略内容", 50)
                 ),
                 List.of(),
                 List.of(),

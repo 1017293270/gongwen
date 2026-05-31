@@ -68,12 +68,13 @@
 - P10D 后续修正：文种已明确解耦为分类维度，新建草稿不再按“通知”硬编码主送、附件、落款和日期等默认块，草稿结构应来自模板映射、上传范文或后续 AI 生成；渲染预览新增 LibreOffice 环境自检能力，便于区分“解析可用”和“原貌预览运行时未配置”。
 - P10E T18-T19 完整结构事实基线：已新增 no-placeholder 讲话稿示例基线，并把 `DocumentStructureProfile` 上传派生改为从 DOCX bytes 直接抽取 `document-structure-v2` fact nodes，覆盖正文段落、表格段落、页眉页脚、位置、runs、编号和显式风险，不再只依赖 `TemplateProfile.structures`。
 - P10E T20 独立语义建议：新增 `DocumentSemanticSuggester`，在 fact nodes 上建议标题、主送、日期、正文、正文标题、发文机关、文号、附件、落款、固定文本等角色；建议只作为映射默认值，正文开始后不再因“单位/机关/号”等词把正文误判为单位或文号。
-- P10E T21 草稿节点初始化修正：`DraftNode.initializeNodes` 首次初始化优先使用源节点文本，避免把首个旧 `BODY_PARAGRAPH` 复制到所有正文节点；已有节点默认保持非破坏性，新增 `POST /api/drafts/{draftId}/nodes/reinitialize` 可按当前已发布映射显式重建，并可保留用户已编辑节点。
+- P10E T21 草稿节点初始化修正：`DraftNode.initializeNodes` 首次初始化优先使用源节点文本，避免把首个旧 `BODY_PARAGRAPH` 复制到所有正文节点；已有节点默认保持非破坏性，新增 `POST /api/drafts/{draftId}/nodes/reinitialize` 可按当前已发布映射显式重建，并可保留用户已编辑节点。后续严格对应修正已将初始化范围从“已确认可编辑槽位”扩展为所有非忽略映射节点，`UNKNOWN` 节点以 `NEEDS_REVIEW` 保留源文本，`STATIC_TEXT` 等固定节点以锁定节点保留源文本，避免未编辑时丢副标题、表格、页眉页脚等原稿事实。
 - P10E T22 模板解析工作台前端：已从 `frontend/src/App.tsx` 拆出 `TemplateParseWorkspace`、`StructureNodeTree` 和 `MappingBulkToolbar`，完整展示 fact tree、分离事实节点类型与语义建议、支持选中节点批量标为正文/一级标题/固定文本/忽略，并保留保存草稿和发布映射入口；无占位符参考范文不再阻断映射。
-- P10E T23 工作台结构化预览前端：已从 `frontend/src/App.tsx` 拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，结构树展示完整工作台节点和静态事实，静态表格/页眉页脚/固定文本不再进入纸面编辑预览；新增“从原稿重建结构”入口调用 `POST /api/drafts/{draftId}/nodes/reinitialize`，默认保留用户已编辑节点并标记真实预览待刷新。
+- P10E T23 工作台结构化预览前端：已从 `frontend/src/App.tsx` 拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，结构树展示完整工作台节点和静态事实，纸面结构化编辑预览按持久化节点顺序渲染标题、日期、主送、正文、固定文本、页眉页脚等节点，未编辑时不再主动丢弃静态事实；新增“从原稿重建结构”入口调用 `POST /api/drafts/{draftId}/nodes/reinitialize`，默认以原稿内容覆盖旧节点，另提供“保留编辑重建”用于保留用户已编辑节点。
 - P10E T24 无占位符参考文档导出：新增 DOCX 节点定位与原位替换渲染器，`REFERENCE_DOCUMENT` / `OFFICIAL_DOCUMENT` 在无占位符且存在映射节点时走原 DOCX 节点替换；占位符模板保持旧路径，`STATIC_TEXT`、页眉页脚和表格静态文本默认保留，`IGNORE` 节点清空而不物理删除；导出 trace 新增 `export_strategy` 持久化字段（Flyway `V17`）。
 - P10E T25 fixture 回归：新增 `DocxCompleteStructurePipelineTest`，用 `speechReferenceDocument` 覆盖上传、fact extraction、semantic suggestions、发布映射、DraftNode 初始化去重和原 DOCX 节点替换导出；前端模板解析工作台测试明确覆盖无占位符参考文档仍可映射、UNKNOWN 节点可见；本机 LibreOffice CLI 已对示例 DOCX 做 PDF 烟测。
 - P10E T26 集成收口：已核对工作区、空白、迁移号 V1-V17、P10E API 路由、focused 后端/前端回归、前端构建和 Browser 登录页烟测；P10E DOCX 完整结构事实与无占位符范文套版阶段关闭。
+- P10E T27 严格对应修正：针对“原稿、工作台结构化预览、未修改导出三者不一致”的真实样本反馈，后端 DraftNode 初始化/重建改为保留所有非忽略原始映射节点，前端 `WorkbenchPreview` 改为按节点源顺序渲染固定文本和静态事实；普通“从原稿重建结构”改为覆盖旧节点，“保留编辑重建”作为显式保留入口。验证覆盖 `DraftNodeServiceTest`、`DraftWordExportServiceTest`、`DocxCompleteStructurePipelineTest`、`WorkbenchPreview.test.tsx`、`workbenchNodes.test.ts`、`App.test.tsx` 和 `npm run build`，并新增 `docs/DOCX_ROUNDTRIP_TEST_CASES.md` 固化自动化与人工闭环测试用例。
 
 当前推荐下一阶段：
 

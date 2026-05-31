@@ -262,7 +262,7 @@ describe('App', () => {
     expect(await screen.findByText('草稿已保存')).toBeInTheDocument();
   });
 
-  it('reinitializes draft nodes from the source document while preserving user edits', async () => {
+  it('reinitializes draft nodes from the source document by replacing stale edits', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '1');
     const nodeDraft = { ...sampleDraft('重建结构草稿'), templateVersionId: 9 };
     const nodeRows = sampleDraftNodes();
@@ -307,11 +307,56 @@ describe('App', () => {
       method: 'POST',
       body: JSON.stringify({
         mode: 'FROM_SOURCE_DOCUMENT',
-        preserveUserEditedNodes: true,
+        preserveUserEditedNodes: false,
       }),
     }));
     expect((await screen.findAllByText('结构节点已按原稿重建')).length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue('重建后的标题')).toBeInTheDocument();
+  });
+
+  it('can reinitialize draft nodes while explicitly preserving user edits', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('保留编辑草稿'), templateVersionId: 9 };
+    const nodeRows = sampleDraftNodes();
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes') && !init?.method) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/reinitialize') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await screen.findByRole('button', { name: '保留编辑重建' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/nodes/reinitialize', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        mode: 'FROM_SOURCE_DOCUMENT',
+        preserveUserEditedNodes: true,
+      }),
+    }));
   });
 
   it('edits a template-derived body section without appending a block per keypress', async () => {
@@ -377,7 +422,7 @@ describe('App', () => {
     expect(bodyBlocks[1].content).toContain('公司总部三楼第一会议室2');
   });
 
-  it('keeps template top structures out of the structured editing preview', async () => {
+  it('keeps template top structures visible in the structured editing preview', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '1');
     const draft = { ...sampleDraft('红头预览草稿'), templateVersionId: 9 };
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -405,7 +450,7 @@ describe('App', () => {
 
     await openWorkbench();
     expect(await within(screen.getByLabelText('结构节点树')).findByText('示例单位文件')).toBeInTheDocument();
-    expect(within(screen.getByLabelText('公文预览')).queryByText('示例单位文件')).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText('公文预览')).getByText('示例单位文件')).toBeInTheDocument();
     expect(within(screen.getByLabelText('公文预览')).getByText('结构化编辑预览')).toBeInTheDocument();
   });
 
