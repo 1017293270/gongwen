@@ -90,7 +90,7 @@ public class TemplateUploadService {
             TemplateProfile profile = intelligenceService.enrich(documentTypeCode, originalFileName, content, profileParser.parse(content));
             String profileHash = sha256(content);
             profileRepository.save(version.id(), profile, profileHash);
-            saveDocumentStructureProfile(version.id(), profile, profileHash);
+            saveDocumentStructureProfile(version.id(), content, profileHash);
             versionRepository.markParsed(version.id(), profileHash);
 
             return new TemplateUploadResponse(
@@ -134,13 +134,13 @@ public class TemplateUploadService {
         versionRepository.markFailed(version.id(), "TEMPLATE_PARSE_FAILED", exception.getMessage());
     }
 
-    private void saveDocumentStructureProfile(long templateVersionId, TemplateProfile profile, String profileHash) {
+    private void saveDocumentStructureProfile(long templateVersionId, byte[] content, String profileHash) {
         if (documentStructureProfileRepository == null || documentStructureExtractor == null) {
             return;
         }
         documentStructureProfileRepository.save(
                 templateVersionId,
-                documentStructureExtractor.extract(profile, profileHash)
+                documentStructureExtractor.extract(content, profileHash)
         );
     }
 

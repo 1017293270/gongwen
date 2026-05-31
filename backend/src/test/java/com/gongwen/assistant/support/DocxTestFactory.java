@@ -266,6 +266,54 @@ public final class DocxTestFactory {
         );
     }
 
+    public static byte[] speechReferenceDocument() {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            document.createHeader(HeaderFooterType.DEFAULT)
+                    .createParagraph()
+                    .createRun()
+                    .setText("内部测试资料");
+            document.createFooter(HeaderFooterType.DEFAULT)
+                    .createParagraph()
+                    .createRun()
+                    .setText("测试文档 | 讲话稿范文示例");
+
+            speechParagraph(document, "在全区重点工作推进会上的讲话", ParagraphAlignment.CENTER, 22, true, 0);
+            speechParagraph(document, "政务会议讲话稿测试样例", ParagraphAlignment.CENTER, 13, false, 0);
+            speechParagraph(document, "2026年5月30日", ParagraphAlignment.CENTER, 12, false, 0);
+            speechParagraph(document, "同志们：", ParagraphAlignment.LEFT, 15, false, 0);
+            speechParagraph(document, "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署，全面梳理当前工作进展，分析存在问题，安排下一阶段重点任务，动员全区上下进一步统一思想、压实责任、狠抓落实，以更加扎实的作风推动各项工作取得新成效。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "今年以来，各部门各单位围绕中心、服务大局，主动担当、协同发力，在项目建设、民生保障、基层治理、营商环境优化等方面做了大量工作，整体态势稳中有进、持续向好。成绩值得肯定，但也要清醒看到，对照高质量发展的要求，对照群众的新期待，我们在工作统筹、执行效率、闭环管理、服务质效等方面仍有差距，需要在下一步工作中认真研究、切实改进。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "一、提高政治站位，把思想和行动统一到重点任务落实上来", ParagraphAlignment.LEFT, 16, true, 0);
+            speechParagraph(document, "抓落实是检验干部作风和治理能力的重要标尺。越是任务繁重、矛盾交织，越要保持清醒和战略定力，把上级要求、发展需要和群众期盼贯通起来，把工作摆到全局中审视、放到实践中检验。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "要强化系统观念。各项重点工作不是孤立推进的单项任务，而是相互关联、相互支撑的整体工程。要坚持全区一盘棋，加强横向协同和纵向联动，做到目标同向、措施同频、责任同担，避免各管一段、各说各话。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "二、聚焦关键环节，以务实举措推动工作提质增效", ParagraphAlignment.LEFT, 16, true, 0);
+            speechParagraph(document, "下一阶段，要把精力集中到最关键、最紧迫、最能带动全局的工作上来，既抓当前进度，也抓长远质效，确保各项部署落到实处、见到实效。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "1. 突出项目牵引。坚持把项目建设作为稳增长、促发展的重要支撑，完善项目清单、责任清单、问题清单。", ParagraphAlignment.LEFT, 14, false, 210);
+            speechParagraph(document, "2. 优化政务服务。持续改进窗口服务、线上办理和跨部门协同机制，让服务更有温度、办事更有速度。", ParagraphAlignment.LEFT, 14, false, 210);
+            speechParagraph(document, "3. 守牢民生底线。紧盯就业、教育、医疗、养老、住房保障等重点领域，把群众急难愁盼事项办实办细。", ParagraphAlignment.LEFT, 14, false, 210);
+            speechParagraph(document, "三、压紧压实责任，形成齐抓共管的工作合力", ParagraphAlignment.LEFT, 16, true, 0);
+            speechParagraph(document, "责任落实到位，工作才能推进到位。各部门各单位要把职责摆进去、把任务领回去、把压力传导下去，形成一级抓一级、层层抓落实的工作格局。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "要健全闭环机制。对会议明确的事项，要建立台账、动态更新、销号管理，做到任务有清单、推进有节点、结果有反馈。督查考核要突出实绩导向，既看完成了什么，也看解决了什么问题、带来了什么变化。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "结束语", ParagraphAlignment.LEFT, 16, true, 0);
+            speechParagraph(document, "同志们，做好下一阶段工作，任务艰巨、责任重大。希望大家以更加坚定的信心、更加务实的举措、更加过硬的作风，凝心聚力、攻坚克难，确保各项重点工作高质量推进，为全区经济社会发展提供更加坚实的支撑。", ParagraphAlignment.LEFT, 15, false, 420);
+            speechParagraph(document, "我就讲这些，谢谢大家。", ParagraphAlignment.LEFT, 15, false, 420);
+
+            XWPFTable table = document.createTable(3, 2);
+            table.getRow(0).getCell(0).setText("文档类型");
+            table.getRow(0).getCell(1).setText("政务会议讲话稿（测试样例）");
+            table.getRow(1).getCell(0).setText("适用场景");
+            table.getRow(1).getCell(1).setText("重点工作推进会、季度调度会、专题部署会");
+            table.getRow(2).getCell(0).setText("使用说明");
+            table.getRow(2).getCell(1).setText("虚构内容，仅供项目功能、排版、导出和检索测试使用");
+
+            document.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to create speech reference docx", exception);
+        }
+    }
+
     public static byte[] docxWithNoticeReferenceSkeleton() {
         try (XWPFDocument document = new XWPFDocument();
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -355,6 +403,30 @@ public final class DocxTestFactory {
         XWPFRun run = paragraph.createRun();
         run.setFontFamily("FangSong");
         run.setFontSize(16);
+        return paragraph;
+    }
+
+    private static XWPFParagraph speechParagraph(
+            XWPFDocument document,
+            String text,
+            ParagraphAlignment alignment,
+            int fontSize,
+            boolean bold,
+            int firstLineIndent
+    ) {
+        XWPFParagraph paragraph = document.createParagraph();
+        paragraph.setAlignment(alignment);
+        paragraph.setSpacingBetween(28.0, LineSpacingRule.EXACT);
+        if (firstLineIndent > 0) {
+            paragraph.setIndentationFirstLine(firstLineIndent);
+        }
+        XWPFRun run = paragraph.createRun();
+        run.setFontFamily("Times New Roman", XWPFRun.FontCharRange.ascii);
+        run.setFontFamily("Times New Roman", XWPFRun.FontCharRange.hAnsi);
+        run.setFontFamily(fontSize >= 16 && bold ? "方正小标宋简体" : "仿宋_GB2312", XWPFRun.FontCharRange.eastAsia);
+        run.setFontSize(fontSize);
+        run.setBold(bold);
+        run.setText(text);
         return paragraph;
     }
 

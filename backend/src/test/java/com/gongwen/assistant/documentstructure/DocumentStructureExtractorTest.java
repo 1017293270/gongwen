@@ -13,6 +13,39 @@ class DocumentStructureExtractorTest {
     private final DocumentStructureExtractor extractor = new DocumentStructureExtractor();
 
     @Test
+    void extractsAllSupportedFactsFromSpeechReferenceDocument() {
+        byte[] docx = DocxTestFactory.speechReferenceDocument();
+
+        DocumentStructureProfile profile = extractor.extract(docx, "hash-speech");
+
+        assertThat(profile.extractorVersion()).isEqualTo("document-structure-v2");
+        assertThat(profile.nodes())
+                .filteredOn(node -> "PARAGRAPH".equals(node.nodeType()))
+                .extracting(DocumentNode::text)
+                .contains(
+                        "在全区重点工作推进会上的讲话",
+                        "政务会议讲话稿测试样例",
+                        "2026年5月30日",
+                        "同志们：",
+                        "一、提高政治站位，把思想和行动统一到重点任务落实上来",
+                        "结束语",
+                        "我就讲这些，谢谢大家。"
+                );
+        assertThat(profile.nodes())
+                .filteredOn(node -> "TABLE_PARAGRAPH".equals(node.nodeType()))
+                .extracting(DocumentNode::text)
+                .contains("文档类型", "政务会议讲话稿（测试样例）", "使用说明");
+        assertThat(profile.nodes())
+                .filteredOn(node -> "HEADER_PARAGRAPH".equals(node.nodeType()))
+                .extracting(DocumentNode::text)
+                .contains("内部测试资料");
+        assertThat(profile.nodes())
+                .filteredOn(node -> "FOOTER_PARAGRAPH".equals(node.nodeType()))
+                .extracting(DocumentNode::text)
+                .contains("测试文档 | 讲话稿范文示例");
+    }
+
+    @Test
     void extractsDocumentNodesFromTemplateProfileStructures() {
         TemplateProfile templateProfile = profileParser.parse(DocxTestFactory.docxWithNoticeReferenceSkeleton());
 

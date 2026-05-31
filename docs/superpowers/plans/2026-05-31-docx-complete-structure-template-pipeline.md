@@ -100,8 +100,8 @@ Completion evidence format:
 
 | Task | Status | Preferred Agent | Dependencies | Deliverable | Commit | Verification | Risk |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| T18 | 未开始 | Integration Agent | P10D | P10E contracts, final API boundaries, fixture baseline |  | `git status --short --branch`; focused fixture inspection command | Must preserve P10D APIs while adding P10E endpoints |
-| T19 | 未开始 | Backend Structure Agent | T18 | fact-first DOCX structure extraction |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.*"` | Complex OOXML features become explicit risk nodes rather than silent omissions |
+| T18 | 已完成 | Integration Agent | P10D | P10E contracts, final API boundaries, fixture baseline | 未提交（T18 进度更新） | `git status --short --branch`; speech fixture inspection command | Must preserve P10D APIs while adding P10E endpoints |
+| T19 | 已完成 | Backend Structure Agent | T18 | fact-first DOCX structure extraction | 未提交（T19 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Complex OOXML features become explicit risk nodes rather than silent omissions |
 | T20 | 未开始 | Backend Semantic Agent | T19 | independent semantic role suggester |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.*" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest"` | Role suggestions must not overwrite facts |
 | T21 | 未开始 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.*"` | Existing user-edited nodes must not be overwritten without explicit reinitialize request |
 | T22 | 未开始 | Frontend Template Agent | T20 | complete structure mapping workspace |  | `npm test -- src/App.test.tsx src/components/template/TemplateParseWorkspace.test.tsx`; `npm run build` | `App.tsx` must shrink through component extraction instead of growing further |
@@ -115,6 +115,8 @@ Completion evidence format:
 | Date | Task | Agent | Commit | Verification | Result | Risk |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-05-31 | Plan | Codex | plan document change | `git status --short --branch` | plan written on dirty P10D branch without touching feature code | implementation not started |
+| 2026-05-31 | T18 | Codex Integration Agent | 未提交（T18 进度更新） | `git status --short --branch`; Python fixture inspection | pass; checkpoint commit left branch clean, speech fixture has 20 main paragraphs, 1 table, header `内部测试资料`, footer `测试文档 \| 讲话稿范文示例` | implementation starts at T19; existing P10D APIs must remain compatible |
+| 2026-05-31 | T19 | Codex Backend Structure Agent | 未提交（T19 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; extractor now reads DOCX bytes directly, emits v2 fact nodes for body paragraphs, table cell paragraphs, headers and footers, and keeps old `DocumentNode` constructor compatibility | role suggestions intentionally remain `UNKNOWN` until T20 semantic suggester |
 
 ## Agent File Boundaries
 
@@ -355,7 +357,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Confirm worktree state**
+- [x] **Step 1: Confirm worktree state**
 
   Run:
 
@@ -369,7 +371,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - Dirty files are reviewed and not reverted.
   - The agent records unrelated dirty files in its final summary.
 
-- [ ] **Step 2: Inspect the speech fixture facts**
+- [x] **Step 2: Inspect the speech fixture facts**
 
   Run:
 
@@ -398,7 +400,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - Header contains `内部测试资料`.
   - Footer contains `测试文档 | 讲话稿范文示例`.
 
-- [ ] **Step 3: Update docs with P10E planned stage**
+- [x] **Step 3: Update docs with P10E planned stage**
 
   Add P10E to `docs/PROJECT_TASKS.md` current recommendation:
 
@@ -406,7 +408,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - P10E DOCX 完整结构事实与无占位符范文套版：在 P10D 基础上补齐 fact-first 结构抽取、独立语义建议、DraftNode 干净初始化、结构映射 UI、无占位符范文原位替换导出和 fixture 回归。
   ```
 
-- [ ] **Step 4: Update AGENTS with P10E dispatch guidance**
+- [x] **Step 4: Update AGENTS with P10E dispatch guidance**
 
   Add a concise "当前下一轮并行建议" entry:
 
@@ -419,7 +421,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - Agent P10E-QA：以示例 DOCX 和动态 fixtures 固化结构、映射、初始化、导出和渲染回归。
   ```
 
-- [ ] **Step 5: Mark T18 progress**
+- [x] **Step 5: Mark T18 progress**
 
   Update Progress Board T18 and add Progress Log entry with verification commands and result.
 
@@ -449,7 +451,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Add failing test for complete speech fixture extraction**
+- [x] **Step 1: Add failing test for complete speech fixture extraction**
 
   In `backend/src/test/java/com/gongwen/assistant/documentstructure/DocumentStructureExtractorTest.java`, add:
 
@@ -487,7 +489,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
   Run:
 
@@ -500,7 +502,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - FAIL because `DocumentStructureExtractor.extract(byte[], String)` does not exist or still derives incomplete facts.
 
-- [ ] **Step 3: Add fact DTO records**
+- [x] **Step 3: Add fact DTO records**
 
   Create `DocumentNodeLocation.java`:
 
@@ -555,7 +557,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 4: Extend `DocumentNode` additively**
+- [x] **Step 4: Extend `DocumentNode` additively**
 
   Modify `DocumentNode.java` to include:
 
@@ -617,7 +619,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 5: Implement `DocxStructureWalker`**
+- [x] **Step 5: Implement `DocxStructureWalker`**
 
   Create `DocxStructureWalker.java` with methods:
 
@@ -636,7 +638,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - For each paragraph, collect first non-empty run formatting and run facts.
   - Assign `roleSuggestion` as `UNKNOWN` in T19. T20 replaces suggestions.
 
-- [ ] **Step 6: Modify `DocumentStructureExtractor` to use direct DOCX bytes**
+- [x] **Step 6: Modify `DocumentStructureExtractor` to use direct DOCX bytes**
 
   Add overload:
 
@@ -651,7 +653,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - Return profile with extractor version `document-structure-v2`.
   - Keep the existing `extract(TemplateProfile, String)` method for compatibility, but make upload use the byte-based method in Step 7.
 
-- [ ] **Step 7: Update `TemplateUploadService` to persist byte-based structure facts**
+- [x] **Step 7: Update `TemplateUploadService` to persist byte-based structure facts**
 
   Modify `saveDocumentStructureProfile` call so upload uses:
 
@@ -661,7 +663,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   Preserve profile save behavior.
 
-- [ ] **Step 8: Run fact extraction tests**
+- [x] **Step 8: Run fact extraction tests**
 
   Run:
 
@@ -674,7 +676,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 9: Update Progress Board and Progress Log**
+- [x] **Step 9: Update Progress Board and Progress Log**
 
   Record commands, result, and remaining unsupported OOXML risks.
 
@@ -1683,4 +1685,3 @@ Use this checklist during T26 before claiming completion:
 - [ ] Clicking `从原稿重建结构` rebuilds nodes and preserves edited nodes when requested.
 - [ ] Export for the reference document preserves header/footer/table and replaces mapped paragraph content in place.
 - [ ] Export for the placeholder notice sample still works through placeholder replacement.
-

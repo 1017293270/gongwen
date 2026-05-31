@@ -200,9 +200,13 @@ class TemplateUploadServiceTest {
 
         DocumentStructureProfile structureProfile = structureRepository.findByTemplateVersionId(1L).orElseThrow();
         assertThat(structureProfile.sourceFileHash()).hasSize(64);
+        assertThat(structureProfile.extractorVersion()).isEqualTo("document-structure-v2");
         assertThat(structureProfile.nodes())
-                .extracting("roleSuggestion")
-                .contains("TITLE", "BODY");
+                .extracting("nodeType")
+                .contains("PARAGRAPH", "HEADER_PARAGRAPH");
+        assertThat(structureProfile.nodes())
+                .extracting("text")
+                .contains("{{标题}}", "{{正文}}", "机关公文");
     }
 
     @Test
