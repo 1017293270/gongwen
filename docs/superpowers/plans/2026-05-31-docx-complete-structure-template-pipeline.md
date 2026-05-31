@@ -108,7 +108,7 @@ Completion evidence format:
 | T23 | 已完成 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup | `dd8182a` | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | Workbench preview is explicitly structured-editing only; original DOCX in-place export completed in T24 |
 | T24 | 已完成 | Backend Export Agent | T19, T21 | original DOCX in-place replacement export for reference templates | 本提交（T24 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxNodeReplacementRendererTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest"` | Multi-line replacement currently uses line breaks in the original paragraph; broader fixtures remain T25 |
 | T25 | 已完成 | QA Agent | T19-T24 | fixture regression suite and render verification | 本提交（T25 实现） | `.\gradlew.bat --no-daemon --console=plain test --rerun-tasks --tests "com.gongwen.assistant.integration.DocxCompleteStructurePipelineTest" --tests "com.gongwen.assistant.documentstructure.*" --tests "com.gongwen.assistant.draft.node.*" --tests "com.gongwen.assistant.exporting.*"`; `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; LibreOffice CLI PDF smoke | Browser authenticated automation remains for T26/manual; LibreOffice smoke used direct CLI conversion |
-| T26 | 未开始 | Integration Agent | T18-T25 | final integration closure and docs sync |  | `git status --short --branch`; `git diff --check`; focused backend/frontend commands; migration/API grep | Full backend/frontend suites may remain optional per lightweight-test instruction, but focused coverage is mandatory |
+| T26 | 已完成 | Integration Agent | T18-T25 | final integration closure and docs sync | 本提交（T26 收口） | `git status --short --branch`; `git diff --check`; migration continuity check; API route grep; final focused backend/frontend commands; Browser smoke; LibreOffice CLI smoke from T25 | Full backend/frontend suites were intentionally not run per lightweight-test direction; focused regression and smoke checks passed |
 
 ## Progress Log
 
@@ -124,6 +124,7 @@ Completion evidence format:
 | 2026-05-31 | T23 | Codex Frontend Workbench Agent | `dd8182a` | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; workbench structure tree and structured editing preview were extracted, static facts stay visible in the tree but out of paper preview, and `从原稿重建结构` calls `POST /api/drafts/{draftId}/nodes/reinitialize` preserving user edits | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
 | 2026-05-31 | T24 | Codex Backend Export Agent | 本提交（T24 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxNodeReplacementRendererTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest"` | pass; no-placeholder `REFERENCE_DOCUMENT` export now uses original DOCX node replacement, preserves paragraph objects/header text, records `ORIGINAL_NODE_REPLACEMENT`, and persists `export_strategy` via Flyway `V17` | T25 still needs fixture-level pipeline coverage across upload, mapping, node init, export, and optional render smoke |
 | 2026-05-31 | T25 | Codex QA Agent | 本提交（T25 实现） | `.\gradlew.bat --no-daemon --console=plain test --rerun-tasks --tests "com.gongwen.assistant.integration.DocxCompleteStructurePipelineTest" --tests "com.gongwen.assistant.documentstructure.*" --tests "com.gongwen.assistant.draft.node.*" --tests "com.gongwen.assistant.exporting.*"`; `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; LibreOffice CLI PDF smoke | pass; speech reference fixture now covers upload, fact extraction, semantic suggestions, published mapping, duplicate-free DraftNode initialization, original DOCX node replacement export, and no-placeholder mapping UI behavior | browser authenticated workflow still needs T26/manual verification; full backend/frontend suites remain optional per lightweight-test direction |
+| 2026-05-31 | T26 | Codex Integration Agent | 本提交（T26 收口） | `git status --short --branch`; `git diff --check`; migration continuity check V1-V17; `rg -n "/nodes/reinitialize\|structure-facts\|structure-profile\|structure-mapping\|render-preview" frontend/src backend/src/main/java`; `.\gradlew.bat --no-daemon --console=plain test --rerun-tasks --tests "com.gongwen.assistant.documentstructure.*" --tests "com.gongwen.assistant.documentstructure.semantic.*" --tests "com.gongwen.assistant.draft.node.*" --tests "com.gongwen.assistant.exporting.*" --tests "com.gongwen.assistant.integration.DocxCompleteStructurePipelineTest"`; `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; P10E plan closed, API routes aligned, migrations continuous through `V17`, Browser smoke reached app/login signal with 0 console errors | full backend/frontend suites remain optional; authenticated browser workflow remains best covered manually or by later E2E |
 
 ## Agent File Boundaries
 
@@ -1548,7 +1549,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - If backend is running and LibreOffice is configured, status reports available.
   - If backend is not running, record "not run; backend not running" in Progress Log risk.
 
-- [ ] **Step 6: Update fixture README**
+- [x] **Step 6: Update fixture README**
 
   Add categories:
 
@@ -1557,7 +1558,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - no-placeholder reference document with table/header/footer: verifies supported non-body facts remain visible and preserved.
   ```
 
-- [ ] **Step 7: Update Progress Board and Progress Log**
+- [x] **Step 7: Update Progress Board and Progress Log**
 
   Record commands, result, and any render smoke limitation.
 
@@ -1571,7 +1572,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Check worktree and diff**
+- [x] **Step 1: Check worktree and diff**
 
   Run:
 
@@ -1585,7 +1586,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - No whitespace errors beyond known line-ending warnings.
   - All P10E files are accounted for.
 
-- [ ] **Step 2: Check API route alignment**
+- [x] **Step 2: Check API route alignment**
 
   Run:
 
@@ -1597,7 +1598,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - Every frontend P10E API call has a matching backend route.
 
-- [ ] **Step 3: Run final focused backend tests**
+- [x] **Step 3: Run final focused backend tests**
 
   Run:
 
@@ -1610,7 +1611,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 4: Run final focused frontend tests and build**
+- [x] **Step 4: Run final focused frontend tests and build**
 
   Run:
 
@@ -1624,7 +1625,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 5: Update `docs/PROJECT_TASKS.md`**
+- [x] **Step 5: Update `docs/PROJECT_TASKS.md`**
 
   Add P10E completion summary under current state:
 
@@ -1632,7 +1633,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - P10E DOCX 完整结构事实与无占位符范文套版：已完成 fact-first 结构抽取、独立语义建议、DraftNode 干净初始化、结构映射工作台增强、工作台结构预览修正和无占位符参考文档原位替换导出。
   ```
 
-- [ ] **Step 6: Update `AGENTS.md` current status**
+- [x] **Step 6: Update `AGENTS.md` current status**
 
   Add high-signal summary:
 
@@ -1640,7 +1641,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   P10E 已把 DOCX 链路升级为 fact-first：DocumentStructureProfile 直接从 OOXML 抽取段落、表格、页眉页脚等事实；语义角色仅作为可校正建议；DraftNode 初始化按源节点文本生成，不再复制旧 BODY_PARAGRAPH；REFERENCE_DOCUMENT 导出走原 DOCX 节点原位替换。
   ```
 
-- [ ] **Step 7: Close plan**
+- [x] **Step 7: Close plan**
 
   Update every Progress Board row to final status and add final Progress Log entry.
 

@@ -73,10 +73,11 @@
 - P10E T23 工作台结构化预览前端：已从 `frontend/src/App.tsx` 拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，结构树展示完整工作台节点和静态事实，静态表格/页眉页脚/固定文本不再进入纸面编辑预览；新增“从原稿重建结构”入口调用 `POST /api/drafts/{draftId}/nodes/reinitialize`，默认保留用户已编辑节点并标记真实预览待刷新。
 - P10E T24 无占位符参考文档导出：新增 DOCX 节点定位与原位替换渲染器，`REFERENCE_DOCUMENT` / `OFFICIAL_DOCUMENT` 在无占位符且存在映射节点时走原 DOCX 节点替换；占位符模板保持旧路径，`STATIC_TEXT`、页眉页脚和表格静态文本默认保留，`IGNORE` 节点清空而不物理删除；导出 trace 新增 `export_strategy` 持久化字段（Flyway `V17`）。
 - P10E T25 fixture 回归：新增 `DocxCompleteStructurePipelineTest`，用 `speechReferenceDocument` 覆盖上传、fact extraction、semantic suggestions、发布映射、DraftNode 初始化去重和原 DOCX 节点替换导出；前端模板解析工作台测试明确覆盖无占位符参考文档仍可映射、UNKNOWN 节点可见；本机 LibreOffice CLI 已对示例 DOCX 做 PDF 烟测。
+- P10E T26 集成收口：已核对工作区、空白、迁移号 V1-V17、P10E API 路由、focused 后端/前端回归、前端构建和 Browser 登录页烟测；P10E DOCX 完整结构事实与无占位符范文套版阶段关闭。
 
 当前推荐下一阶段：
 
-- P10E DOCX 完整结构事实与无占位符范文套版：T18-T25 已完成。下一步优先派 T26 Integration Agent 做最终收口。
+- P10E DOCX 完整结构事实与无占位符范文套版：T18-T26 已完成。后续若继续该链路，优先做真实样本人工验收、更多文种 fixtures 和端到端浏览器自动化，不再继续扩大 P10E 范围。
 - P10D DOCX 原貌预览与结构化工作台：T0-T17 已完成。下一步优先做前端工作台拆分，把 `frontend/src/App.tsx` 中的 workbench/template/export 表面拆到 feature components，再继续 P11/P9 这类 UI-heavy 切片。
 - P10D 文种/模板解耦继续下沉：后续“范文导入成草稿”应复用 `DocumentStructureProfile` 和 `DraftNode`，不要再恢复文种硬编码字段。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
@@ -878,10 +879,9 @@
 
 ## 当前开发队列
 
-1. P10E T26 集成收口：核对 API、迁移、前后端 focused 命令、浏览器/渲染烟测和文档状态。
-2. P11 导出体验增强。
-3. P9 权限继续收口：材料/导出文件下载鉴权、模板管理员细粒度权限、审计日志和权限不足 UI。
-4. P12 部署与环境。
+1. P11 导出体验增强。
+2. P9 权限继续收口：材料/导出文件下载鉴权、模板管理员细粒度权限、审计日志和权限不足 UI。
+3. P12 部署与环境。
 
 P10D 执行纪律：
 
