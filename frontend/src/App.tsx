@@ -67,6 +67,7 @@ import {
   login,
   logout,
   resetUserPassword,
+  reinitializeDraftNodes,
   publishStructureMapping,
   requestRenderPreview,
   restoreDraftNodeFormatOverride,
@@ -104,6 +105,8 @@ import {
   type WorkbenchPreviewRequestStatus,
 } from './components/workbench/WorkbenchExportPanel';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
+import { WorkbenchPreview } from './components/workbench/WorkbenchPreview';
+import { WorkbenchStructureTree, type ReinitializeNodeStatus } from './components/workbench/WorkbenchStructureTree';
 import { TemplateParseWorkspace } from './components/template/TemplateParseWorkspace';
 import {
   qualitySummary,
@@ -147,9 +150,7 @@ import type {
 } from './draftTypes';
 import { estimateAiProgress } from './progress';
 import {
-  bodyNodeEditorLabel,
   bodyNodeLabel,
-  bodyNodePreview,
   composeBodySectionParts,
   composeBodySectionContent,
   deriveWorkbenchNodes,
@@ -356,6 +357,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [localOperationSuggestion, setLocalOperationSuggestion] = useState<AiLocalOperation | null>(null);
   const [nodeFormatStatus, setNodeFormatStatus] = useState<NodeFormatPanelStatus>('idle');
   const [nodeFormatError, setNodeFormatError] = useState('');
+  const [reinitializeNodeStatus, setReinitializeNodeStatus] = useState<ReinitializeNodeStatus>('idle');
+  const [reinitializeNodeMessage, setReinitializeNodeMessage] = useState('');
   const [renderPreviewOutdated, setRenderPreviewOutdated] = useState(false);
   const [workbenchRenderPreview, setWorkbenchRenderPreview] = useState<DocumentRenderPreview | null>(null);
   const [workbenchRenderPreviewStatus, setWorkbenchRenderPreviewStatus] = useState<WorkbenchPreviewRequestStatus>('idle');
@@ -610,6 +613,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setQualityCheck(null);
     setLocalOperationSuggestion(null);
     setLocalOperationStatus('idle');
+    setReinitializeNodeStatus('idle');
+    setReinitializeNodeMessage('');
     setExportError('');
     if (loadedDraft.templateVersionId) {
       setTemplateStructureOverrides((current) => ({
@@ -814,11 +819,6 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const attachmentNodePreviewStyle = mergePreviewStyle(attachmentPreviewStyle, attachmentNode?.formatting);
   const signatureNodePreviewStyle = mergePreviewStyle(signaturePreviewStyle, signatureNode?.formatting);
   const dateNodePreviewStyle = mergePreviewStyle(datePreviewStyle, dateNode?.formatting);
-  const templateHeaderStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['HEADER']);
-  const templateTopStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['UNIT', 'META']);
-  const templateFooterStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['FOOTER']);
-  const templateUnknownStructures = templateStructuresByType(selectedTemplateProfile, selectedTemplateOverrides, ['UNKNOWN'])
-    .filter((item) => !looksLikePlaceholderOnly(item.structure.textPreview));
   const latestTemplateVersions = useMemo(
     () => pickLatestTemplateVersions(templateVersions),
     [templateVersions],
@@ -1080,6 +1080,40 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       }
       return block.sortOrder !== sortOrder;
     }));
+  }
+
+  async function handleReinitializeDraftNodes() {
+    if (!draft) {
+      return;
+    }
+    try {
+      setReinitializeNodeStatus('running');
+      setReinitializeNodeMessage('正在按当前映射重建结构节点');
+      const nextNodes = await reinitializeDraftNodes(draft.id, true);
+      setDraftNodes(nextNodes);
+      setDraft((currentDraft) => currentDraft ? { ...currentDraft, nodes: nextNodes } : currentDraft);
+      setDirtyDraftNodeIds(new Set());
+      setDeletedNodeIds(new Set());
+      writeDeletedNodeIds(deletedNodeStorageKey(draft.id, draft.templateVersionId), new Set());
+      setSelectedNodeId(null);
+      setRenderPreviewOutdated(true);
+      setQualityCheck(null);
+      setQualityCheckStatus('idle');
+      setQualityCheckError('');
+      setExportStatus('idle');
+      setExportError('');
+      setLocalOperationSuggestion(null);
+      setReinitializeNodeStatus('success');
+      setReinitializeNodeMessage('结构节点已按原稿重建');
+      setStatus('idle');
+      setStatusMessage('结构节点已按原稿重建，真实预览待刷新');
+      showToast({ title: '结构节点已按原稿重建', tone: 'success' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '结构重建失败';
+      setReinitializeNodeStatus('error');
+      setReinitializeNodeMessage(message);
+      showToast({ title: message, tone: 'error' });
+    }
   }
 
   function draftBlockPayload(
@@ -1927,72 +1961,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
             <TextField label="主送" onChange={(event) => updateBlock('RECIPIENT', event.target.value)} value={recipient} />
 
-            <section className="structure-tree" aria-label="结构节点树">
-              <div className="paragraph-index-header">
-                <span className="field-label">结构树</span>
-                <span className="paragraph-count">{workbenchNodes.length} 节点</span>
-              </div>
-              {workbenchNodes.length > 0 ? (
-                <div className="structure-tree-list">
-                  {workbenchNodes.map((node, index) => (
-                    <button
-                      aria-current={selectedNodeId === node.nodeId ? 'true' : undefined}
-                      className={`structure-tree-item ${selectedNodeId === node.nodeId ? 'selected' : ''}`}
-                      key={node.nodeId}
-                      onClick={() => selectNode(node.nodeId)}
-                      type="button"
-                    >
-                      <span className="structure-tree-main">
-                        <span className="structure-tree-title">{workbenchNodeLabel(node, index)}</span>
-                        <span className="structure-tree-meta">{workbenchNodeRoleLabel(node.nodeType)}</span>
-                      </span>
-                      <span className={`node-status-badge ${statusBadgeTone(node.status)}`}>
-                        {draftNodeStatusLabel(node.status)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="empty-note">暂无结构节点，先绑定模板或填写正文。</p>
-              )}
-            </section>
-
-            <section className="paragraph-index" aria-label="正文段落目录">
-              <div className="paragraph-index-header">
-                <span className="field-label">正文</span>
-                <span className="paragraph-count">{bodySectionNodes.length} 段</span>
-              </div>
-              {bodySectionNodes.length > 0 ? (
-                <div className="paragraph-index-list">
-                  {bodySectionNodes.map((node, index) => (
-                    <div
-                      aria-current={selectedNodeId === node.nodeId ? 'true' : undefined}
-                      className={`paragraph-index-item ${selectedNodeId === node.nodeId ? 'selected' : ''}`}
-                      key={node.nodeId}
-                    >
-                      <button className="paragraph-index-select" onClick={() => selectNode(node.nodeId)} type="button">
-                        <span className="paragraph-index-number">{index + 1}</span>
-                        <span className="paragraph-index-copy">
-                          <span className="paragraph-index-title">{bodyNodeLabel(node, index)}</span>
-                          <span className="paragraph-index-preview">{bodyNodePreview(node)}</span>
-                        </span>
-                      </button>
-                      <button
-                        aria-label={`删除正文结构：${bodyNodeLabel(node, index)}`}
-                        className="paragraph-index-delete"
-                        onClick={() => removeBodyNode(node)}
-                        title="删除当前草稿结构，不删除模板"
-                        type="button"
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="empty-note">暂无正文段落，先生成或填写正文。</p>
-              )}
-            </section>
+            <WorkbenchStructureTree
+              bodySectionNodes={bodySectionNodes}
+              canReinitialize={Boolean(draft?.templateVersionId) && status !== 'loading'}
+              nodes={workbenchNodes}
+              onReinitialize={() => void handleReinitializeDraftNodes()}
+              onRemoveBodyNode={removeBodyNode}
+              onSelectNode={selectNode}
+              reinitializeMessage={reinitializeNodeMessage}
+              reinitializeStatus={reinitializeNodeStatus}
+              selectedNodeId={selectedNodeId}
+            />
 
             <TextField label="附件" onChange={(event) => updateBlock('ATTACHMENT', event.target.value)} value={attachment} />
 
@@ -2048,147 +2027,39 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
           </div>
             </section>
 
-            <section aria-label="公文预览">
-          <div className="document-stage">
-            <article className="document-paper">
-              {templateHeaderStructures.length > 0 && (
-                <div className="document-template-region document-template-header" aria-label="模板页眉">
-                  {templateHeaderStructures.map(({ structure, style }) => (
-                    <p key={structure.structureKey} style={style}>{structure.textPreview}</p>
-                  ))}
-                </div>
-              )}
-              {templateTopStructures.length > 0 && (
-                <div className="document-template-region document-template-top" aria-label="模板头部结构">
-                  {templateTopStructures.map(({ structure, style }) => (
-                    <p key={structure.structureKey} style={style}>{stripTemplateBraces(structure.textPreview)}</p>
-                  ))}
-                </div>
-              )}
-              {selectedNodeId === titleNode?.nodeId ? (
-                <input
-                  aria-label="编辑节点：标题"
-                  className="document-title-editor"
-                  onChange={(event) => updateWorkbenchNodeContent(titleNode, event.target.value)}
-                  style={titleNodePreviewStyle}
-                  value={title}
-                />
-              ) : (
-                <h2 className="document-title" style={titleNodePreviewStyle}>{title}</h2>
-              )}
-              {selectedNodeId === recipientNode?.nodeId ? (
-                <input
-                  aria-label="编辑节点：主送"
-                  className="document-inline-editor"
-                  onChange={(event) => updateWorkbenchNodeContent(recipientNode, event.target.value)}
-                  style={recipientNodePreviewStyle}
-                  value={recipient}
-                />
-              ) : (
-                <p style={recipientNodePreviewStyle}>{recipient}：</p>
-              )}
-              {bodySectionNodes.length > 0 ? bodySectionNodes.map((node, index) => (
-                selectedNodeId === node.nodeId ? (
-                  <section
-                    className="document-node selected"
-                    key={node.nodeId}
-                    ref={(element) => {
-                      paragraphRefs.current[node.nodeId] = element;
-                    }}
-                    style={mergePreviewStyle(bodyPreviewStyle, node.formatting)}
-                    tabIndex={-1}
-                  >
-                    <input
-                      aria-label={`编辑标题：${bodyNodeLabel(node, index)}`}
-                      className="document-heading-editor"
-                      onChange={(event) => updateBodyNodeHeading(node, event.target.value)}
-                      placeholder="正文标题"
-                      value={node.heading ?? ''}
-                    />
-                    <textarea
-                      aria-label={`编辑段落：${bodyNodeEditorLabel(node, index)}`}
-                      className="document-paragraph-editor"
-                      onChange={(event) => {
-                        syncParagraphEditorHeight(event.currentTarget);
-                        updateBodyNodeContent(node, event.target.value);
-                      }}
-                      ref={(element) => {
-                        if (element) {
-                          syncParagraphEditorHeight(element);
-                        }
-                      }}
-                      style={mergePreviewStyle(bodyPreviewStyle, node.formatting)}
-                      value={node.content}
-                    />
-                    <Button icon={<Trash2 aria-hidden="true" />} onClick={() => removeBodyNode(node)} variant="ghost">
-                      删除当前结构
-                    </Button>
-                  </section>
-                ) : (
-                  <button
-                    aria-pressed={false}
-                    className="document-node"
-                    key={node.nodeId}
-                    onClick={() => selectNode(node.nodeId, false)}
-                    ref={(element) => {
-                      paragraphRefs.current[node.nodeId] = element;
-                    }}
-                    style={mergePreviewStyle(bodyPreviewStyle, node.formatting)}
-                    type="button"
-                  >
-                    <span className="visually-hidden">选择正文结构：</span>
-                    {node.heading && <span className="document-node-heading">{node.heading}</span>}
-                    <span className="document-node-content">{node.content.trim() || '点击填写正文段落'}</span>
-                  </button>
-                )
-              )) : <p>请在左侧填写正文内容。</p>}
-              {attachment && (selectedNodeId === attachmentNode?.nodeId ? (
-                <input
-                  aria-label="编辑节点：附件"
-                  className="document-inline-editor"
-                  onChange={(event) => updateWorkbenchNodeContent(attachmentNode, event.target.value)}
-                  style={attachmentNodePreviewStyle}
-                  value={attachment}
-                />
-              ) : <p style={attachmentNodePreviewStyle}>附件：{attachment}</p>)}
-              <p className="signature" style={signatureNodePreviewStyle}>
-                {selectedNodeId === signatureNode?.nodeId ? (
-                  <input
-                    aria-label="编辑节点：落款"
-                    className="document-inline-editor"
-                    onChange={(event) => updateWorkbenchNodeContent(signatureNode, event.target.value)}
-                    style={signatureNodePreviewStyle}
-                    value={signature}
-                  />
-                ) : <span>{signature}</span>}
-                <br />
-                {selectedNodeId === dateNode?.nodeId ? (
-                  <input
-                    aria-label="编辑节点：日期"
-                    className="document-inline-editor"
-                    onChange={(event) => updateWorkbenchNodeContent(dateNode, event.target.value)}
-                    style={dateNodePreviewStyle}
-                    value={date}
-                  />
-                ) : <span style={dateNodePreviewStyle}>{date}</span>}
-              </p>
-              {templateUnknownStructures.length > 0 && (
-                <div className="document-template-region document-template-extra" aria-label="模板未映射结构">
-                  {templateUnknownStructures.slice(0, 4).map(({ structure, style }) => (
-                    <p key={structure.structureKey} style={style}>{stripTemplateBraces(structure.textPreview)}</p>
-                  ))}
-                </div>
-              )}
-              {templateFooterStructures.length > 0 && (
-                <div className="document-template-region document-template-footer" aria-label="模板页脚">
-                  {templateFooterStructures.map(({ structure, style }) => (
-                    <p key={structure.structureKey} style={style}>{structure.textPreview}</p>
-                  ))}
-                </div>
-              )}
-            </article>
-          </div>
-            </section>
+            <WorkbenchPreview
+              attachment={attachment}
+              attachmentNode={attachmentNode}
+              attachmentStyle={attachmentNodePreviewStyle}
+              bodySectionNodes={bodySectionNodes}
+              bodyStyleForNode={(node) => mergePreviewStyle(bodyPreviewStyle, node.formatting)}
+              date={date}
+              dateNode={dateNode}
+              dateStyle={dateNodePreviewStyle}
+              onRemoveBodyNode={removeBodyNode}
+              onSelectNode={(nodeId) => selectNode(nodeId, false)}
+              onUpdateAttachment={(content) => updateWorkbenchNodeContent(attachmentNode, content)}
+              onUpdateBodyContent={updateBodyNodeContent}
+              onUpdateBodyHeading={updateBodyNodeHeading}
+              onUpdateDate={(content) => updateWorkbenchNodeContent(dateNode, content)}
+              onUpdateRecipient={(content) => updateWorkbenchNodeContent(recipientNode, content)}
+              onUpdateSignature={(content) => updateWorkbenchNodeContent(signatureNode, content)}
+              onUpdateTitle={(content) => updateWorkbenchNodeContent(titleNode, content)}
+              recipient={recipient}
+              recipientNode={recipientNode}
+              recipientStyle={recipientNodePreviewStyle}
+              registerNodeRef={(nodeId, element) => {
+                paragraphRefs.current[nodeId] = element;
+              }}
+              selectedNodeId={selectedNodeId}
+              signature={signature}
+              signatureNode={signatureNode}
+              signatureStyle={signatureNodePreviewStyle}
+              syncParagraphEditorHeight={syncParagraphEditorHeight}
+              title={title}
+              titleNode={titleNode}
+              titleStyle={titleNodePreviewStyle}
+            />
 
             <section className="panel" aria-label="AI 建议和质检">
           <div className="panel-header">

@@ -280,6 +280,16 @@ export function initializeDraftNodes(draftId: number) {
   });
 }
 
+export function reinitializeDraftNodes(draftId: number, preserveUserEditedNodes = true) {
+  return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes/reinitialize`, {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'FROM_SOURCE_DOCUMENT',
+      preserveUserEditedNodes,
+    }),
+  });
+}
+
 export function listDraftNodes(draftId: number) {
   return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes`);
 }

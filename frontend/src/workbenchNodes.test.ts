@@ -125,6 +125,34 @@ describe('deriveWorkbenchNodes', () => {
     });
   });
 
+  it('derives persisted source nodes without injecting template or legacy title text', () => {
+    const nodes = deriveWorkbenchNodes({
+      ...draft([
+        { id: 1, blockType: 'TITLE', content: '未命名通知', sortOrder: 10 },
+        { id: 3, blockType: 'BODY_PARAGRAPH', content: '旧正文', sortOrder: 30 },
+      ]),
+      title: '未命名通知',
+      nodes: [
+        draftNode(201, 'TITLE', '在全区重点工作推进会上的讲话', 10),
+        draftNode(202, 'DATE', '2026年5月30日', 20),
+        draftNode(203, 'RECIPIENT', '同志们：', 30),
+        draftNode(204, 'BODY_HEADING_LEVEL_1', '一、提高政治站位，把思想和行动统一到重点任务落实上来', 40),
+        draftNode(205, 'BODY', '抓落实是检验干部作风和治理能力的重要标尺。', 50),
+        draftNode(206, 'STATIC_TEXT', '文档类型\t讲话稿', 60, { nodeType: 'TABLE_PARAGRAPH' }),
+      ],
+    }, profile(), {});
+
+    expect(nodes.map((node) => node.nodeType)).toContain('TITLE');
+    expect(nodes.filter((node) => node.nodeType === 'BODY_SECTION')).toHaveLength(1);
+    expect(nodes.find((node) => node.nodeType === 'TITLE')?.content).toBe('在全区重点工作推进会上的讲话');
+    expect(nodes.some((node) => node.content.includes('未命名通知'))).toBe(false);
+    expect(nodes.find((node) => node.templateNodeKey === 'node-206')).toMatchObject({
+      nodeType: 'STATIC_TEMPLATE_TEXT',
+      factNodeType: 'TABLE_PARAGRAPH',
+      locked: true,
+    });
+  });
+
   it('does not turn reference recipient attachment signature and date paragraphs into body nodes', () => {
     const referenceProfile = {
       ...profile(),
@@ -192,14 +220,20 @@ describe('deriveWorkbenchNodes', () => {
   });
 });
 
-function draftNode(id: number, role: string, content: string, sortOrder: number) {
+function draftNode(
+  id: number,
+  role: string,
+  content: string,
+  sortOrder: number,
+  options: { nodeType?: string } = {},
+) {
   return {
     id,
     draftId: 1,
     structureMappingProfileId: 7,
     templateNodeKey: `node-${id}`,
     parentTemplateNodeKey: null,
-    nodeType: 'PARAGRAPH',
+    nodeType: options.nodeType ?? 'PARAGRAPH',
     role,
     slotKey: role === 'TITLE' ? 'title' : 'body',
     title: role,

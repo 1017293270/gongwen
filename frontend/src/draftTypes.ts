@@ -380,6 +380,7 @@ export type WorkbenchNodeSource = 'TEMPLATE' | 'DRAFT' | 'AI' | 'USER';
 export type WorkbenchNode = {
   nodeId: string;
   nodeType: WorkbenchNodeType;
+  factNodeType?: string;
   templateStructureKey?: string;
   draftBlockId?: number;
   draftNodeId?: number;
@@ -393,6 +394,7 @@ export type WorkbenchNode = {
   status?: string;
   source: WorkbenchNodeSource;
   locked: boolean;
+  editable?: boolean;
   formatting?: Partial<TemplateStructureFormatting>;
 };
 

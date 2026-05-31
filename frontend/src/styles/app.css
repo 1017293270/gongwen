@@ -1467,6 +1467,17 @@ textarea.field {
   background: var(--color-accent-muted);
 }
 
+.structure-tree-item.static {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.structure-tree-item.static:hover {
+  border-color: var(--color-border-subtle);
+  background: var(--color-bg-subtle);
+}
+
 .structure-tree-main {
   display: grid;
   min-width: 0;
@@ -1487,6 +1498,22 @@ textarea.field {
 }
 
 .structure-tree-meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.workbench-structure-actions {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-bg-subtle);
+  padding: var(--space-3);
+}
+
+.workbench-structure-actions p {
+  margin: 0;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-body);
@@ -1725,6 +1752,14 @@ textarea.field {
   border-radius: 8px;
   background: var(--color-bg-muted);
   padding: var(--space-5);
+}
+
+.document-preview-label {
+  width: min(100%, 760px);
+  margin: 0 auto var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
 }
 
 .document-paper {

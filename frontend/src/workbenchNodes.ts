@@ -64,7 +64,8 @@ function nodesFromDraftNodes(draftNodes: DraftNode[]) {
 
     nodes.push({
       nodeId: `draft-node:${draftNode.id}`,
-      nodeType: mapStructureType(draftNode.role),
+      nodeType: mapStructureType(draftNode.role, draftNode.nodeType),
+      factNodeType: draftNode.nodeType,
       draftNodeId: draftNode.id,
       templateNodeKey: draftNode.templateNodeKey,
       sortOrder: draftNode.sortOrder,
@@ -72,7 +73,8 @@ function nodesFromDraftNodes(draftNodes: DraftNode[]) {
       content: draftNode.content,
       status: draftNode.status,
       source: sourceFromDraftNodeStatus(draftNode.status),
-      locked: draftNode.status === 'LOCKED',
+      locked: draftNode.status === 'LOCKED' || !isEditableDraftRole(draftNode.role),
+      editable: isEditableDraftRole(draftNode.role),
       formatting: formattingFromDraftNode(draftNode),
     });
   }
@@ -95,6 +97,7 @@ function bodyNodeFromDraftNode(
   return {
     nodeId: `draft-node:${node.id}`,
     nodeType: 'BODY_SECTION',
+    factNodeType: bodyNode?.nodeType ?? headingNode?.nodeType,
     draftNodeId: bodyNode?.id,
     headingDraftNodeId: headingNode?.id,
     templateNodeKey: node.templateNodeKey,
@@ -106,6 +109,7 @@ function bodyNodeFromDraftNode(
     status: combinedDraftNodeStatus(headingNode, bodyNode),
     source: sourceFromDraftNodeStatus(node.status),
     locked: node.status === 'LOCKED' || headingNode?.status === 'LOCKED',
+    editable: node.status !== 'LOCKED' && headingNode?.status !== 'LOCKED',
     formatting: formattingFromDraftNode(node),
   };
 }
@@ -235,6 +239,7 @@ function nodesFromTemplateProfile(
         pendingBody = {
           nodeId: `template:${structure.structureKey}`,
           nodeType: 'BODY_SECTION',
+          factNodeType: structure.structureType,
           templateStructureKey: structure.structureKey,
           sortOrder: aSortOrder(structure),
           label: stripBodyPrefix(text),
@@ -242,6 +247,7 @@ function nodesFromTemplateProfile(
           content: '',
           source: 'TEMPLATE',
           locked: false,
+          editable: true,
           formatting,
         };
       } else if (pendingBody) {
@@ -250,12 +256,14 @@ function nodesFromTemplateProfile(
         nodes.push({
           nodeId: `template:${structure.structureKey}`,
           nodeType: 'BODY_SECTION',
+          factNodeType: structure.structureType,
           templateStructureKey: structure.structureKey,
           sortOrder: aSortOrder(structure),
           label: '正文',
           content: stripTemplateBraces(text),
           source: 'TEMPLATE',
           locked: false,
+          editable: true,
           formatting,
         });
       }
@@ -268,15 +276,18 @@ function nodesFromTemplateProfile(
       pendingBody = null;
     }
 
+    const nodeType = mapStructureType(structureType, structure.structureType);
     nodes.push({
       nodeId: `template:${structure.structureKey}`,
-      nodeType: mapStructureType(structureType),
+      nodeType,
+      factNodeType: structure.structureType,
       templateStructureKey: structure.structureKey,
       sortOrder: aSortOrder(structure),
       label: structure.label || stripTemplateBraces(text) || '模板结构',
       content: stripTemplateBraces(text),
       source: 'TEMPLATE',
-      locked: structureType === 'HEADER' || structureType === 'FOOTER',
+      locked: !isEditableWorkbenchType(nodeType),
+      editable: isEditableWorkbenchType(nodeType),
       formatting,
     });
     if (structureType === 'TITLE') {
@@ -303,6 +314,7 @@ function nodesFromDraftBlocks(blocks: DraftBlock[]) {
       return {
         nodeId: `block:${block.id || block.sortOrder || index}`,
         nodeType: block.blockType === 'BODY_PARAGRAPH' ? 'BODY_SECTION' : mapStructureType(block.blockType),
+        factNodeType: block.blockType,
         draftBlockId: block.id,
         sortOrder: block.sortOrder,
         label: block.blockType === 'BODY_PARAGRAPH' ? stripBodyPrefix(heading ?? `第 ${index + 1} 段`) : block.blockType,
@@ -310,6 +322,7 @@ function nodesFromDraftBlocks(blocks: DraftBlock[]) {
         content,
         source: 'DRAFT',
         locked: false,
+        editable: true,
       };
     });
 }
@@ -476,7 +489,7 @@ function mergeFormatting(
   return { ...(base ?? {}), ...(override ?? {}) };
 }
 
-function mapStructureType(type: string): WorkbenchNodeType {
+function mapStructureType(type: string, factType?: string): WorkbenchNodeType {
   switch (type) {
     case 'TITLE':
       return 'TITLE';
@@ -495,8 +508,34 @@ function mapStructureType(type: string): WorkbenchNodeType {
     case 'FOOTER':
       return 'FOOTER';
     default:
+      if (factType === 'HEADER_PARAGRAPH') {
+        return 'HEADER';
+      }
+      if (factType === 'FOOTER_PARAGRAPH') {
+        return 'FOOTER';
+      }
       return 'STATIC_TEMPLATE_TEXT';
   }
+}
+
+function isEditableDraftRole(role: string) {
+  return role === 'TITLE'
+    || role === 'RECIPIENT'
+    || role === 'BODY'
+    || role.startsWith('BODY_HEADING_LEVEL_')
+    || role === 'ATTACHMENT_NOTE'
+    || role === 'ATTACHMENT_CONTENT'
+    || role === 'SIGNATURE'
+    || role === 'DATE';
+}
+
+function isEditableWorkbenchType(nodeType: WorkbenchNodeType) {
+  return nodeType === 'TITLE'
+    || nodeType === 'RECIPIENT'
+    || nodeType === 'BODY_SECTION'
+    || nodeType === 'ATTACHMENT'
+    || nodeType === 'SIGNATURE'
+    || nodeType === 'DATE';
 }
 
 function aSortOrder(structure: TemplateProfile['structures'][number]) {
