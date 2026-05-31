@@ -48,6 +48,25 @@ class DraftNodeControllerTest {
     }
 
     @Test
+    void reinitializesNodes() throws Exception {
+        when(service.reinitializeNodes(eq(5L), any(ReinitializeDraftNodesRequest.class)))
+                .thenReturn(List.of(sampleNode("BODY", "重建后的正文")));
+
+        mockMvc.perform(post("/api/drafts/5/nodes/reinitialize")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ReinitializeDraftNodesRequest(
+                                "FROM_SOURCE_DOCUMENT",
+                                true
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data[0].role").value("BODY"))
+                .andExpect(jsonPath("$.data[0].content").value("重建后的正文"));
+
+        verify(service).reinitializeNodes(eq(5L), any(ReinitializeDraftNodesRequest.class));
+    }
+
+    @Test
     void listsNodes() throws Exception {
         when(service.listNodes(5L)).thenReturn(List.of(sampleNode("BODY", "正文内容")));
 

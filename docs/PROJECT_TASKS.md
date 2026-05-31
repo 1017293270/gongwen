@@ -66,10 +66,13 @@
 - P10D T16 轻量 QA 与文档收口：新增 DOCX fixture 覆盖清单，动态样本覆盖占位符模板、样式模板、参考范文、手册/指南、复杂表格、页眉页脚和缺字体；focused 回归覆盖手册阻断、中文字体、节点 AI、草稿局部格式覆盖、导出追溯、工作台节点和预览刷新。
 - P10D T17 集成关闭：已核对工作区状态、迁移号 V1-V16、前后端 API 路由、focused 后端/前端验证和文档进度板；全量后端/前端测试与浏览器自动化因轻量测试方向和工具不可用留作后续人工/CI 验证。
 - P10D 后续修正：文种已明确解耦为分类维度，新建草稿不再按“通知”硬编码主送、附件、落款和日期等默认块，草稿结构应来自模板映射、上传范文或后续 AI 生成；渲染预览新增 LibreOffice 环境自检能力，便于区分“解析可用”和“原貌预览运行时未配置”。
+- P10E T18-T19 完整结构事实基线：已新增 no-placeholder 讲话稿示例基线，并把 `DocumentStructureProfile` 上传派生改为从 DOCX bytes 直接抽取 `document-structure-v2` fact nodes，覆盖正文段落、表格段落、页眉页脚、位置、runs、编号和显式风险，不再只依赖 `TemplateProfile.structures`。
+- P10E T20 独立语义建议：新增 `DocumentSemanticSuggester`，在 fact nodes 上建议标题、主送、日期、正文、正文标题、发文机关、文号、附件、落款、固定文本等角色；建议只作为映射默认值，正文开始后不再因“单位/机关/号”等词把正文误判为单位或文号。
+- P10E T21 草稿节点初始化修正：`DraftNode.initializeNodes` 首次初始化优先使用源节点文本，避免把首个旧 `BODY_PARAGRAPH` 复制到所有正文节点；已有节点默认保持非破坏性，新增 `POST /api/drafts/{draftId}/nodes/reinitialize` 可按当前已发布映射显式重建，并可保留用户已编辑节点。
 
 当前推荐下一阶段：
 
-- P10E DOCX 完整结构事实与无占位符范文套版：已新增实施计划 `docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。下一步优先补齐 fact-first 结构抽取、独立语义建议、DraftNode 干净初始化、结构映射工作台增强、工作台结构预览修正和无占位符参考文档原位替换导出。
+- P10E DOCX 完整结构事实与无占位符范文套版：T18-T21 已完成。下一步优先派 T22 前端模板 Agent 做完整结构映射工作台，T23 前端工作台 Agent 接入显式重建和结构化预览清理，T24 后端导出 Agent 做无占位符参考文档原 DOCX 节点原位替换导出。
 - P10D DOCX 原貌预览与结构化工作台：T0-T17 已完成。下一步优先做前端工作台拆分，把 `frontend/src/App.tsx` 中的 workbench/template/export 表面拆到 feature components，再继续 P11/P9 这类 UI-heavy 切片。
 - P10D 文种/模板解耦继续下沉：后续“范文导入成草稿”应复用 `DocumentStructureProfile` 和 `DraftNode`，不要再恢复文种硬编码字段。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
@@ -871,10 +874,10 @@
 
 ## 当前开发队列
 
-1. 前端工作台拆分：把 `frontend/src/App.tsx` 中的 workbench/template/export 表面拆到 feature components，先降低后续 UI 迭代风险。
-2. P11 导出体验增强。
-3. P10B 结构维度配置持久化。
-4. P10 模板管理员后台后续增强：字段映射、启停、版本详情。
+1. P10E T22 前端模板解析工作台：拆出组件、展示完整 fact tree、支持批量映射和发布。
+2. P10E T23 前端工作台结构化预览：接入显式 reinitialize、清理正文上方误插节点，并继续拆 `frontend/src/App.tsx`。
+3. P10E T24 后端导出：无占位符参考文档走原 DOCX 节点原位替换，保留占位符模板旧路径。
+4. P11 导出体验增强。
 5. P9 权限继续收口：材料/导出文件下载鉴权、模板管理员细粒度权限、审计日志和权限不足 UI。
 6. P12 部署与环境。
 

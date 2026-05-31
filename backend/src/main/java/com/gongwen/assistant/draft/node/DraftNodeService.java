@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -34,6 +33,12 @@ public class DraftNodeService {
             "LOCKED"
     );
     private static final Set<String> SKIPPED_ROLES = Set.of("UNKNOWN", "IGNORE");
+    private static final Set<String> PRESERVABLE_REINITIALIZE_STATUSES = Set.of(
+            "USER_FILLED",
+            "AI_GENERATED",
+            "USER_MODIFIED_AFTER_AI",
+            "FORMAT_OVERRIDDEN"
+    );
     private static final Set<String> ALLOWED_ALIGNMENTS = Set.of("LEFT", "CENTER", "RIGHT", "BOTH", "JUSTIFY");
     private static final Set<String> ALLOWED_LINE_SPACING_RULES = Set.of("AUTO", "EXACT", "AT_LEAST");
 
@@ -63,22 +68,68 @@ public class DraftNodeService {
         StructureMappingProfile mapping = mappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED")
                 .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before nodes can be initialized"));
         List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
-        if (!existingNodes.isEmpty() && existingNodes.stream()
-                .allMatch(node -> Objects.equals(node.structureMappingProfileId(), mapping.mappingProfileId()))) {
+        if (!existingNodes.isEmpty()) {
             return toDtos(existingNodes);
         }
         DocumentStructureProfile structureProfile = structureProfileRepository.findByTemplateVersionId(templateVersionId)
                 .orElseThrow(() -> new DraftNodeException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found"));
+        List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, List.of(), false);
+        return toDtos(draftNodeRepository.replaceForDraft(draftId, nodes));
+    }
+
+    public List<DraftNodeDto> reinitializeNodes(long draftId, ReinitializeDraftNodesRequest request) {
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        Long templateVersionId = draft.templateVersionId();
+        if (templateVersionId == null) {
+            throw new DraftNodeException("DRAFT_TEMPLATE_REQUIRED", "Draft must bind a template version before nodes can be reinitialized");
+        }
+        StructureMappingProfile mapping = mappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED")
+                .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before nodes can be reinitialized"));
+        DocumentStructureProfile structureProfile = structureProfileRepository.findByTemplateVersionId(templateVersionId)
+                .orElseThrow(() -> new DraftNodeException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found"));
+        List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
+        boolean preserveUserEditedNodes = request == null || request.shouldPreserveUserEditedNodes();
+        List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, existingNodes, preserveUserEditedNodes);
+        return toDtos(draftNodeRepository.replaceForDraft(draftId, nodes));
+    }
+
+    private List<DraftNode> buildDraftNodes(
+            long draftId,
+            DraftDetailDto draft,
+            StructureMappingProfile mapping,
+            DocumentStructureProfile structureProfile,
+            List<DraftNode> existingNodes,
+            boolean preserveUserEditedNodes
+    ) {
         Map<String, DocumentNode> sourceNodes = structureProfile.nodes().stream()
                 .collect(Collectors.toMap(DocumentNode::nodeKey, Function.identity()));
-        Map<String, String> legacyContent = legacyBlockContent(draft);
-        List<DraftNode> nodes = mapping.items().stream()
+        List<StructureMappingItem> confirmedItems = mapping.items().stream()
                 .filter(item -> "CONFIRMED".equals(item.status()))
                 .filter(item -> !SKIPPED_ROLES.contains(item.role()))
                 .sorted(Comparator.comparingInt(StructureMappingItem::sortOrder))
-                .map(item -> toDraftNode(draftId, mapping.mappingProfileId(), item, sourceNodes.get(item.nodeKey()), legacyContent))
                 .toList();
-        return toDtos(draftNodeRepository.replaceForDraft(draftId, nodes));
+        Map<String, Long> confirmedRoleCounts = confirmedItems.stream()
+                .collect(Collectors.groupingBy(StructureMappingItem::role, Collectors.counting()));
+        Map<String, String> legacyContent = legacyBlockContent(draft, confirmedRoleCounts);
+        Map<Integer, String> legacyBodyBySortOrder = legacyBodyBySortOrder(draft);
+        Map<String, DraftNode> existingByKeyAndRole = existingNodes.stream()
+                .collect(Collectors.toMap(
+                        node -> keyAndRole(node.templateNodeKey(), node.role()),
+                        Function.identity(),
+                        (first, ignored) -> first
+                ));
+        return confirmedItems.stream()
+                .map(item -> toDraftNode(
+                        draftId,
+                        mapping.mappingProfileId(),
+                        item,
+                        sourceNodes.get(item.nodeKey()),
+                        legacyContent,
+                        legacyBodyBySortOrder,
+                        existingByKeyAndRole,
+                        preserveUserEditedNodes
+                ))
+                .toList();
     }
 
     public List<DraftNodeDto> listNodes(long draftId) {
@@ -123,11 +174,14 @@ public class DraftNodeService {
             Long mappingProfileId,
             StructureMappingItem item,
             DocumentNode sourceNode,
-            Map<String, String> legacyContent
+            Map<String, String> legacyContent,
+            Map<Integer, String> legacyBodyBySortOrder,
+            Map<String, DraftNode> existingByKeyAndRole,
+            boolean preserveUserEditedNodes
     ) {
-        String content = initialContent(item.role(), sourceNode, legacyContent);
+        String content = initialContent(item, sourceNode, legacyContent, legacyBodyBySortOrder);
         String title = titleFor(item.role(), sourceNode, content);
-        return new DraftNode(
+        DraftNode node = new DraftNode(
                 0,
                 draftId,
                 mappingProfileId,
@@ -144,29 +198,63 @@ public class DraftNodeService {
                 null,
                 null
         );
+        return preserveUserEditedNodes ? preserveExistingContent(node, existingByKeyAndRole) : node;
     }
 
-    private String initialContent(String role, DocumentNode sourceNode, Map<String, String> legacyContent) {
-        String legacy = legacyContent.getOrDefault(role, "");
-        if (!legacy.isBlank()) {
-            return legacy;
-        }
-        if ("BODY".equals(role)) {
-            String legacyBody = legacyContent.getOrDefault("BODY_PARAGRAPH", "");
-            return legacyBody.isBlank() ? editableSourceText(sourceNode) : legacyBody;
+    private String initialContent(
+            StructureMappingItem item,
+            DocumentNode sourceNode,
+            Map<String, String> legacyContent,
+            Map<Integer, String> legacyBodyBySortOrder
+    ) {
+        String role = item.role();
+        String source = editableSourceText(sourceNode);
+        if ("BODY".equals(role) || role.startsWith("BODY_HEADING_LEVEL_")) {
+            if (!source.isBlank()) {
+                return source;
+            }
+            return "BODY".equals(role) ? legacyBodyBySortOrder(item, legacyBodyBySortOrder) : "";
         }
         if ("ATTACHMENT_NOTE".equals(role) || "ATTACHMENT_CONTENT".equals(role)) {
-            String legacyAttachment = legacyContent.getOrDefault("ATTACHMENT", "");
-            return legacyAttachment.isBlank() ? editableSourceText(sourceNode) : legacyAttachment;
+            String legacyAttachment = legacyContent.getOrDefault(role, "");
+            return source.isBlank() ? legacyAttachment : source;
         }
         if (isEditableSourceRole(role)) {
-            return editableSourceText(sourceNode);
+            String legacy = legacyContent.getOrDefault(role, "");
+            return source.isBlank() ? legacy : source;
         }
-        if ("STATIC_TEXT".equals(role)
-                || role.startsWith("BODY_HEADING_LEVEL_")) {
-            return editableSourceText(sourceNode);
+        if ("STATIC_TEXT".equals(role)) {
+            return source;
         }
         return "";
+    }
+
+    private String legacyBodyBySortOrder(StructureMappingItem item, Map<Integer, String> legacyBodyBySortOrder) {
+        return legacyBodyBySortOrder.getOrDefault(item.sortOrder(), "");
+    }
+
+    private DraftNode preserveExistingContent(DraftNode node, Map<String, DraftNode> existingByKeyAndRole) {
+        DraftNode existing = existingByKeyAndRole.get(keyAndRole(node.templateNodeKey(), node.role()));
+        if (existing == null || !PRESERVABLE_REINITIALIZE_STATUSES.contains(existing.status())) {
+            return node;
+        }
+        return new DraftNode(
+                node.id(),
+                node.draftId(),
+                node.structureMappingProfileId(),
+                node.templateNodeKey(),
+                node.parentTemplateNodeKey(),
+                node.nodeType(),
+                node.role(),
+                node.slotKey(),
+                node.title(),
+                existing.content(),
+                node.sortOrder(),
+                existing.status(),
+                existing.formatOverride(),
+                node.createdAt(),
+                node.updatedAt()
+        );
     }
 
     private boolean isEditableSourceRole(String role) {
@@ -220,13 +308,38 @@ public class DraftNodeService {
         return content == null || content.isBlank() ? "EMPTY" : "USER_FILLED";
     }
 
-    private Map<String, String> legacyBlockContent(DraftDetailDto draft) {
+    private Map<String, String> legacyBlockContent(DraftDetailDto draft, Map<String, Long> confirmedRoleCounts) {
         return draft.blocks().stream()
+                .filter(block -> confirmedRoleCounts.getOrDefault(legacyRoleForBlock(block.blockType()), 0L) == 1L)
                 .collect(Collectors.toMap(
-                        DraftBlockDto::blockType,
+                        block -> legacyRoleForBlock(block.blockType()),
                         DraftBlockDto::content,
                         (first, ignored) -> first
                 ));
+    }
+
+    private Map<Integer, String> legacyBodyBySortOrder(DraftDetailDto draft) {
+        return draft.blocks().stream()
+                .filter(block -> "BODY_PARAGRAPH".equals(block.blockType()))
+                .collect(Collectors.toMap(
+                        DraftBlockDto::sortOrder,
+                        DraftBlockDto::content,
+                        (first, ignored) -> first
+                ));
+    }
+
+    private String legacyRoleForBlock(String blockType) {
+        if (blockType == null) {
+            return "";
+        }
+        return switch (blockType) {
+            case "ATTACHMENT" -> "ATTACHMENT_NOTE";
+            default -> blockType;
+        };
+    }
+
+    private String keyAndRole(String nodeKey, String role) {
+        return (nodeKey == null ? "" : nodeKey) + "::" + (role == null ? "" : role);
     }
 
     private List<DraftNodeDto> toDtos(List<DraftNode> nodes) {

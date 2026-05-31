@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
 
 class DraftNodeServiceTest {
     @Test
-    void initializesNodesFromPublishedMappingAndLegacyDraftBlocks() {
+    void initializesNodesFromPublishedMappingAndSourceText() {
         DraftService draftService = mock(DraftService.class);
         when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
         InMemoryDraftNodeRepository nodes = new InMemoryDraftNodeRepository();
@@ -39,7 +39,7 @@ class DraftNodeServiceTest {
         assertThat(initialized).extracting(DraftNodeDto::role)
                 .containsExactly("TITLE", "BODY_HEADING_LEVEL_1", "BODY", "DATE");
         assertThat(initialized).extracting(DraftNodeDto::content)
-                .containsExactly("测试通知", "一、工作安排", "正文内容", "2026年5月30日");
+                .containsExactly("模板标题", "一、工作安排", "模板正文", "2026年5月30日");
         assertThat(initialized).extracting(DraftNodeDto::status)
                 .containsExactly("USER_FILLED", "USER_FILLED", "USER_FILLED", "USER_FILLED");
         assertThat(initialized).extracting(DraftNodeDto::structureMappingProfileId)
@@ -62,13 +62,20 @@ class DraftNodeServiceTest {
     }
 
     @Test
-    void reinitializesNodesWhenPublishedMappingChanges() {
+    void initializeKeepsExistingNodesWhenPublishedMappingChangesUntilExplicitReinitialize() {
         DraftService draftService = mock(DraftService.class);
         when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
         InMemoryDraftNodeRepository nodes = new InMemoryDraftNodeRepository();
         service(draftService, nodes, publishedMapping(), structureProfile()).initializeNodes(5L);
 
-        List<DraftNodeDto> refreshed = service(draftService, nodes, publishedMappingV2(), structureProfile()).initializeNodes(5L);
+        List<DraftNodeDto> unchanged = service(draftService, nodes, publishedMappingV2(), structureProfile()).initializeNodes(5L);
+
+        assertThat(unchanged).extracting(DraftNodeDto::structureMappingProfileId)
+                .containsOnly(21L);
+        assertThat(nodes.replaceCount).isEqualTo(1);
+
+        List<DraftNodeDto> refreshed = service(draftService, nodes, publishedMappingV2(), structureProfile())
+                .reinitializeNodes(5L, new ReinitializeDraftNodesRequest("FROM_SOURCE_DOCUMENT", false));
 
         assertThat(refreshed).extracting(DraftNodeDto::structureMappingProfileId)
                 .containsOnly(22L);
@@ -92,6 +99,57 @@ class DraftNodeServiceTest {
                         "同志们：",
                         "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。"
                 );
+    }
+
+    @Test
+    void initializesEachBodyNodeFromItsOwnSourceTextInsteadOfDuplicatingLegacyBody() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplateAndOneLegacyBody());
+        DraftNodeService service = service(
+                draftService,
+                new InMemoryDraftNodeRepository(),
+                multiBodyPublishedMapping(),
+                multiBodyStructureProfile()
+        );
+
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+
+        assertThat(initialized)
+                .filteredOn(node -> "BODY".equals(node.role()))
+                .extracting(DraftNodeDto::content)
+                .containsExactly("第一段源正文", "第二段源正文", "第三段源正文");
+    }
+
+    @Test
+    void reinitializePreservesUserEditedNodesWhenRequested() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(emptyDraftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(
+                draftService,
+                repository,
+                multiBodyPublishedMapping(),
+                multiBodyStructureProfile()
+        );
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+        DraftNodeDto edited = initialized.stream()
+                .filter(node -> "BODY".equals(node.role()))
+                .findFirst()
+                .orElseThrow();
+        service.updateNode(5L, edited.id(), new UpdateDraftNodeRequest(
+                "用户改过的第一段",
+                "USER_MODIFIED_AFTER_AI"
+        ));
+
+        List<DraftNodeDto> reinitialized = service.reinitializeNodes(
+                5L,
+                new ReinitializeDraftNodesRequest("FROM_SOURCE_DOCUMENT", true)
+        );
+
+        assertThat(reinitialized)
+                .filteredOn(node -> node.templateNodeKey().equals(edited.templateNodeKey()))
+                .extracting(DraftNodeDto::content)
+                .containsExactly("用户改过的第一段");
     }
 
     @Test
@@ -190,6 +248,12 @@ class DraftNodeServiceTest {
         return new DraftDetailDto(5L, "NOTICE", "未命名通知", "DRAFT", 9L, List.of());
     }
 
+    private DraftDetailDto draftWithTemplateAndOneLegacyBody() {
+        return new DraftDetailDto(5L, "NOTICE", "旧草稿", "DRAFT", 9L, List.of(
+                new DraftBlockDto(1L, "BODY_PARAGRAPH", "旧正文块不应被复制", 30)
+        ));
+    }
+
     private StructureMappingProfile publishedMapping() {
         return new StructureMappingProfile(
                 21L,
@@ -254,6 +318,27 @@ class DraftNodeServiceTest {
         );
     }
 
+    private StructureMappingProfile multiBodyPublishedMapping() {
+        return new StructureMappingProfile(
+                23L,
+                9L,
+                2,
+                "PUBLISHED",
+                List.of(
+                        item("multi-title", "TITLE", 10),
+                        item("multi-body-1", "BODY", 30),
+                        item("multi-body-2", "BODY", 40),
+                        item("multi-body-3", "BODY", 50)
+                ),
+                List.of(),
+                4,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
     private StructureMappingItem item(String nodeKey, String role, int sortOrder) {
         return new StructureMappingItem(nodeKey, role, "", "CONFIRMED", "USER", 1, "", sortOrder);
     }
@@ -287,6 +372,24 @@ class DraftNodeServiceTest {
                         node("reference-date", "DATE", "2026年5月30日", 20),
                         node("reference-recipient", "RECIPIENT", "同志们：", 30),
                         node("reference-body", "BODY", "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。", 40)
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
+    }
+
+    private DocumentStructureProfile multiBodyStructureProfile() {
+        return new DocumentStructureProfile(
+                1,
+                "hash",
+                "document-structure-v2",
+                List.of(
+                        node("multi-title", "TITLE", "多段正文测试", 10),
+                        node("multi-body-1", "BODY", "第一段源正文", 30),
+                        node("multi-body-2", "BODY", "第二段源正文", 40),
+                        node("multi-body-3", "BODY", "第三段源正文", 50)
                 ),
                 List.of(),
                 List.of(),

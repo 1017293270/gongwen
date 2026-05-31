@@ -102,8 +102,8 @@ Completion evidence format:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | T18 | 已完成 | Integration Agent | P10D | P10E contracts, final API boundaries, fixture baseline | `9b8d517` | `git status --short --branch`; speech fixture inspection command | Must preserve P10D APIs while adding P10E endpoints |
 | T19 | 已完成 | Backend Structure Agent | T18 | fact-first DOCX structure extraction | `9b8d517` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Complex OOXML features become explicit risk nodes rather than silent omissions |
-| T20 | 已完成 | Backend Semantic Agent | T19 | independent semantic role suggester | 本提交（T20 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Suggestions remain advisory and facts remain unchanged; more document types can add heuristics later |
-| T21 | 未开始 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.*"` | Existing user-edited nodes must not be overwritten without explicit reinitialize request |
+| T20 | 已完成 | Backend Semantic Agent | T19 | independent semantic role suggester | `d27e917` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Suggestions remain advisory and facts remain unchanged; more document types can add heuristics later |
+| T21 | 已完成 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization | 本提交（T21 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | Existing nodes are kept until explicit reinitialize; frontend action remains T23 |
 | T22 | 未开始 | Frontend Template Agent | T20 | complete structure mapping workspace |  | `npm test -- src/App.test.tsx src/components/template/TemplateParseWorkspace.test.tsx`; `npm run build` | `App.tsx` must shrink through component extraction instead of growing further |
 | T23 | 未开始 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup |  | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | Workbench preview remains approximate and must be labelled correctly |
 | T24 | 未开始 | Backend Export Agent | T19, T21 | original DOCX in-place replacement export for reference templates |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.*" --tests "com.gongwen.assistant.exporting.word.*"` | Multi-paragraph replacement into one original paragraph needs deterministic behavior |
@@ -117,7 +117,9 @@ Completion evidence format:
 | 2026-05-31 | Plan | Codex | plan document change | `git status --short --branch` | plan written on dirty P10D branch without touching feature code | implementation not started |
 | 2026-05-31 | T18 | Codex Integration Agent | `9b8d517` | `git status --short --branch`; Python fixture inspection | pass; checkpoint commit left branch clean, speech fixture has 20 main paragraphs, 1 table, header `内部测试资料`, footer `测试文档 \| 讲话稿范文示例` | implementation starts at T19; existing P10D APIs must remain compatible |
 | 2026-05-31 | T19 | Codex Backend Structure Agent | `9b8d517` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; extractor now reads DOCX bytes directly, emits v2 fact nodes for body paragraphs, table cell paragraphs, headers and footers, and keeps old `DocumentNode` constructor compatibility | role suggestions intentionally remain `UNKNOWN` until T20 semantic suggester |
-| 2026-05-31 | T20 | Codex Backend Semantic Agent | 本提交（T20 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; upload now persists semantic suggestions for fact nodes, speech headings/date/recipient/body are suggested, and late body unit/meta keyword false positives are demoted | suggestions are deterministic heuristics and remain user-confirmable mapping defaults |
+| 2026-05-31 | T20 | Codex Backend Semantic Agent | `d27e917` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; upload now persists semantic suggestions for fact nodes, speech headings/date/recipient/body are suggested, and late body unit/meta keyword false positives are demoted | suggestions are deterministic heuristics and remain user-confirmable mapping defaults |
+| 2026-05-31 | T21 | Codex Backend Draft Agent | 本提交（T21 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; initialize now uses each source node text, avoids duplicate legacy body copy, keeps existing nodes non-destructively, and adds explicit reinitialize endpoint with preserve-user-edits behavior | frontend reinitialize action and preview cleanup remain T23 |
+| 2026-05-31 | T18-T21 | Codex Integration Agent | 本提交（T21 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest" --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; fact extraction, upload persistence, semantic suggestions, parser demotion, and draft node initialize/reinitialize contracts pass together | full backend/frontend suites and browser smoke remain for T25/T26 or CI |
 
 ## Agent File Boundaries
 
@@ -861,7 +863,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Add failing duplicated body regression test**
+- [x] **Step 1: Add failing duplicated body regression test**
 
   In `DraftNodeServiceTest.java`, add:
 
@@ -886,7 +888,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 2: Add failing reinitialize preservation test**
+- [x] **Step 2: Add failing reinitialize preservation test**
 
   Add:
 
@@ -913,7 +915,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 3: Run failing draft tests**
+- [x] **Step 3: Run failing draft tests**
 
   Run:
 
@@ -926,7 +928,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - FAIL on duplicate body behavior and missing reinitialize API.
 
-- [ ] **Step 4: Add reinitialize request record**
+- [x] **Step 4: Add reinitialize request record**
 
   Create:
 
@@ -943,7 +945,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 5: Fix body initialization logic**
+- [x] **Step 5: Fix body initialization logic**
 
   Modify `DraftNodeService.initialContent` rules:
 
@@ -959,7 +961,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 6: Add `reinitializeNodes` service method**
+- [x] **Step 6: Add `reinitializeNodes` service method**
 
   Behavior:
 
@@ -969,7 +971,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - If `preserveUserEditedNodes=true`, copy content/status/format override from existing node with same `templateNodeKey` and role when status is `USER_FILLED`, `USER_MODIFIED_AFTER_AI`, `AI_GENERATED`, or `FORMAT_OVERRIDDEN`.
   - Replace draft nodes in repository.
 
-- [ ] **Step 7: Add controller endpoint**
+- [x] **Step 7: Add controller endpoint**
 
   In `DraftNodeController`, add:
 
@@ -983,7 +985,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 8: Run draft node tests**
+- [x] **Step 8: Run draft node tests**
 
   Run:
 
@@ -996,7 +998,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 9: Update Progress Board and Progress Log**
+- [x] **Step 9: Update Progress Board and Progress Log**
 
   Record exact test command and result.
 

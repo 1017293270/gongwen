@@ -31,6 +31,14 @@ public class DraftNodeController {
         return ApiResponse.ok(service.initializeNodes(draftId));
     }
 
+    @PostMapping("/reinitialize")
+    public ApiResponse<List<DraftNodeDto>> reinitialize(
+            @PathVariable long draftId,
+            @RequestBody(required = false) ReinitializeDraftNodesRequest request
+    ) {
+        return ApiResponse.ok(service.reinitializeNodes(draftId, request));
+    }
+
     @GetMapping
     public ApiResponse<List<DraftNodeDto>> list(@PathVariable long draftId) {
         return ApiResponse.ok(service.listNodes(draftId));
