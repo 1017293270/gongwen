@@ -250,6 +250,29 @@ export type DocumentStructureNode = {
   path: string;
   formatting: TemplateStructureFormatting | null;
   riskCodes: string[];
+  location?: {
+    part: string;
+    paragraphIndex: number | null;
+    tableIndex: number | null;
+    rowIndex: number | null;
+    cellIndex: number | null;
+    cellParagraphIndex: number | null;
+  } | null;
+  runs?: Array<{
+    runIndex: number;
+    text: string;
+    eastAsiaFontFamily: string | null;
+    latinFontFamily: string | null;
+    fontSizeHalfPoints: number | null;
+    bold: boolean | null;
+    italic: boolean | null;
+    colorHex: string | null;
+  }>;
+  numbering?: {
+    numId: string | null;
+    ilvl: string | null;
+    styleId: string | null;
+  } | null;
 };
 
 export type DocumentStructureProfile = {

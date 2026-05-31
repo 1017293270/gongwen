@@ -103,8 +103,8 @@ Completion evidence format:
 | T18 | 已完成 | Integration Agent | P10D | P10E contracts, final API boundaries, fixture baseline | `9b8d517` | `git status --short --branch`; speech fixture inspection command | Must preserve P10D APIs while adding P10E endpoints |
 | T19 | 已完成 | Backend Structure Agent | T18 | fact-first DOCX structure extraction | `9b8d517` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Complex OOXML features become explicit risk nodes rather than silent omissions |
 | T20 | 已完成 | Backend Semantic Agent | T19 | independent semantic role suggester | `d27e917` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Suggestions remain advisory and facts remain unchanged; more document types can add heuristics later |
-| T21 | 已完成 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization | 本提交（T21 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | Existing nodes are kept until explicit reinitialize; frontend action remains T23 |
-| T22 | 未开始 | Frontend Template Agent | T20 | complete structure mapping workspace |  | `npm test -- src/App.test.tsx src/components/template/TemplateParseWorkspace.test.tsx`; `npm run build` | `App.tsx` must shrink through component extraction instead of growing further |
+| T21 | 已完成 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization | `416f912` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | Existing nodes are kept until explicit reinitialize; frontend action remains T23 |
+| T22 | 已完成 | Frontend Template Agent | T20 | complete structure mapping workspace | 本提交（T22 实现） | `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | `App.tsx` template workspace is extracted; deeper workbench preview cleanup remains T23 |
 | T23 | 未开始 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup |  | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | Workbench preview remains approximate and must be labelled correctly |
 | T24 | 未开始 | Backend Export Agent | T19, T21 | original DOCX in-place replacement export for reference templates |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.*" --tests "com.gongwen.assistant.exporting.word.*"` | Multi-paragraph replacement into one original paragraph needs deterministic behavior |
 | T25 | 未开始 | QA Agent | T19-T24 | fixture regression suite and render verification |  | focused backend regression; focused frontend regression; `npm run build`; render smoke when LibreOffice is available | Browser automation may still be unavailable; document exact fallback |
@@ -118,8 +118,9 @@ Completion evidence format:
 | 2026-05-31 | T18 | Codex Integration Agent | `9b8d517` | `git status --short --branch`; Python fixture inspection | pass; checkpoint commit left branch clean, speech fixture has 20 main paragraphs, 1 table, header `内部测试资料`, footer `测试文档 \| 讲话稿范文示例` | implementation starts at T19; existing P10D APIs must remain compatible |
 | 2026-05-31 | T19 | Codex Backend Structure Agent | `9b8d517` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; extractor now reads DOCX bytes directly, emits v2 fact nodes for body paragraphs, table cell paragraphs, headers and footers, and keeps old `DocumentNode` constructor compatibility | role suggestions intentionally remain `UNKNOWN` until T20 semantic suggester |
 | 2026-05-31 | T20 | Codex Backend Semantic Agent | `d27e917` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; upload now persists semantic suggestions for fact nodes, speech headings/date/recipient/body are suggested, and late body unit/meta keyword false positives are demoted | suggestions are deterministic heuristics and remain user-confirmable mapping defaults |
-| 2026-05-31 | T21 | Codex Backend Draft Agent | 本提交（T21 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; initialize now uses each source node text, avoids duplicate legacy body copy, keeps existing nodes non-destructively, and adds explicit reinitialize endpoint with preserve-user-edits behavior | frontend reinitialize action and preview cleanup remain T23 |
-| 2026-05-31 | T18-T21 | Codex Integration Agent | 本提交（T21 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest" --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; fact extraction, upload persistence, semantic suggestions, parser demotion, and draft node initialize/reinitialize contracts pass together | full backend/frontend suites and browser smoke remain for T25/T26 or CI |
+| 2026-05-31 | T21 | Codex Backend Draft Agent | `416f912` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; initialize now uses each source node text, avoids duplicate legacy body copy, keeps existing nodes non-destructively, and adds explicit reinitialize endpoint with preserve-user-edits behavior | frontend reinitialize action and preview cleanup remain T23 |
+| 2026-05-31 | T18-T21 | Codex Integration Agent | `416f912` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest" --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; fact extraction, upload persistence, semantic suggestions, parser demotion, and draft node initialize/reinitialize contracts pass together | full backend/frontend suites remain for T25/T26 or CI |
+| 2026-05-31 | T22 | Codex Frontend Template Agent | 本提交（T22 实现） | `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; template parse workspace extracted from `App.tsx`, all fact nodes render with separate fact type and role suggestion, selected nodes support batch role changes, draft save and publish actions remain wired | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
 
 ## Agent File Boundaries
 
@@ -1033,7 +1034,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Add failing UI test for all nodes visible**
+- [x] **Step 1: Add failing UI test for all nodes visible**
 
   In `TemplateParseWorkspace.test.tsx`, render a profile with:
 
@@ -1056,11 +1057,11 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   expect(screen.getByLabelText('映射角色：在全区重点工作推进会上的讲话')).toHaveValue('TITLE');
   ```
 
-- [ ] **Step 2: Add failing UI test for batch actions**
+- [x] **Step 2: Add failing UI test for batch actions**
 
   Assert that selecting two nodes and clicking `标为正文` changes both role selects to `BODY`, then save calls the provided `onSaveMappingDraft`.
 
-- [ ] **Step 3: Run failing frontend tests**
+- [x] **Step 3: Run failing frontend tests**
 
   Run:
 
@@ -1073,7 +1074,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - FAIL because components do not exist.
 
-- [ ] **Step 4: Create `StructureNodeTree`**
+- [x] **Step 4: Create `StructureNodeTree`**
 
   Required props:
 
@@ -1095,7 +1096,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - risk chips when `riskCodes.length > 0`.
   - stable checkbox per node.
 
-- [ ] **Step 5: Create `MappingBulkToolbar`**
+- [x] **Step 5: Create `MappingBulkToolbar`**
 
   Required actions:
 
@@ -1108,7 +1109,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   Disable buttons when no nodes are selected.
 
-- [ ] **Step 6: Create `TemplateParseWorkspace`**
+- [x] **Step 6: Create `TemplateParseWorkspace`**
 
   Move existing parse-workspace body from `App.tsx` and wire new tree/toolbar.
 
@@ -1120,7 +1121,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - Mapping actions card.
   - Validation messages.
 
-- [ ] **Step 7: Replace inline App workspace**
+- [x] **Step 7: Replace inline App workspace**
 
   Modify `App.tsx` so it imports and uses:
 
@@ -1143,7 +1144,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   />
   ```
 
-- [ ] **Step 8: Run frontend focused tests and build**
+- [x] **Step 8: Run frontend focused tests and build**
 
   Run:
 
@@ -1157,7 +1158,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 9: Update Progress Board and Progress Log**
+- [x] **Step 9: Update Progress Board and Progress Log**
 
   Record exact commands and result.
 

@@ -337,7 +337,7 @@ Agent: 后端
 - Agent P10E-Structure：按 `docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md` 升级 `DocumentStructureProfile` 为 fact-first OOXML 结构层，禁止把语义猜测写死为事实。
 - Agent P10E-Semantic：独立语义建议器，覆盖讲话稿、通知、请示、报告常见结构；正文开始后不得因“单位/机关/号”等词把正文误判为 `UNIT`/`META`。
 - Agent P10E-Draft：修 `DraftNode` 初始化和 reinitialize，按源节点文本生成，消除旧 `DraftBlock` / `BODY_PARAGRAPH` 复制污染。
-- Agent P10E-Frontend：拆出模板解析工作台和工作台预览组件，展示完整结构树、映射批量操作和“结构化编辑预览”边界。
+- Agent P10E-Frontend：模板解析工作台拆分和批量映射已完成；下一步优先拆工作台预览组件，接入显式 reinitialize，并标清“结构化编辑预览”边界。
 - Agent P10E-Export：实现无占位符参考文档的原 DOCX 原位替换导出，保留占位符模板原有导出路径。
 - Agent P10E-QA：以示例 DOCX 和动态 fixtures 固化结构、映射、初始化、导出和渲染回归。
 - 集成 Agent：先查 `git status --short --branch`，确认没有覆盖用户未提交改动；对齐 API 字段后跑 focused 后端测试、前端 `npm run build`，必要时再跑更广测试。
@@ -404,7 +404,7 @@ P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新�
 
 P10D 后续修正已明确文种和模板边界：文种仅作为分类、列表归档、权限过滤和 AI 提示倾向，不再隐含固定格式；新建草稿不再自动塞“各部门、各直属单位”“附件：无”“办公室”和日期等通知骨架，草稿结构应来自已发布模板映射、上传范文或后续 AI 生成结果。旧 `DraftBlock` 兼容链路仍保留用于读取历史草稿、保存和导出 fallback。
 
-P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。P10E T18-T21 已落地：上传模板会持久化 `document-structure-v2` fact nodes（正文段落、表格段落、页眉页脚、位置、runs、编号事实），`DocumentSemanticSuggester` 在事实层上给出标题、主送、日期、正文、正文标题、发文机关、文号等建议，正文开始后不再因“单位/机关/号”等词误判为 `UNIT`/`META`；`DraftNode.initializeNodes` 对已有节点保持非破坏性，首次初始化优先使用源节点文本，显式 `POST /api/drafts/{draftId}/nodes/reinitialize` 才按当前发布映射重建，并可保留用户已编辑节点。
+P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。P10E T18-T22 已落地：上传模板会持久化 `document-structure-v2` fact nodes（正文段落、表格段落、页眉页脚、位置、runs、编号事实），`DocumentSemanticSuggester` 在事实层上给出标题、主送、日期、正文、正文标题、发文机关、文号等建议，正文开始后不再因“单位/机关/号”等词误判为 `UNIT`/`META`；`DraftNode.initializeNodes` 对已有节点保持非破坏性，首次初始化优先使用源节点文本，显式 `POST /api/drafts/{draftId}/nodes/reinitialize` 才按当前发布映射重建，并可保留用户已编辑节点；前端模板解析工作台已拆到 `frontend/src/components/template/**`，完整展示 fact tree，分离事实节点类型和语义建议，支持选中节点批量标为正文、一级标题、固定文本或忽略，并继续复用保存草稿和发布映射 API。
 
 当前核心 API：
 

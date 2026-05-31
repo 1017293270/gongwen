@@ -6,7 +6,6 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
-  ClipboardList,
   Eye,
   FileCog,
   FileDown,
@@ -47,7 +46,6 @@ import {
   getAiProviderSettings,
   getCurrentUser,
   getRenderPreview,
-  getRenderPreviewPageUrl,
   getStructureMapping,
   getTemplateProfile,
   getTemplateDocumentKind,
@@ -106,6 +104,7 @@ import {
   type WorkbenchPreviewRequestStatus,
 } from './components/workbench/WorkbenchExportPanel';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
+import { TemplateParseWorkspace } from './components/template/TemplateParseWorkspace';
 import {
   qualitySummary,
   WorkbenchQualityPanel,
@@ -225,19 +224,6 @@ const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: strin
 ];
 
 type NodeAiActionKind = 'local-operation' | 'quality-check' | 'none';
-
-const MAPPING_ROLE_OPTIONS = [
-  { value: 'UNKNOWN', label: '待确认' },
-  { value: 'TITLE', label: '标题' },
-  { value: 'RECIPIENT', label: '主送' },
-  { value: 'BODY', label: '正文' },
-  { value: 'BODY_HEADING_LEVEL_1', label: '一级标题' },
-  { value: 'ATTACHMENT_NOTE', label: '附件说明' },
-  { value: 'SIGNATURE', label: '落款' },
-  { value: 'DATE', label: '日期' },
-  { value: 'STATIC_TEXT', label: '固定文本' },
-  { value: 'IGNORE', label: '忽略' },
-];
 
 const DEFAULT_AI_SETTINGS: AiProviderSettings = {
   provider: 'mock',
@@ -3381,296 +3367,6 @@ function TemplateManagementPage({
   );
 }
 
-function TemplateParseWorkspace({
-  documentKind,
-  mappingItems,
-  mappingMessage,
-  mappingProfile,
-  mappingStatus,
-  profile,
-  structureProfile,
-  renderPreview,
-  renderPreviewStatus,
-  renderPreviewMessage,
-  onMappingRoleChange,
-  onPublishMapping,
-  onSaveMappingDraft,
-  onRequestRenderPreview,
-}: {
-  documentKind: TemplateDocumentKind | null;
-  mappingItems: StructureMappingItem[];
-  mappingMessage: string;
-  mappingProfile: StructureMappingProfile | null;
-  mappingStatus: 'idle' | 'loading' | 'saving' | 'publishing' | 'blocked' | 'error';
-  profile: TemplateProfile;
-  structureProfile: DocumentStructureProfile | null;
-  renderPreview: DocumentRenderPreview | null;
-  renderPreviewStatus: 'idle' | 'loading' | 'requesting' | 'error';
-  renderPreviewMessage: string;
-  onMappingRoleChange: (nodeKey: string, role: string, sortOrder: number) => void;
-  onPublishMapping: () => void;
-  onSaveMappingDraft: () => void;
-  onRequestRenderPreview: () => void;
-}) {
-  const warnings = documentKind?.blockingWarnings ?? [];
-  const blocksAutoTemplate = documentKind?.recommendedWorkflow === 'BLOCK_AUTO_TEMPLATE' || warnings.length > 0;
-  const nodes = structureProfile?.nodes ?? [];
-  const mappingByNodeKey = useMemo(
-    () => new Map(mappingItems.map((item) => [item.nodeKey, item])),
-    [mappingItems],
-  );
-
-  return (
-    <div className="template-parse-workspace">
-      <section className="template-profile-box template-profile-wide">
-        <div className="template-workspace-section-header">
-          <div>
-            <h3>文档类型</h3>
-            <p>系统会把手册、制度和普通文档提示为非自动套版流程，避免误当模板发布。</p>
-          </div>
-          <span className={`status-chip ${blocksAutoTemplate ? 'danger' : ''}`}>
-            {documentKindLabel(documentKind?.documentKind ?? 'UNKNOWN_DOCUMENT')}
-          </span>
-        </div>
-        {blocksAutoTemplate && (
-          <StatusMessage
-            title="该文件不适合直接作为自动套版模板"
-            tone="warning"
-          >
-            {(warnings.length > 0 ? warnings : ['建议先换用标准模板或范文，再进入结构映射。']).map((warning) => (
-              <p key={warning}>{warning}</p>
-            ))}
-          </StatusMessage>
-        )}
-        <div className="template-kind-grid">
-          <div>
-            <span>推荐流程</span>
-            <strong>{workflowLabel(documentKind?.recommendedWorkflow ?? 'REVIEW_REQUIRED')}</strong>
-          </div>
-          <div>
-            <span>置信度</span>
-            <strong>{Math.round((documentKind?.confidence ?? 0) * 100)}%</strong>
-          </div>
-          <div>
-            <span>来源</span>
-            <strong>{documentKind?.source || 'profile'}</strong>
-          </div>
-          <div>
-            <span>文种</span>
-            <strong>{documentKind?.documentTypeCode || 'UNKNOWN'}</strong>
-          </div>
-        </div>
-        {documentKind?.reasonCodes && documentKind.reasonCodes.length > 0 && (
-          <div className="template-reason-list" aria-label="识别原因">
-            {documentKind.reasonCodes.map((reason) => (
-              <span key={reason}>{reason}</span>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="template-profile-box template-profile-wide">
-        <div className="template-workspace-section-header">
-          <div>
-            <h3>结构树</h3>
-            <p>{structureProfile ? `${nodes.length} 个结构节点 · ${structureProfile.extractorVersion}` : '结构 profile 暂不可用，使用模板 profile 兜底展示。'}</p>
-          </div>
-        </div>
-        {nodes.length > 0 ? (
-          <div className="template-node-tree" aria-label="模板结构树">
-            {nodes.slice(0, 30).map((node) => (
-              <article className="template-node-row" key={node.nodeKey}>
-                <ChevronRight aria-hidden="true" />
-                <div>
-                  <strong>{node.roleSuggestion || node.nodeType}</strong>
-                  <span>{node.nodeType} · {node.path}</span>
-                  <p>{node.textPreview || '该节点暂无可展示文字'}</p>
-                </div>
-                {node.riskCodes.length > 0 && <small>{node.riskCodes.length} 个风险</small>}
-                <label className="template-node-role-control">
-                  <span>角色</span>
-                  <select
-                    aria-label={`映射角色：${node.textPreview || node.nodeKey}`}
-                    onChange={(event) => onMappingRoleChange(node.nodeKey, event.target.value, node.orderIndex)}
-                    value={mappingByNodeKey.get(node.nodeKey)?.role ?? node.roleSuggestion ?? 'UNKNOWN'}
-                  >
-                    {MAPPING_ROLE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-              </article>
-            ))}
-          </div>
-        ) : (profile.structures ?? []).length > 0 ? (
-          <div className="template-node-tree" aria-label="模板结构树">
-            {(profile.structures ?? []).slice(0, 30).map((structure) => (
-              <article className="template-node-row" key={structure.structureKey}>
-                <ChevronRight aria-hidden="true" />
-                <div>
-                  <strong>{structure.label}</strong>
-                  <span>{structure.structureType} · {locationLabel(structure.locationType)}</span>
-                  <p>{structure.textPreview || '该结构暂无可展示文字'}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="empty-note">未识别到可展示的结构节点。</p>
-        )}
-      </section>
-
-      <section className="template-profile-box">
-        <h3>占位符</h3>
-        {profile.placeholders.length === 0 ? (
-          <p className="empty-note">未识别到显式占位符。</p>
-        ) : profile.placeholders.map((placeholder) => (
-          <div className="template-profile-item" key={`${placeholder.key}-${placeholder.paragraphKey}`}>
-            <ClipboardList aria-hidden="true" />
-            <span>{placeholder.key}</span>
-            {placeholder.splitAcrossRuns && <small>跨 run</small>}
-          </div>
-        ))}
-      </section>
-
-      <section className="template-profile-box">
-        <h3>解析风险</h3>
-        {profile.validationItems.length === 0 && (structureProfile?.risks ?? []).length === 0 ? (
-          <p className="empty-note">未发现解析风险。</p>
-        ) : (
-          [...profile.validationItems, ...(structureProfile?.risks ?? [])].map((item, index) => (
-            <div className="template-profile-risk" key={`${item.code}-${item.message}-${index}`}>
-              <strong>{item.code}</strong>
-              <span>{item.message}</span>
-            </div>
-          ))
-        )}
-      </section>
-
-      <section className="template-profile-box template-profile-wide">
-        <div className="template-workspace-section-header">
-          <div>
-            <h3>结构映射</h3>
-            <p>{mappingProfile ? `v${mappingProfile.versionNo} · ${mappingProfile.status} · ${mappingProfile.confirmedCount} 个已确认` : mappingMessage || '映射暂不可用'}</p>
-          </div>
-          <div className="template-mapping-actions">
-            <Button
-              disabled={!mappingProfile || mappingStatus === 'saving' || mappingStatus === 'publishing'}
-              icon={<Save aria-hidden="true" />}
-              isLoading={mappingStatus === 'saving'}
-              loadingLabel="保存中"
-              onClick={onSaveMappingDraft}
-              variant="secondary"
-            >
-              保存草稿
-            </Button>
-            <Button
-              disabled={!mappingProfile || mappingStatus === 'saving' || mappingStatus === 'publishing'}
-              icon={<CheckCircle2 aria-hidden="true" />}
-              isLoading={mappingStatus === 'publishing'}
-              loadingLabel="发布中"
-              onClick={onPublishMapping}
-            >
-              发布映射
-            </Button>
-          </div>
-        </div>
-        {mappingStatus === 'error' && (
-          <StatusMessage title={mappingMessage || '结构映射不可用'} tone="warning" />
-        )}
-        {mappingStatus === 'blocked' && (
-          <StatusMessage title={mappingMessage || '映射发布被阻断'} tone="warning">
-            {(mappingProfile?.validationItems ?? []).map((item) => (
-              <p key={`${item.code}-${item.role ?? ''}-${item.message}`}>{item.message}</p>
-            ))}
-          </StatusMessage>
-        )}
-        {mappingStatus === 'idle' && mappingMessage && (
-          <p className="empty-note">{mappingMessage}</p>
-        )}
-      </section>
-
-      <RenderPreviewPanel
-        preview={renderPreview}
-        status={renderPreviewStatus}
-        message={renderPreviewMessage}
-        onRequest={onRequestRenderPreview}
-      />
-    </div>
-  );
-}
-
-function RenderPreviewPanel({
-  preview,
-  status,
-  message,
-  onRequest,
-}: {
-  preview: DocumentRenderPreview | null;
-  status: 'idle' | 'loading' | 'requesting' | 'error';
-  message: string;
-  onRequest: () => void;
-}) {
-  return (
-    <section className="template-profile-box">
-      <div className="template-workspace-section-header">
-        <div>
-          <h3>原貌预览</h3>
-          <p>预览由后端渲染任务生成，当前只展示状态和页面入口。</p>
-        </div>
-        <Button
-          disabled={status === 'loading' || status === 'requesting'}
-          icon={<RotateCcw aria-hidden="true" />}
-          isLoading={status === 'requesting'}
-          loadingLabel="提交中"
-          onClick={onRequest}
-          variant="secondary"
-        >
-          生成预览
-        </Button>
-      </div>
-
-      {status === 'loading' && (
-        <StatusMessage title={message || '正在读取渲染预览状态'} tone="info" />
-      )}
-      {status === 'error' && (
-        <StatusMessage title={message || '渲染预览状态加载失败'} tone="warning" />
-      )}
-      {preview?.status === 'RENDERING' && (
-        <StatusMessage title="渲染预览生成中" tone="info" />
-      )}
-      {preview?.status === 'FAILED' && (
-        <StatusMessage title="预览生成失败" tone="warning">
-          <p>{renderPreviewIssueMessage(preview)}</p>
-        </StatusMessage>
-      )}
-      {preview?.status === 'UNSUPPORTED' && (
-        <StatusMessage title="当前环境暂不支持渲染预览" tone="warning">
-          <p>{renderPreviewIssueMessage(preview)}</p>
-        </StatusMessage>
-      )}
-      {!preview && status === 'idle' && (
-        <p className="empty-note">尚未生成预览。</p>
-      )}
-      {preview?.status === 'PENDING' && (
-        <StatusMessage title={message || '预览任务已提交，稍后可再次刷新状态。'} tone="info" />
-      )}
-      {preview?.status === 'READY' && (
-        <div className="template-preview-page-list" aria-label="渲染预览页面">
-          <span>{preview.pageCount} 页 · {preview.renderer}</span>
-          {preview.id && preview.manifest.pages.length > 0 ? preview.manifest.pages.slice(0, 4).map((page) => (
-            <a href={getRenderPreviewPageUrl(preview.id as number, page.pageNumber)} key={page.pageNumber} rel="noreferrer" target="_blank">
-              第 {page.pageNumber} 页 · {page.widthPixels}×{page.heightPixels}
-            </a>
-          )) : (
-            <span>暂无可下载页面。</span>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function TemplateStructureEditor({
   structure,
   override,
@@ -6137,31 +5833,6 @@ function templateKindLabel(templateKind: string) {
   return labels[templateKind] ?? templateKind;
 }
 
-function documentKindLabel(documentKind: string) {
-  const labels: Record<string, string> = {
-    PLACEHOLDER_TEMPLATE: '占位符模板',
-    STYLE_TEMPLATE: '样式模板',
-    REFERENCE_DOCUMENT: '参考范文',
-    OFFICIAL_DOCUMENT: '正式公文',
-    MANUAL_OR_GUIDE: '手册/说明',
-    POLICY_OR_REGULATION: '制度/规范',
-    ORDINARY_DOCUMENT: '普通文档',
-    UNKNOWN_DOCUMENT: '待确认',
-  };
-  return labels[documentKind] ?? documentKind;
-}
-
-function workflowLabel(workflow: string) {
-  const labels: Record<string, string> = {
-    AUTO_TEMPLATE: '可进入自动套版',
-    REVIEW_AND_MAP: '先审核并映射结构',
-    REVIEW_AND_ADD_PLACEHOLDERS: '先审核并补占位符',
-    BLOCK_AUTO_TEMPLATE: '阻断自动套版',
-    REVIEW_REQUIRED: '需要人工确认',
-  };
-  return labels[workflow] ?? workflow;
-}
-
 function slotKeyForMappingRole(role: string) {
   switch (role) {
     case 'TITLE':
@@ -6210,14 +5881,6 @@ function confirmVisibleMappingItems(items: StructureMappingItem[]) {
       source: item.source || 'SYSTEM',
     };
   });
-}
-
-function renderPreviewIssueMessage(preview: DocumentRenderPreview) {
-  if (preview.errorCode === 'RENDER_PREVIEW_UNSUPPORTED'
-    && (preview.errorMessage ?? '').toLowerCase().includes('libreoffice')) {
-    return '本机没有可用的 LibreOffice，无法把 DOCX 渲染成原貌预览。安装 LibreOffice 后，或把 GONGWEN_LIBREOFFICE_PATH 指到 soffice.exe，再重新生成预览。';
-  }
-  return preview.errorMessage ?? preview.errorCode ?? '请稍后重试。';
 }
 
 function nodeRoleForBlockType(blockType: string) {
