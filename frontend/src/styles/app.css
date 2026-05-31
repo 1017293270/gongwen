@@ -2806,7 +2806,7 @@ button.template-card:disabled {
   min-width: 0;
 }
 
-.template-workspace-section-header > div {
+.template-workspace-section-header > div:not(.template-mapping-actions) {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -2946,7 +2946,9 @@ button.template-card:disabled {
 .template-mapping-actions {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: var(--space-2);
+  justify-content: flex-end;
 }
 
 .template-preview-page-list {
@@ -3493,7 +3495,8 @@ button.template-card:disabled {
 
   .template-mapping-actions {
     width: 100%;
-    flex-direction: column;
+    flex-direction: row;
+    justify-content: flex-start;
   }
 
   .template-list-toolbar,

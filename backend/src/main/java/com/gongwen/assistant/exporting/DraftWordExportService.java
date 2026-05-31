@@ -9,9 +9,6 @@ import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
 import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
-import com.gongwen.assistant.quality.QualityCheckItem;
-import com.gongwen.assistant.quality.QualityCheckRepository;
-import com.gongwen.assistant.quality.QualityCheckResponse;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
@@ -61,7 +58,6 @@ public class DraftWordExportService {
     private final TemplateStructureFormattingRepository templateStructureFormattingRepository;
     private final TemplateEffectiveFormattingService templateEffectiveFormattingService;
     private final WordExportService wordExportService;
-    private final QualityCheckRepository qualityCheckRepository;
     private final CurrentUserProvider currentUserProvider;
     private final DraftNodeRepository draftNodeRepository;
     private final StructureMappingRepository structureMappingRepository;
@@ -87,7 +83,6 @@ public class DraftWordExportService {
                 null,
                 null,
                 null,
-                null,
                 null
         );
     }
@@ -100,7 +95,6 @@ public class DraftWordExportService {
             TemplateStructureFormattingRepository templateStructureFormattingRepository,
             TemplateEffectiveFormattingService templateEffectiveFormattingService,
             WordExportService wordExportService,
-            QualityCheckRepository qualityCheckRepository,
             CurrentUserProvider currentUserProvider
     ) {
         this(
@@ -111,7 +105,6 @@ public class DraftWordExportService {
                 templateStructureFormattingRepository,
                 templateEffectiveFormattingService,
                 wordExportService,
-                qualityCheckRepository,
                 currentUserProvider,
                 null,
                 null,
@@ -128,7 +121,6 @@ public class DraftWordExportService {
             TemplateStructureFormattingRepository templateStructureFormattingRepository,
             TemplateEffectiveFormattingService templateEffectiveFormattingService,
             WordExportService wordExportService,
-            QualityCheckRepository qualityCheckRepository,
             CurrentUserProvider currentUserProvider,
             DraftNodeRepository draftNodeRepository,
             StructureMappingRepository structureMappingRepository,
@@ -141,7 +133,6 @@ public class DraftWordExportService {
         this.templateStructureFormattingRepository = templateStructureFormattingRepository;
         this.templateEffectiveFormattingService = templateEffectiveFormattingService;
         this.wordExportService = wordExportService;
-        this.qualityCheckRepository = qualityCheckRepository;
         this.currentUserProvider = currentUserProvider;
         this.draftNodeRepository = draftNodeRepository;
         this.structureMappingRepository = structureMappingRepository;
@@ -180,7 +171,6 @@ public class DraftWordExportService {
         TemplateProfile profile = templateProfile(templateVersionId);
         ensureDocumentKindAllowsExport(profile);
         ExportStructureContext structureContext = exportStructureContext(templateVersionId);
-        ensureQualityCheckAllowsExport(draft.id());
         List<DraftNode> draftNodes = draftNodes(draft.id());
         Map<String, TemplateStructureFormattingProfile> structureOverrides =
                 templateStructureFormattingRepository.findOverrides(templateVersionId);
@@ -201,31 +191,6 @@ public class DraftWordExportService {
                 profile,
                 traceSnapshot(structureContext, formattingContext, draftNodes)
         ));
-    }
-
-    private void ensureQualityCheckAllowsExport(long draftId) {
-        if (qualityCheckRepository == null) {
-            return;
-        }
-        QualityCheckResponse latest = qualityCheckRepository.findLatestByDraftId(draftId)
-                .orElseThrow(() -> new WordExportException(
-                        "QUALITY_CHECK_REQUIRED",
-                        "请先运行基础质检，通过后再导出 Word。",
-                        null
-                ));
-        if (!latest.exportBlocked()) {
-            return;
-        }
-        String blockingMessage = latest.items().stream()
-                .filter(item -> "ERROR".equalsIgnoreCase(item.severity()))
-                .findFirst()
-                .map(QualityCheckItem::message)
-                .orElse("基础质检存在阻断项。");
-        throw new WordExportException(
-                "QUALITY_CHECK_BLOCKED",
-                "导出已阻断：" + blockingMessage + " 请处理后重新质检。",
-                null
-        );
     }
 
     private CurrentUser currentUserOrNull() {

@@ -62,6 +62,39 @@ class DraftNodeServiceTest {
     }
 
     @Test
+    void reinitializesNodesWhenPublishedMappingChanges() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository nodes = new InMemoryDraftNodeRepository();
+        service(draftService, nodes, publishedMapping(), structureProfile()).initializeNodes(5L);
+
+        List<DraftNodeDto> refreshed = service(draftService, nodes, publishedMappingV2(), structureProfile()).initializeNodes(5L);
+
+        assertThat(refreshed).extracting(DraftNodeDto::structureMappingProfileId)
+                .containsOnly(22L);
+        assertThat(nodes.replaceCount).isEqualTo(2);
+    }
+
+    @Test
+    void initializesReferenceDocumentNodesFromSourceTextWhenDraftIsEmpty() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(emptyDraftWithTemplate());
+        DraftNodeService service = service(draftService, new InMemoryDraftNodeRepository(), referencePublishedMapping(), referenceStructureProfile());
+
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+
+        assertThat(initialized).extracting(DraftNodeDto::role)
+                .containsExactly("TITLE", "DATE", "RECIPIENT", "BODY");
+        assertThat(initialized).extracting(DraftNodeDto::content)
+                .containsExactly(
+                        "在全区重点工作推进会上的讲话",
+                        "2026年5月30日",
+                        "同志们：",
+                        "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。"
+                );
+    }
+
+    @Test
     void listsAndUpdatesNodeContentAfterDraftAccessCheck() {
         DraftService draftService = mock(DraftService.class);
         when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
@@ -153,6 +186,10 @@ class DraftNodeServiceTest {
         ));
     }
 
+    private DraftDetailDto emptyDraftWithTemplate() {
+        return new DraftDetailDto(5L, "NOTICE", "未命名通知", "DRAFT", 9L, List.of());
+    }
+
     private StructureMappingProfile publishedMapping() {
         return new StructureMappingProfile(
                 21L,
@@ -175,6 +212,48 @@ class DraftNodeServiceTest {
         );
     }
 
+    private StructureMappingProfile publishedMappingV2() {
+        return new StructureMappingProfile(
+                22L,
+                9L,
+                2,
+                "PUBLISHED",
+                List.of(
+                        item("title-node", "TITLE", 10),
+                        item("heading-node", "BODY_HEADING_LEVEL_1", 20),
+                        item("body-node", "BODY", 30),
+                        item("date-node", "DATE", 40)
+                ),
+                List.of(),
+                4,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private StructureMappingProfile referencePublishedMapping() {
+        return new StructureMappingProfile(
+                22L,
+                9L,
+                2,
+                "PUBLISHED",
+                List.of(
+                        item("reference-title", "TITLE", 10),
+                        item("reference-date", "DATE", 20),
+                        item("reference-recipient", "RECIPIENT", 30),
+                        item("reference-body", "BODY", 40)
+                ),
+                List.of(),
+                4,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
     private StructureMappingItem item(String nodeKey, String role, int sortOrder) {
         return new StructureMappingItem(nodeKey, role, "", "CONFIRMED", "USER", 1, "", sortOrder);
     }
@@ -190,6 +269,24 @@ class DraftNodeServiceTest {
                         node("body-node", "BODY", "模板正文", 30),
                         node("date-node", "DATE", "2026年5月30日", 40),
                         node("ignored-node", "IGNORE", "忽略内容", 50)
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
+    }
+
+    private DocumentStructureProfile referenceStructureProfile() {
+        return new DocumentStructureProfile(
+                1,
+                "hash",
+                "document-structure-v1",
+                List.of(
+                        node("reference-title", "TITLE", "在全区重点工作推进会上的讲话", 10),
+                        node("reference-date", "DATE", "2026年5月30日", 20),
+                        node("reference-recipient", "RECIPIENT", "同志们：", 30),
+                        node("reference-body", "BODY", "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署。", 40)
                 ),
                 List.of(),
                 List.of(),

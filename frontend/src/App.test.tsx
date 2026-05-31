@@ -1031,7 +1031,6 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
-      .mockResolvedValueOnce(jsonResponse(qualityCheckPass()))
       .mockResolvedValueOnce(docxResponse('测试模板-v2.docx'));
     stubFetch(fetchMock);
 
@@ -1043,9 +1042,7 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
       method: 'PUT',
     }));
-    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
-      method: 'POST',
-    }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/drafts/1/quality-check'))).toBe(false);
     expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
       method: 'POST',
     }));
@@ -1053,7 +1050,16 @@ describe('App', () => {
     expect(await screen.findByText('Word 已导出')).toBeInTheDocument();
   });
 
-  it('blocks Word export when the automatic quality check has blocking issues', async () => {
+  it('keeps Word export independent from manual quality check state', async () => {
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:word-export'),
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const exportDraft = { ...sampleDraft('导出阻断草稿'), templateVersionId: 9 };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([
@@ -1062,7 +1068,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
-      .mockResolvedValueOnce(jsonResponse(qualityCheckBlocked()));
+      .mockResolvedValueOnce(docxResponse('测试模板-v2.docx'));
     stubFetch(fetchMock);
 
     render(<App />);
@@ -1070,11 +1076,11 @@ describe('App', () => {
     await openWorkbench();
     await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: '导出 Word' }));
 
-    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/drafts/1/quality-check'))).toBe(false);
+    expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
       method: 'POST',
     }));
-    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/exports/drafts/1/word'))).toBe(false);
-    expect((await screen.findAllByText(/导出已阻断/)).length).toBeGreaterThan(0);
+    expect(clickSpy).toHaveBeenCalled();
   });
 
   it('marks true preview outdated after editing and refreshes it from the workbench', async () => {
@@ -1132,7 +1138,6 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
-      .mockResolvedValueOnce(jsonResponse(qualityCheckPass()))
       .mockResolvedValueOnce(errorResponse('EXPORT_REQUIRED_SLOT_EMPTY', '导出必填结构槽位为空：BODY（正文）'));
     stubFetch(fetchMock);
 
@@ -1190,9 +1195,6 @@ describe('App', () => {
         const payload = JSON.parse(String(init?.body));
         return Promise.resolve(jsonResponse({ ...draft, blocks: payload.blocks }));
       }
-      if (url.endsWith('/api/drafts/1/quality-check')) {
-        return Promise.resolve(jsonResponse(qualityCheckPass()));
-      }
       if (url.endsWith('/api/exports/drafts/1/word')) {
         return Promise.resolve(docxResponse('测试模板-v2.docx'));
       }
@@ -1214,6 +1216,7 @@ describe('App', () => {
     expect(bodyBlocks[0].content).toContain('2026年6月3日上午9:30。');
     expect(bodyBlocks[1].content).toContain('二、会议地点');
     expect(bodyBlocks[1].content).toContain('公司总部三楼第一会议室。');
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/drafts/1/quality-check'))).toBe(false);
   });
 
   it('shows retry state when outline generation fails', async () => {
@@ -1771,14 +1774,11 @@ describe('App', () => {
   it('creates a draft inside the selected document-type list before opening it in the workbench', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '5');
     const createdDraft = {
-      ...sampleDraft('未命名请示'),
+      ...sampleDraft('未命名草稿'),
       id: 8,
       documentTypeCode: 'REQUEST',
       templateVersionId: null,
-      blocks: [
-        { id: 10, blockType: 'TITLE', content: '未命名请示', sortOrder: 10 },
-        { id: 11, blockType: 'RECIPIENT', content: '', sortOrder: 20 },
-      ],
+      blocks: [],
     };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -1851,14 +1851,14 @@ describe('App', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ documentTypeCode: 'REQUEST', title: '未命名请示' }),
+      body: JSON.stringify({ documentTypeCode: 'REQUEST', title: '未命名草稿' }),
     }));
     expect(window.localStorage.getItem('gongwen.currentDraftId')).toBe('8');
     expect(screen.getByRole('button', { name: '草稿列表' })).toHaveAttribute('aria-current', 'page');
-    expect(await screen.findByRole('heading', { name: '未命名请示' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '未命名草稿' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '进入工作台' }));
-    expect(await screen.findByDisplayValue('未命名请示')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('未命名草稿')).toBeInTheDocument();
     expect(container.querySelector('.app-shell')).toHaveClass('app-shell--workbench-focus');
     expect(screen.getByRole('button', { name: '回到目录' })).toBeInTheDocument();
 
@@ -2112,6 +2112,170 @@ describe('App', () => {
     expect(await within(dialog).findByText('渲染预览生成中')).toBeInTheDocument();
   });
 
+  it('shows feedback after requesting a pending render preview', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([
+          { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+        ]));
+      }
+      if (url.endsWith('/api/templates?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          { id: 12, templateName: '通知映射模板', documentTypeCode: 'NOTICE', status: 'ACTIVE' },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          {
+            templateVersionId: 31,
+            templateId: 12,
+            templateName: '通知映射模板',
+            documentTypeCode: 'NOTICE',
+            versionNo: 1,
+            originalFileName: 'notice-template.docx',
+          },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions/31/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-profile')) {
+        return Promise.resolve(jsonResponse(mappingStructureProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/document-kind')) {
+        return Promise.resolve(jsonResponse(styleDocumentKind()));
+      }
+      if (url.endsWith('/api/templates/versions/31/render-preview') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(renderPreviewFixture('PENDING')));
+      }
+      if (url.endsWith('/api/templates/versions/31/render-preview')) {
+        return Promise.resolve(jsonResponse(renderPreviewFixture('PENDING')));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-mapping') && !init?.method) {
+        return Promise.resolve(jsonResponse(structureMappingFixture('DRAFT', [])));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
+    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
+    await userEvent.click(within(dialog).getByRole('button', { name: '生成预览' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/templates/versions/31/render-preview', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(await within(dialog).findByText('预览任务已提交，稍后可再次刷新状态。')).toBeInTheDocument();
+  });
+
+  it('confirms suggested roles when saving a mapping draft', async () => {
+    let savedItems: Array<{
+      nodeKey: string;
+      role: string;
+      slotKey: string;
+      status: string;
+      source: string;
+      confidence: number;
+      notes: string;
+      sortOrder: number;
+    }> = [];
+    const suggestedItems = [
+      {
+        nodeKey: 'title-node',
+        role: 'TITLE',
+        slotKey: 'title',
+        status: 'SUGGESTED',
+        source: 'RULE',
+        confidence: 0.65,
+        notes: '',
+        sortOrder: 10,
+      },
+      {
+        nodeKey: 'body-node',
+        role: 'BODY',
+        slotKey: 'body',
+        status: 'SUGGESTED',
+        source: 'RULE',
+        confidence: 0.65,
+        notes: '',
+        sortOrder: 20,
+      },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([
+          { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+        ]));
+      }
+      if (url.endsWith('/api/templates?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          { id: 12, templateName: '通知映射模板', documentTypeCode: 'NOTICE', status: 'ACTIVE' },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions?documentTypeCode=NOTICE')) {
+        return Promise.resolve(jsonResponse([
+          {
+            templateVersionId: 31,
+            templateId: 12,
+            templateName: '通知映射模板',
+            documentTypeCode: 'NOTICE',
+            versionNo: 1,
+            originalFileName: 'notice-template.docx',
+          },
+        ]));
+      }
+      if (url.endsWith('/api/templates/versions/31/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-profile')) {
+        return Promise.resolve(jsonResponse(mappingStructureProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/31/document-kind')) {
+        return Promise.resolve(jsonResponse(styleDocumentKind()));
+      }
+      if (url.endsWith('/api/templates/versions/31/render-preview')) {
+        return Promise.resolve(jsonResponse(renderPreviewFixture('PENDING')));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-mapping') && !init?.method) {
+        return Promise.resolve(jsonResponse(structureMappingFixture('DRAFT', suggestedItems)));
+      }
+      if (url.endsWith('/api/templates/versions/31/structure-mapping/draft') && init?.method === 'PUT') {
+        savedItems = JSON.parse(String(init.body)).items;
+        return Promise.resolve(jsonResponse(structureMappingFixture('DRAFT', savedItems)));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
+    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存草稿' }));
+
+    expect(savedItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ nodeKey: 'title-node', role: 'TITLE', status: 'CONFIRMED', source: 'USER' }),
+      expect.objectContaining({ nodeKey: 'body-node', role: 'BODY', status: 'CONFIRMED', source: 'USER' }),
+    ]));
+    expect(await within(dialog).findByText('v1 · DRAFT · 2 个已确认')).toBeInTheDocument();
+  });
+
   it('maps a structure node and shows publish blockers from backend', async () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -2314,40 +2478,6 @@ function docxResponse(fileName: string) {
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     }),
   } as Response;
-}
-
-function qualityCheckPass() {
-  return {
-    id: 'quality-pass',
-    draftId: 1,
-    status: 'PASS',
-    exportBlocked: false,
-    aiTraceId: null,
-    checkedAt: '2026-05-30T00:00:00Z',
-    items: [],
-  };
-}
-
-function qualityCheckBlocked() {
-  return {
-    id: 'quality-blocked',
-    draftId: 1,
-    status: 'ERROR',
-    exportBlocked: true,
-    aiTraceId: null,
-    checkedAt: '2026-05-30T00:00:00Z',
-    items: [
-      {
-        severity: 'ERROR',
-        category: 'REQUIRED_FIELD',
-        code: 'REQUIRED_RECIPIENT_MISSING',
-        message: '主送对象不能为空。',
-        targetBlockType: 'RECIPIENT',
-        targetBlockId: 2,
-        suggestion: '请补齐该字段后再导出。',
-      },
-    ],
-  };
 }
 
 function sampleExportRecord(overrides: Partial<{

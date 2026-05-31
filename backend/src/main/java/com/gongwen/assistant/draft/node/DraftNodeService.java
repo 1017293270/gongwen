@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -55,15 +56,17 @@ public class DraftNodeService {
 
     public List<DraftNodeDto> initializeNodes(long draftId) {
         DraftDetailDto draft = draftService.getDraft(draftId);
-        if (draftNodeRepository.existsByDraftId(draftId)) {
-            return toDtos(draftNodeRepository.findByDraftId(draftId));
-        }
         Long templateVersionId = draft.templateVersionId();
         if (templateVersionId == null) {
             throw new DraftNodeException("DRAFT_TEMPLATE_REQUIRED", "Draft must bind a template version before nodes can be initialized");
         }
         StructureMappingProfile mapping = mappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED")
                 .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before nodes can be initialized"));
+        List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
+        if (!existingNodes.isEmpty() && existingNodes.stream()
+                .allMatch(node -> Objects.equals(node.structureMappingProfileId(), mapping.mappingProfileId()))) {
+            return toDtos(existingNodes);
+        }
         DocumentStructureProfile structureProfile = structureProfileRepository.findByTemplateVersionId(templateVersionId)
                 .orElseThrow(() -> new DraftNodeException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found"));
         Map<String, DocumentNode> sourceNodes = structureProfile.nodes().stream()
@@ -149,16 +152,39 @@ public class DraftNodeService {
             return legacy;
         }
         if ("BODY".equals(role)) {
-            return legacyContent.getOrDefault("BODY_PARAGRAPH", "");
+            String legacyBody = legacyContent.getOrDefault("BODY_PARAGRAPH", "");
+            return legacyBody.isBlank() ? editableSourceText(sourceNode) : legacyBody;
         }
         if ("ATTACHMENT_NOTE".equals(role) || "ATTACHMENT_CONTENT".equals(role)) {
-            return legacyContent.getOrDefault("ATTACHMENT", "");
+            String legacyAttachment = legacyContent.getOrDefault("ATTACHMENT", "");
+            return legacyAttachment.isBlank() ? editableSourceText(sourceNode) : legacyAttachment;
+        }
+        if (isEditableSourceRole(role)) {
+            return editableSourceText(sourceNode);
         }
         if ("STATIC_TEXT".equals(role)
                 || role.startsWith("BODY_HEADING_LEVEL_")) {
-            return sourceNode == null ? "" : sourceNode.text();
+            return editableSourceText(sourceNode);
         }
         return "";
+    }
+
+    private boolean isEditableSourceRole(String role) {
+        return "TITLE".equals(role)
+                || "RECIPIENT".equals(role)
+                || "SIGNATURE".equals(role)
+                || "DATE".equals(role);
+    }
+
+    private String editableSourceText(DocumentNode sourceNode) {
+        if (sourceNode == null || sourceNode.text() == null) {
+            return "";
+        }
+        String text = sourceNode.text().strip();
+        if (text.contains("{{") && text.contains("}}")) {
+            return "";
+        }
+        return text;
     }
 
     private String titleFor(String role, DocumentNode sourceNode, String content) {

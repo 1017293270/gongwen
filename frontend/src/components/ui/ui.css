@@ -34,6 +34,10 @@
   flex: 0 0 auto;
 }
 
+.ui-button > span:not(.ui-visually-hidden) {
+  white-space: nowrap;
+}
+
 .ui-button-primary {
   border-color: var(--color-primary);
   background: var(--color-primary);

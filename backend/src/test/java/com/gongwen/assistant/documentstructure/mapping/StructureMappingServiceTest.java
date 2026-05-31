@@ -98,6 +98,7 @@ class StructureMappingServiceTest {
 
         assertThat(result.status()).isEqualTo("PUBLISHED");
         assertThat(result.versionNo()).isEqualTo(2);
+        assertThat(result.confirmedCount()).isEqualTo(2);
         assertThat(result.validationItems()).isEmpty();
         assertThat(result.publishedAt()).isNotNull();
     }

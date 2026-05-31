@@ -32,4 +32,21 @@ class LibreOfficeRenderClientTest {
                 input.toString()
         );
     }
+
+    @Test
+    void reportsUnavailableLibreOfficeEnvironment() {
+        LibreOfficeRenderClient client = new LibreOfficeRenderClient(new RenderPreviewProperties(
+                "storage/previews",
+                "libreoffice",
+                "Z:/missing/soffice.exe",
+                180,
+                20
+        ));
+
+        RenderPreviewEnvironmentStatus status = client.environmentStatus();
+
+        assertThat(status.available()).isFalse();
+        assertThat(status.libreOfficePath()).isEqualTo("Z:/missing/soffice.exe");
+        assertThat(status.message()).contains("GONGWEN_LIBREOFFICE_PATH");
+    }
 }

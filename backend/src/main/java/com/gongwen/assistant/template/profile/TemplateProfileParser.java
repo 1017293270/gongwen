@@ -234,7 +234,7 @@ public class TemplateProfileParser {
             boolean seenBody,
             boolean seenRecipient
     ) {
-        if (isDateLine(text) && isRightAligned(paragraph)) {
+        if (isDateLine(text)) {
             return "DATE";
         }
         if (isAttachmentLine(text)) {
@@ -246,7 +246,33 @@ public class TemplateProfileParser {
         if (isLikelyRecipientLine(text, seenTitle, seenBody, seenRecipient)) {
             return "RECIPIENT";
         }
+        if ("UNKNOWN".equals(inferredType) && !seenTitle && isLikelyDocumentTitle(text, paragraph)) {
+            return "TITLE";
+        }
+        if ("UNKNOWN".equals(inferredType) && isLikelyBodyParagraph(text, seenTitle, seenBody, seenRecipient)) {
+            return "BODY";
+        }
         return inferredType;
+    }
+
+    private boolean isLikelyDocumentTitle(String text, XWPFParagraph paragraph) {
+        String normalized = text.strip();
+        return normalized.length() <= 80
+                && !normalized.endsWith("：")
+                && !normalized.endsWith(":")
+                && !isDateLine(normalized)
+                && !isAttachmentLine(normalized)
+                && !isFormattingInstructionLine(normalized)
+                && (isCentered(paragraph)
+                || containsAny(normalized, "通知", "请示", "报告", "讲话", "发言", "会议", "推进会", "方案", "意见"));
+    }
+
+    private boolean isLikelyBodyParagraph(String text, boolean seenTitle, boolean seenBody, boolean seenRecipient) {
+        String normalized = text.strip();
+        if (!seenTitle || normalized.length() < 20 || isFormattingInstructionLine(normalized)) {
+            return false;
+        }
+        return seenRecipient || seenBody || normalized.length() > 40;
     }
 
     private boolean isLikelyRecipientLine(String text, boolean seenTitle, boolean seenBody, boolean seenRecipient) {
@@ -283,6 +309,10 @@ public class TemplateProfileParser {
 
     private boolean isRightAligned(XWPFParagraph paragraph) {
         return paragraph.getAlignment() != null && "RIGHT".equals(paragraph.getAlignment().name());
+    }
+
+    private boolean isCentered(XWPFParagraph paragraph) {
+        return paragraph.getAlignment() != null && "CENTER".equals(paragraph.getAlignment().name());
     }
 
     private String nextNonBlankText(List<XWPFParagraph> paragraphs, int index) {

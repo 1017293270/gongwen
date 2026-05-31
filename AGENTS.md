@@ -330,10 +330,16 @@ Agent: 后端
 - Agent P10D-F 后端格式 T12：已完成；后续只负责协助前端/导出消费已冻结的 `DraftNode` 格式覆盖合同。
 - Agent P10D-G 前端格式 T13：已完成；后续只负责协助 T15 消费前端格式状态。
 - Agent P10D-H 导出 T14/T15：已完成；后续只协助 QA/集成核对结构映射、节点正文、格式合并、真实预览状态和导出阻断消息。
-- Agent A 后端 P11：在导出服务前读取或触发最新质检结果，`exportBlocked=true` 时阻断导出并返回稳定错误；确保导出记录绑定具体模板版本。
-- Agent B 前端 P11：在工作台导出入口展示质检状态、阻断原因、重试质检和导出失败反馈；后续导出记录页只做列表入口，不扩大成完整审计后台。
+- Agent A 后端 P11：导出服务只处理模板版本、结构映射、必填槽位、文档类型和文件生成错误，不再读取基础质检结果作为前置门禁；确保导出记录绑定具体模板版本。
+- Agent B 前端 P11：工作台导出入口与基础质检入口保持独立，导出只自动保存当前草稿并展示导出失败/成功反馈；后续导出记录页只做列表入口，不扩大成完整审计后台。
 - Agent C 后端/前端 P10：继续模板后台字段映射、模板启停和版本详情；必须复用已存在 `GET/POST /api/templates`、版本上传和 profile API。
 - Agent D QA/文档：P10D T16/T17 已完成；后续优先协助前端工作台拆分与轻量回归。
+- Agent P10E-Structure：按 `docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md` 升级 `DocumentStructureProfile` 为 fact-first OOXML 结构层，禁止把语义猜测写死为事实。
+- Agent P10E-Semantic：独立语义建议器，覆盖讲话稿、通知、请示、报告常见结构；正文开始后不得因“单位/机关/号”等词把正文误判为 `UNIT`/`META`。
+- Agent P10E-Draft：修 `DraftNode` 初始化和 reinitialize，按源节点文本生成，消除旧 `DraftBlock` / `BODY_PARAGRAPH` 复制污染。
+- Agent P10E-Frontend：拆出模板解析工作台和工作台预览组件，展示完整结构树、映射批量操作和“结构化编辑预览”边界。
+- Agent P10E-Export：实现无占位符参考文档的原 DOCX 原位替换导出，保留占位符模板原有导出路径。
+- Agent P10E-QA：以示例 DOCX 和动态 fixtures 固化结构、映射、初始化、导出和渲染回归。
 - 集成 Agent：先查 `git status --short --branch`，确认没有覆盖用户未提交改动；对齐 API 字段后跑 focused 后端测试、前端 `npm run build`，必要时再跑更广测试。
 
 ## 13. 文档更新规则
@@ -358,7 +364,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前基础质检阻断、导出记录列表、导出详情、失败重试和历史文件下载。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、DraftNode 格式覆盖后端合同、右栏节点级格式面板、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、右栏真实预览状态与刷新入口、导出记录页、导出消费结构映射与 DraftNode 正文/格式合并结果、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前结构阻断、导出记录列表、导出详情、失败重试和历史文件下载；基础质检保持独立入口，不再作为 Word 导出的强制前置动作。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、DraftNode 格式覆盖后端合同、右栏节点级格式面板、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、右栏真实预览状态与刷新入口、导出记录页、导出消费结构映射与 DraftNode 正文/格式合并结果、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
 
 P10D DOCX 原貌预览与结构化工作台已完成 T0 契约冻结。冻结内容见 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`：下一迁移号从 `V12` 开始，后续 T3/T4/T6/T8/T14 分别预留 `V12`/`V13`/`V14`/`V15`/`V16`；共享枚举、API 边界、Agent 文件边界和进度更新规则已固定；本机 `18081` 只视为手动联调后端，不作为自动测试前置条件。
 
@@ -368,7 +374,7 @@ P10D T2 文件类型识别基线已落地：`TemplateAnalysisProfile` 继续保�
 
 P10D T3 `DocumentStructureProfile` 基础已落地：新增 `document_structure_profile` 表（Flyway `V12__document_structure_profile.sql`）和 `com.gongwen.assistant.documentstructure` 包。模板上传时会在保存 `TemplateProfile` 后同步派生并保存 `DocumentStructureProfile`，首版从 `TemplateProfile.structures` 生成 `DocumentNode`，节点字段包含 `nodeKey`、`nodeType`、`roleSuggestion`、`textPreview`、`orderIndex`、`path`、`formatting` 和 `riskCodes`；首版节点类型覆盖 `PARAGRAPH`、`TABLE_PARAGRAPH`、`HEADER_PARAGRAPH` 和 `FOOTER_PARAGRAPH`，完整 OOXML 事实提取仍留给后续增强。
 
-P10D T4 DOCX 渲染预览后端已落地：新增 `document_render_preview` 表（Flyway `V13__document_render_preview.sql`）和 `com.gongwen.assistant.rendering` 包；`DocumentRenderPreviewService` 会先记录 `RENDERING` 任务，再通过可替换 renderer seam 生成 `READY`、`FAILED` 或 `UNSUPPORTED` 状态，页面文件下载会校验路径必须位于配置的预览存储目录下。默认 renderer 为 LibreOffice headless，命令由 `LibreOfficeRenderClient` 构造，PDF 页面栅格化使用 PDFBox；本轮仅用 focused tests 覆盖命令、状态和路径约束，未实际调用本机 LibreOffice。新增环境变量：`GONGWEN_RENDER_PREVIEW_STORAGE_DIR`、`GONGWEN_RENDER_PREVIEW_RENDERER`、`GONGWEN_LIBREOFFICE_PATH`、`GONGWEN_RENDER_PREVIEW_DPI`、`GONGWEN_RENDER_PREVIEW_TIMEOUT_SECONDS`。
+P10D T4 DOCX 渲染预览后端已落地：新增 `document_render_preview` 表（Flyway `V13__document_render_preview.sql`）和 `com.gongwen.assistant.rendering` 包；`DocumentRenderPreviewService` 会先记录 `RENDERING` 任务，再通过可替换 renderer seam 生成 `READY`、`FAILED` 或 `UNSUPPORTED` 状态，页面文件下载会校验路径必须位于配置的预览存储目录下。默认 renderer 为 LibreOffice headless，命令由 `LibreOfficeRenderClient` 构造，PDF 页面栅格化使用 PDFBox；渲染预览现提供 `GET /api/render-previews/environment` 用于检查 LibreOffice 是否可用，未配置时解析和结构映射仍可继续，但原貌预览会提示运行时依赖缺失。新增环境变量：`GONGWEN_RENDER_PREVIEW_STORAGE_DIR`、`GONGWEN_RENDER_PREVIEW_RENDERER`、`GONGWEN_LIBREOFFICE_PATH`、`GONGWEN_RENDER_PREVIEW_DPI`、`GONGWEN_RENDER_PREVIEW_TIMEOUT_SECONDS`。
 
 P10D T5 模板解析工作台只读 UI 已落地：`GET /api/templates/versions/{versionId}/structure-profile` 和 `GET /api/templates/versions/{versionId}/document-kind` 已补齐，前端 `TemplateProfile` 类型同步支持 `eastAsiaFontFamily`、`latinFontFamily` 和结构化 `lineSpacing`；模板解析弹窗已替换为只读工作台，展示文档类型、结构树、占位符、解析风险和渲染预览状态。手册/格式说明、制度或普通文档应以非模板流程警告呈现，不作为解析失败处理；结构映射编辑和发布仍留给 T6/T7。
 
@@ -388,13 +394,17 @@ P10D T12 `DraftNode` 格式覆盖后端已落地：`PUT /api/drafts/{draftId}/no
 
 P10D T13 节点级格式面板前端已落地：右栏新增独立 `NodeFormatPanel`，支持中文字体、西文字体、字号、加粗、对齐、行距规则和值、首行缩进、段前和段后。保存/恢复会调用 T12 的格式覆盖 API，更新本地 `DraftNode` 后立即把 CSS 近似效果合并到中间结构化编辑区，并提示“真实预览待刷新”；锁定节点、无持久化节点或草稿未加载时禁用格式控件。
 
-P10D T14 导出消费结构节点后端已落地：草稿 Word 导出会要求模板版本已有 `PUBLISHED` 结构映射，默认阻断手册/制度/普通文档、缺失映射、缺失 `TITLE`/`BODY` 必需槽位、必需槽位空值和最新质检阻断项；导出优先读取 `DraftNode` 正文，节点缺失时才回退旧 `DraftBlock`。导出格式会把草稿节点格式覆盖合并到本次导出的 effective formatting，且不修改模板默认格式；`export_record` 新增 `structure_mapping_profile_id`、`structure_mapping_version`、`structure_profile_snapshot_json`、`mapping_profile_snapshot_json`、`formatting_snapshot_json` 和 `node_snapshot_json` 追溯字段（Flyway `V16__export_node_traceability.sql`）。
+P10D T14 导出消费结构节点后端已落地：草稿 Word 导出会要求模板版本已有 `PUBLISHED` 结构映射，默认阻断手册/制度/普通文档、缺失映射、缺失 `TITLE`/`BODY` 必需槽位和必需槽位空值；导出不再读取基础质检结果作为前置门禁。导出优先读取 `DraftNode` 正文，节点缺失时才回退旧 `DraftBlock`。导出格式会把草稿节点格式覆盖合并到本次导出的 effective formatting，且不修改模板默认格式；`export_record` 新增 `structure_mapping_profile_id`、`structure_mapping_version`、`structure_profile_snapshot_json`、`mapping_profile_snapshot_json`、`formatting_snapshot_json` 和 `node_snapshot_json` 追溯字段（Flyway `V16__export_node_traceability.sql`）。
 
 P10D T15 预览刷新与导出状态前端已落地：工作台右栏新增真实预览状态面板，状态覆盖当前、待刷新、生成中、失败和未选择模板；正文编辑、段落生成、局部建议采纳、模板切换和节点格式保存/恢复会标记真实预览待刷新，点击刷新会调用 `POST /api/templates/versions/{versionId}/render-preview`。后端导出阻断消息继续通过工作台导出状态和 Toast 展示，成功导出下载与导出记录行为保持 P11 既有路径。
 
 P10D T16 轻量 QA 与文档同步已落地：`backend/src/test/resources/docx-fixtures/README.md` 固化 fixture 类别清单，动态 DOCX 样本覆盖占位符模板、样式模板、参考范文、手册/指南、复杂表格、页眉页脚和缺字体。focused 回归已覆盖手册阻断、中文 eastAsia/latin 字体、节点感知 AI、草稿节点格式覆盖、导出追溯、工作台节点和预览刷新；按用户“减轻测试重量”要求未跑全量后端/前端测试，Browser 自动化仍因工具不可用未执行。
 
 P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新增 V12-V16；前端 API 调用已和后端 route 声明做 grep 核对；focused 后端回归、`npm test -- src/workbenchNodes.test.ts src/App.test.tsx` 和 `npm run build` 均通过。保留风险是未跑全量后端/前端测试和浏览器自动化验证；下一步建议先拆分 `frontend/src/App.tsx` 的 workbench/template/export 大块，再继续 P11/P9。
+
+P10D 后续修正已明确文种和模板边界：文种仅作为分类、列表归档、权限过滤和 AI 提示倾向，不再隐含固定格式；新建草稿不再自动塞“各部门、各直属单位”“附件：无”“办公室”和日期等通知骨架，草稿结构应来自已发布模板映射、上传范文或后续 AI 生成结果。旧 `DraftBlock` 兼容链路仍保留用于读取历史草稿、保存和导出 fallback。
+
+P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。
 
 当前核心 API：
 
@@ -423,6 +433,7 @@ P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新�
 - `GET /api/templates/versions/{versionId}/document-kind`
 - `GET /api/templates/versions/{versionId}/render-preview`
 - `POST /api/templates/versions/{versionId}/render-preview`
+- `GET /api/render-previews/environment`
 - `GET /api/render-previews/{previewId}/pages/{pageNumber}`
 - `GET /api/templates/versions/{versionId}/structure-mapping`
 - `PUT /api/templates/versions/{versionId}/structure-mapping/draft`
@@ -544,13 +555,13 @@ P8 基础质检当前约定：
 
 P11 导出体验当前约定：
 
-- 工作台 Word 导出入口会先保存当前草稿，再自动运行 `POST /api/drafts/{draftId}/quality-check`；只有 `exportBlocked=false` 时才继续调用 `POST /api/exports/drafts/{draftId}/word`。
-- 后端草稿 Word 导出服务会读取最近一次质检结果；未质检返回 `QUALITY_CHECK_REQUIRED`，存在阻断项返回 `QUALITY_CHECK_BLOCKED`，并在稳定错误消息中带首个阻断原因。
+- 工作台 Word 导出入口会先保存当前草稿，再直接调用 `POST /api/exports/drafts/{draftId}/word`；基础质检由用户通过右栏“基础质检”独立触发，不作为导出前置动作。
+- 后端草稿 Word 导出服务不读取最近一次质检结果；导出只按模板版本、结构映射、必填槽位、文档类型和文件生成错误进行阻断。
 - 导出成功记录会保存 `template_id`、`template_version_id`、`draft_id`、`exported_by`、`department_id` 和本地文件路径，确保历史文件可追溯到具体模板版本。
 - 历史导出文件由 `GONGWEN_EXPORT_STORAGE_DIR` 配置本地存储目录，默认 `storage/exports`；目录内容不提交到仓库。
 - `GET /api/exports` 返回当前用户可访问的导出记录，`GET /api/exports/{recordId}` 返回单条详情和历史文件可用性，`GET /api/exports/{recordId}/download` 只允许下载有权限且状态成功的历史文件。
-- 失败记录如果绑定了草稿，可通过 `POST /api/exports/{recordId}/retry` 重新触发草稿 Word 导出；重试仍会走草稿权限、最新质检和模板版本检查。
-- 前端导出入口复用现有按钮和 `StatusMessage`，覆盖导出中、质检阻断、失败和成功下载状态；导出记录页复用全局管理表格，展示草稿、模板版本、状态、失败原因、详情弹窗、历史下载和失败重试操作。
+- 失败记录如果绑定了草稿，可通过 `POST /api/exports/{recordId}/retry` 重新触发草稿 Word 导出；重试仍会走草稿权限、模板版本和结构映射检查。
+- 前端导出入口复用现有按钮和 `StatusMessage`，覆盖导出中、结构阻断、失败和成功下载状态；导出记录页复用全局管理表格，展示草稿、模板版本、状态、失败原因、详情弹窗、历史下载和失败重试操作。
 
 模板引擎当前约定：
 

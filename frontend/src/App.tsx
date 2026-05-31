@@ -99,8 +99,18 @@ import {
   TextareaField,
   TextField,
 } from './components/ui';
+import {
+  renderPreviewResultMessage,
+  WorkbenchExportPanel,
+  type WorkbenchExportStatus,
+  type WorkbenchPreviewRequestStatus,
+} from './components/workbench/WorkbenchExportPanel';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
-import { WorkbenchPreviewPanel, type WorkbenchPreviewState } from './components/workbench/WorkbenchPreviewPanel';
+import {
+  qualitySummary,
+  WorkbenchQualityPanel,
+  type WorkbenchQualityCheckStatus,
+} from './components/workbench/WorkbenchQualityPanel';
 import type {
   AiLocalOperation,
   AiLocalOperationType,
@@ -146,7 +156,7 @@ import {
   deriveWorkbenchNodes,
 } from './workbenchNodes';
 
-const DEFAULT_TITLE = '关于开展年度档案整理工作的通知';
+const DEFAULT_TITLE = '未命名草稿';
 const CURRENT_DRAFT_ID_KEY = 'gongwen.currentDraftId';
 const DELETED_NODE_STORAGE_PREFIX = 'gongwen.deletedNodes';
 
@@ -164,8 +174,6 @@ type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
 type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
-type QualityCheckStatus = 'idle' | 'checking' | 'success' | 'error';
-type ExportStatus = 'idle' | 'exporting' | 'success' | 'blocked' | 'error';
 type AppView =
   | 'overview'
   | 'workbench'
@@ -364,12 +372,12 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [nodeFormatError, setNodeFormatError] = useState('');
   const [renderPreviewOutdated, setRenderPreviewOutdated] = useState(false);
   const [workbenchRenderPreview, setWorkbenchRenderPreview] = useState<DocumentRenderPreview | null>(null);
-  const [workbenchRenderPreviewStatus, setWorkbenchRenderPreviewStatus] = useState<'idle' | 'requesting' | 'error'>('idle');
+  const [workbenchRenderPreviewStatus, setWorkbenchRenderPreviewStatus] = useState<WorkbenchPreviewRequestStatus>('idle');
   const [workbenchRenderPreviewMessage, setWorkbenchRenderPreviewMessage] = useState('');
   const [qualityCheck, setQualityCheck] = useState<QualityCheckResult | null>(null);
-  const [qualityCheckStatus, setQualityCheckStatus] = useState<QualityCheckStatus>('idle');
+  const [qualityCheckStatus, setQualityCheckStatus] = useState<WorkbenchQualityCheckStatus>('idle');
   const [qualityCheckError, setQualityCheckError] = useState('');
-  const [exportStatus, setExportStatus] = useState<ExportStatus>('idle');
+  const [exportStatus, setExportStatus] = useState<WorkbenchExportStatus>('idle');
   const [exportError, setExportError] = useState('');
   const [discardSuggestionConfirmOpen, setDiscardSuggestionConfirmOpen] = useState(false);
   const paragraphRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -649,13 +657,12 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   }
 
   async function createBlankDraftInDraftList(documentTypeCode: string) {
-    const documentTypeName = documentTypes.find((type) => type.code === documentTypeCode)?.name ?? '公文';
     try {
       setDraftListStatus('creating');
       setDraftListMessage('正在创建草稿');
       setStatus('loading');
       setMaterialStatus('loading');
-      const createdDraft = await createDraft(documentTypeCode, `未命名${documentTypeName}`);
+      const createdDraft = await createDraft(documentTypeCode, DEFAULT_TITLE);
       const workspaceData = await loadWorkspaceData(createdDraft);
       window.localStorage.setItem(CURRENT_DRAFT_ID_KEY, String(createdDraft.id));
       setSelectedDraftDocumentTypeCode(createdDraft.documentTypeCode);
@@ -783,17 +790,6 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const selectedNodeFormatLabel = selectedNode
     ? selectedNode.label || workbenchNodeRoleLabel(selectedNode.nodeType)
     : '未选择';
-  const workbenchPreviewState = workbenchPreviewStateFor(
-    draft?.templateVersionId ?? null,
-    renderPreviewOutdated,
-    workbenchRenderPreview,
-    workbenchRenderPreviewStatus,
-  );
-  const workbenchPreviewMessage = workbenchPreviewMessageFor(
-    workbenchPreviewState,
-    workbenchRenderPreview,
-    workbenchRenderPreviewMessage,
-  );
   const selectedNodeAiContext = aiNodeContextForWorkbenchNode(selectedNode);
   const selectedNodeActionKind = aiActionKindForWorkbenchNode(selectedNode);
   const selectedLocalOperationOptions = useMemo(
@@ -1493,26 +1489,6 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setExportError('');
       const updatedDraft = await saveCurrentDraft('导出前保存当前草稿');
       const exportDraftId = updatedDraft?.id ?? draft.id;
-      let exportQualityCheck: QualityCheckResult;
-      try {
-        setQualityCheckStatus('checking');
-        setQualityCheckError('');
-        exportQualityCheck = await runQualityCheck(exportDraftId);
-        setQualityCheck(exportQualityCheck);
-        setQualityCheckStatus('success');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '导出前质检失败';
-        setQualityCheckStatus('error');
-        setQualityCheckError(message);
-        throw error;
-      }
-      if (exportQualityCheck.exportBlocked) {
-        const message = `导出已阻断：${qualitySummary(exportQualityCheck)}`;
-        setExportStatus('blocked');
-        setExportError(message);
-        showToast({ title: '导出已阻断', description: qualitySummary(exportQualityCheck), tone: 'error' });
-        return;
-      }
       const result = await exportDraftWord(exportDraftId);
       downloadBlob(result.blob, result.fileName);
       setExportStatus('success');
@@ -1896,7 +1872,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   disabled={!draft || !draft.templateVersionId || exportStatus === 'exporting' || status === 'loading'}
                   icon={<FileDown aria-hidden="true" />}
                   isLoading={exportStatus === 'exporting'}
-                  loadingLabel="正在质检并导出"
+                  loadingLabel="正在导出"
                   onClick={() => void handleExportWord()}
                 >
                   导出 Word
@@ -2266,66 +2242,27 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                 </button>
               </div>
             )}
-            <div className="quality-check" aria-label="基础质检">
-              <div className="quality-check-header">
-                <div>
-                  <div className="outline-title">基础质检</div>
-                  <div className="panel-kicker">
-                    {qualityCheck ? qualitySummary(qualityCheck) : '规则检查 + AI 表达建议'}
-                  </div>
-                </div>
-                {qualityCheck && (
-                  <span className={`quality-badge ${qualityCheck.status.toLowerCase()}`}>
-                    {qualityStatusLabel(qualityCheck.status)}
-                  </span>
-                )}
-              </div>
-              <Button
-                disabled={!draft || qualityCheckStatus === 'checking' || status === 'loading'}
-                icon={<CheckCircle2 aria-hidden="true" />}
-                isLoading={qualityCheckStatus === 'checking'}
-                loadingLabel="正在质检"
-                onClick={openQualityDialog}
-                variant="secondary"
-              >
-                {qualityCheckStatus === 'error' ? '重试质检' : '运行质检'}
-              </Button>
-              {qualityCheckStatus === 'error' && <StatusMessage title={qualityCheckError} tone="warning" />}
-            {qualityCheck && (
-              <div className="ai-task-summary" aria-label="质检摘要">
-                <span>{qualitySummary(qualityCheck)}</span>
-                <button className="summary-link" onClick={() => setActiveAiDialog('quality')} type="button">
-                  查看结果
-                </button>
-              </div>
-            )}
-            <div className="export-action" aria-label="Word 导出">
-              <WorkbenchPreviewPanel
-                canRefresh={Boolean(draft?.templateVersionId)}
-                isRefreshing={workbenchRenderPreviewStatus === 'requesting'}
-                message={workbenchPreviewMessage}
-                onRefresh={() => void handleRefreshWorkbenchPreview()}
-                state={workbenchPreviewState}
-              />
-              <div>
-                <div className="outline-title">Word 导出</div>
-                <div className="panel-kicker">
-                  {draft?.templateVersionId ? '导出前会自动保存并运行基础质检' : '请先选择套版模板'}
-                </div>
-              </div>
-              <Button
-                disabled={!draft || !draft.templateVersionId || exportStatus === 'exporting' || status === 'loading'}
-                icon={<FileDown aria-hidden="true" />}
-                isLoading={exportStatus === 'exporting'}
-                loadingLabel="正在质检并导出"
-                onClick={() => void handleExportWord()}
-                variant="secondary"
-              >
-                导出当前草稿
-              </Button>
-              {exportError && <StatusMessage title={exportError} tone="warning" />}
-              {exportStatus === 'success' && !exportError && <StatusMessage title="已生成 Word 文件，可打开和模板对比。" tone="success" />}
-            </div>
+            <WorkbenchQualityPanel
+              disabled={!draft || qualityCheckStatus === 'checking' || status === 'loading'}
+              error={qualityCheckError}
+              onOpenResult={() => setActiveAiDialog('quality')}
+              onRun={openQualityDialog}
+              result={qualityCheck}
+              status={qualityCheckStatus}
+            />
+            <WorkbenchExportPanel
+              exportError={exportError}
+              exportStatus={exportStatus}
+              hasDraft={Boolean(draft)}
+              isWorkbenchLoading={status === 'loading'}
+              onExportWord={() => void handleExportWord()}
+              onRefreshPreview={() => void handleRefreshWorkbenchPreview()}
+              preview={workbenchRenderPreview}
+              previewMessage={workbenchRenderPreviewMessage}
+              previewOutdated={renderPreviewOutdated}
+              previewStatus={workbenchRenderPreviewStatus}
+              templateVersionId={draft?.templateVersionId ?? null}
+            />
             <NodeFormatPanel
               disabled={selectedNodeFormatDisabled}
               error={nodeFormatError}
@@ -2336,7 +2273,6 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               previewOutdated={false}
               status={nodeFormatStatus}
             />
-            </div>
             <div className="local-operation" aria-label="局部段落操作">
               <div className="local-operation-header">
                 <div>
@@ -3123,7 +3059,7 @@ function TemplateManagementPage({
       const preview = await requestRenderPreview(profileContext.templateVersionId);
       setRenderPreview(preview);
       setRenderPreviewStatus('idle');
-      setRenderPreviewMessage('渲染预览已更新');
+      setRenderPreviewMessage(preview.status === 'READY' ? '渲染预览已更新' : '预览任务已提交，稍后可再次刷新状态。');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '渲染预览生成失败';
       setRenderPreviewStatus('error');
@@ -3173,10 +3109,11 @@ function TemplateManagementPage({
     }
     try {
       setMappingStatus('saving');
+      const confirmedItems = confirmVisibleMappingItems(mappingItems);
       const saved = await saveStructureMappingDraft(
         profileContext.templateVersionId,
         mappingProfile?.mappingProfileId ?? null,
-        mappingItems,
+        confirmedItems,
       );
       setMappingProfile(saved);
       setMappingItems(saved.items);
@@ -3704,19 +3641,19 @@ function RenderPreviewPanel({
       )}
       {preview?.status === 'FAILED' && (
         <StatusMessage title="预览生成失败" tone="warning">
-          <p>{preview.errorMessage ?? preview.errorCode ?? '请稍后重试。'}</p>
+          <p>{renderPreviewIssueMessage(preview)}</p>
         </StatusMessage>
       )}
       {preview?.status === 'UNSUPPORTED' && (
         <StatusMessage title="当前环境暂不支持渲染预览" tone="warning">
-          <p>{preview.errorMessage ?? '请配置 LibreOffice 后再生成。'}</p>
+          <p>{renderPreviewIssueMessage(preview)}</p>
         </StatusMessage>
       )}
       {!preview && status === 'idle' && (
         <p className="empty-note">尚未生成预览。</p>
       )}
       {preview?.status === 'PENDING' && (
-        <p className="empty-note">尚未生成预览，可点击生成预览。</p>
+        <StatusMessage title={message || '预览任务已提交，稍后可再次刷新状态。'} tone="info" />
       )}
       {preview?.status === 'READY' && (
         <div className="template-preview-page-list" aria-label="渲染预览页面">
@@ -6162,77 +6099,6 @@ function useEstimatedProgress(isActive: boolean) {
   return progress;
 }
 
-function workbenchPreviewStateFor(
-  templateVersionId: number | null,
-  isOutdated: boolean,
-  preview: DocumentRenderPreview | null,
-  requestStatus: 'idle' | 'requesting' | 'error',
-): WorkbenchPreviewState {
-  if (!templateVersionId) {
-    return 'unavailable';
-  }
-  if (requestStatus === 'requesting') {
-    return 'rendering';
-  }
-  if (isOutdated) {
-    return 'outdated';
-  }
-  if (requestStatus === 'error') {
-    return 'failed';
-  }
-  if (preview?.status === 'FAILED' || preview?.status === 'UNSUPPORTED') {
-    return 'failed';
-  }
-  if (preview?.status === 'PENDING' || preview?.status === 'RENDERING') {
-    return 'rendering';
-  }
-  return 'current';
-}
-
-function workbenchPreviewMessageFor(
-  state: WorkbenchPreviewState,
-  preview: DocumentRenderPreview | null,
-  message: string,
-) {
-  if (message) {
-    return message;
-  }
-  if (state === 'current') {
-    return preview?.updatedAt ? `最后刷新：${new Date(preview.updatedAt).toLocaleString('zh-CN')}` : '当前草稿未发现待刷新的格式或正文修改';
-  }
-  if (state === 'outdated') {
-    return '正文或格式已变化，建议刷新真实预览后再导出对比。';
-  }
-  if (state === 'rendering') {
-    return '预览任务已提交，稍后可再次刷新状态。';
-  }
-  if (state === 'failed') {
-    return preview?.errorMessage ?? '渲染预览暂不可用。';
-  }
-  return '选择套版模板后可刷新真实预览。';
-}
-
-function renderPreviewResultMessage(preview: DocumentRenderPreview) {
-  if (preview.status === 'READY') {
-    return '真实预览已生成';
-  }
-  if (preview.status === 'FAILED' || preview.status === 'UNSUPPORTED') {
-    return preview.errorMessage ?? '真实预览生成失败';
-  }
-  return '真实预览任务已提交';
-}
-
-function qualitySummary(result: QualityCheckResult) {
-  const errorCount = result.items.filter((item) => item.severity === 'ERROR').length;
-  const warningCount = result.items.filter((item) => item.severity === 'WARNING').length;
-  const infoCount = result.items.filter((item) => item.severity === 'INFO').length;
-  return `错误 ${errorCount} · 警告 ${warningCount} · 建议 ${infoCount}`;
-}
-
-function qualityStatusLabel(status: QualityCheckResult['status']) {
-  return status === 'PASS' ? '通过' : status === 'WARNING' ? '有建议' : '需处理';
-}
-
 function qualitySeverityLabel(severity: QualityCheckItem['severity']) {
   return severity === 'ERROR' ? '错误' : severity === 'WARNING' ? '警告' : '建议';
 }
@@ -6318,6 +6184,40 @@ function slotKeyForMappingRole(role: string) {
     default:
       return '';
   }
+}
+
+function confirmVisibleMappingItems(items: StructureMappingItem[]) {
+  return items.map((item) => {
+    if (item.role === 'IGNORE') {
+      return {
+        ...item,
+        status: 'IGNORED',
+        source: item.source || 'USER',
+      };
+    }
+    if (item.role && item.role !== 'UNKNOWN') {
+      return {
+        ...item,
+        slotKey: item.slotKey || slotKeyForMappingRole(item.role),
+        status: 'CONFIRMED',
+        source: 'USER',
+        confidence: item.confidence > 0 ? item.confidence : 1,
+      };
+    }
+    return {
+      ...item,
+      status: 'NEEDS_REVIEW',
+      source: item.source || 'SYSTEM',
+    };
+  });
+}
+
+function renderPreviewIssueMessage(preview: DocumentRenderPreview) {
+  if (preview.errorCode === 'RENDER_PREVIEW_UNSUPPORTED'
+    && (preview.errorMessage ?? '').toLowerCase().includes('libreoffice')) {
+    return '本机没有可用的 LibreOffice，无法把 DOCX 渲染成原貌预览。安装 LibreOffice 后，或把 GONGWEN_LIBREOFFICE_PATH 指到 soffice.exe，再重新生成预览。';
+  }
+  return preview.errorMessage ?? preview.errorCode ?? '请稍后重试。';
 }
 
 function nodeRoleForBlockType(blockType: string) {

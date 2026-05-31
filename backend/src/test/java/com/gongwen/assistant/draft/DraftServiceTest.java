@@ -4,9 +4,6 @@ import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
 import org.junit.jupiter.api.Test;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,22 +14,25 @@ import static org.mockito.Mockito.when;
 
 class DraftServiceTest {
     private final InMemoryDraftRepository repository = new InMemoryDraftRepository();
-    private final DraftService service = new DraftService(
-            repository,
-            Clock.fixed(Instant.parse("2026-05-25T00:00:00Z"), ZoneId.of("Asia/Shanghai"))
-    );
+    private final DraftService service = new DraftService(repository);
 
     @Test
-    void createsNoticeDraftWithDefaultBlocks() {
+    void createsDraftWithoutDocumentTypeFixedBlocks() {
         DraftDetailDto draft = service.createDraft(new CreateDraftRequest("NOTICE", "测试通知"));
 
         assertThat(draft.id()).isEqualTo(1L);
         assertThat(draft.documentTypeCode()).isEqualTo("NOTICE");
         assertThat(draft.title()).isEqualTo("测试通知");
-        assertThat(draft.blocks()).extracting(DraftBlockDto::blockType)
-                .containsExactly("TITLE", "RECIPIENT", "BODY_PARAGRAPH", "ATTACHMENT", "SIGNATURE", "DATE");
-        assertThat(draft.blocks()).extracting(DraftBlockDto::content)
-                .containsExactly("测试通知", "各部门、各直属单位", "", "无", "办公室", "2026年5月25日");
+        assertThat(draft.blocks()).isEmpty();
+    }
+
+    @Test
+    void createsUntitledDraftWhenTitleIsBlank() {
+        DraftDetailDto draft = service.createDraft(new CreateDraftRequest("SPEECH", " "));
+
+        assertThat(draft.documentTypeCode()).isEqualTo("SPEECH");
+        assertThat(draft.title()).isEqualTo("未命名草稿");
+        assertThat(draft.blocks()).isEmpty();
     }
 
     @Test
@@ -73,8 +73,7 @@ class DraftServiceTest {
         DraftDetailDto renamed = service.updateTitle(draft.id(), new UpdateDraftTitleRequest("已重命名通知草稿"));
 
         assertThat(renamed.title()).isEqualTo("已重命名通知草稿");
-        assertThat(renamed.blocks()).extracting(DraftBlockDto::blockType)
-                .containsExactly("TITLE", "RECIPIENT", "BODY_PARAGRAPH", "ATTACHMENT", "SIGNATURE", "DATE");
+        assertThat(renamed.blocks()).isEmpty();
         assertThat(service.listDrafts("NOTICE")).extracting(DraftSummaryDto::title)
                 .containsExactly("已重命名通知草稿");
     }
@@ -111,8 +110,7 @@ class DraftServiceTest {
         when(currentUserProvider.currentUser()).thenReturn(currentUser);
         DraftService authenticatedService = new DraftService(
                 repository,
-                currentUserProvider,
-                Clock.fixed(Instant.parse("2026-05-30T00:00:00Z"), ZoneId.of("UTC")));
+                currentUserProvider);
 
         authenticatedService.createDraft(new CreateDraftRequest("NOTICE", "账号草稿"));
         authenticatedService.listDrafts("NOTICE");

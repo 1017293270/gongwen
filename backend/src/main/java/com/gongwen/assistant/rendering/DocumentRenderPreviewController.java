@@ -19,9 +19,11 @@ import java.nio.charset.StandardCharsets;
 @RequestMapping("/api")
 public class DocumentRenderPreviewController {
     private final DocumentRenderPreviewService service;
+    private final LibreOfficeRenderClient renderClient;
 
-    public DocumentRenderPreviewController(DocumentRenderPreviewService service) {
+    public DocumentRenderPreviewController(DocumentRenderPreviewService service, LibreOfficeRenderClient renderClient) {
         this.service = service;
+        this.renderClient = renderClient;
     }
 
     @GetMapping("/templates/versions/{versionId}/render-preview")
@@ -32,6 +34,11 @@ public class DocumentRenderPreviewController {
     @PostMapping("/templates/versions/{versionId}/render-preview")
     public ApiResponse<DocumentRenderPreview> requestRender(@PathVariable long versionId) {
         return ApiResponse.ok(service.requestRender(versionId));
+    }
+
+    @GetMapping("/render-previews/environment")
+    public ApiResponse<RenderPreviewEnvironmentStatus> getEnvironmentStatus() {
+        return ApiResponse.ok(renderClient.environmentStatus());
     }
 
     @GetMapping("/render-previews/{previewId}/pages/{pageNumber}")

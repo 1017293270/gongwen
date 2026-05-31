@@ -5,34 +5,22 @@ import com.gongwen.assistant.security.CurrentUserProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import java.time.Clock;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Service
 public class DraftService {
     private final DraftRepository draftRepository;
     private final CurrentUserProvider currentUserProvider;
-    private final Clock clock;
 
     @Autowired
     public DraftService(DraftRepository draftRepository, CurrentUserProvider currentUserProvider) {
-        this(draftRepository, currentUserProvider, Clock.systemDefaultZone());
+        this.draftRepository = draftRepository;
+        this.currentUserProvider = currentUserProvider;
     }
 
     public DraftService(DraftRepository draftRepository) {
-        this(draftRepository, null, Clock.systemDefaultZone());
-    }
-
-    DraftService(DraftRepository draftRepository, Clock clock) {
-        this(draftRepository, null, clock);
-    }
-
-    DraftService(DraftRepository draftRepository, CurrentUserProvider currentUserProvider, Clock clock) {
         this.draftRepository = draftRepository;
-        this.currentUserProvider = currentUserProvider;
-        this.clock = clock;
+        this.currentUserProvider = null;
     }
 
     public DraftDetailDto createDraft(CreateDraftRequest request) {
@@ -40,9 +28,9 @@ public class DraftService {
                 ? "NOTICE"
                 : request.documentTypeCode();
         String title = request.title() == null || request.title().isBlank()
-                ? "关于开展年度档案整理工作的通知"
+                ? "未命名草稿"
                 : request.title();
-        return draftRepository.createDraft(documentTypeCode, title, defaultBlocks(title), currentUserOrNull());
+        return draftRepository.createDraft(documentTypeCode, title, List.of(), currentUserOrNull());
     }
 
     public DraftDetailDto getDraft(long id) {
@@ -77,16 +65,5 @@ public class DraftService {
 
     private CurrentUser currentUserOrNull() {
         return currentUserProvider == null ? null : currentUserProvider.currentUser();
-    }
-
-    private List<DraftBlockUpdateRequest> defaultBlocks(String title) {
-        return List.of(
-                new DraftBlockUpdateRequest("TITLE", title, 10),
-                new DraftBlockUpdateRequest("RECIPIENT", "各部门、各直属单位", 20),
-                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "", 30),
-                new DraftBlockUpdateRequest("ATTACHMENT", "无", 40),
-                new DraftBlockUpdateRequest("SIGNATURE", "办公室", 50),
-                new DraftBlockUpdateRequest("DATE", LocalDate.now(clock).format(DateTimeFormatter.ofPattern("yyyy年M月d日")), 60)
-        );
     }
 }

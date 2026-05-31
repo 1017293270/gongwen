@@ -168,6 +168,21 @@ class TemplateProfileParserTest {
     }
 
     @Test
+    void classifiesSpeechReferenceDocumentCoreSlots() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.docxWithParagraphs(
+                "在全区重点工作推进会上的讲话",
+                "政务会议讲话稿测试样例",
+                "2026年5月30日",
+                "同志们：",
+                "今天我们召开这次重点工作推进会，主要任务是深入贯彻上级决策部署，全面梳理当前工作进展。"
+        ));
+
+        assertThat(profile.structures())
+                .extracting(TemplateStructureProfile::structureType)
+                .containsSubsequence("TITLE", "DATE", "RECIPIENT", "BODY");
+    }
+
+    @Test
     void parsesTablePlaceholders() {
         TemplateProfile profile = parser.parse(DocxTestFactory.docxWithTableCell("附件：{{附件}}"));
 

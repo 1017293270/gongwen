@@ -75,6 +75,26 @@ public class LibreOfficeRenderClient {
         );
     }
 
+    public RenderPreviewEnvironmentStatus environmentStatus() {
+        if (!"libreoffice".equalsIgnoreCase(properties.renderer())) {
+            return new RenderPreviewEnvironmentStatus(
+                    properties.renderer(),
+                    false,
+                    properties.libreOfficePath(),
+                    "当前渲染器不是 LibreOffice，原貌预览不可用。"
+            );
+        }
+        boolean available = isLibreOfficeAvailable(properties.libreOfficePath());
+        return new RenderPreviewEnvironmentStatus(
+                properties.renderer(),
+                available,
+                properties.libreOfficePath(),
+                available
+                        ? "LibreOffice 可用，原貌预览可以生成。"
+                        : "未找到 LibreOffice。请安装 LibreOffice，或配置 GONGWEN_LIBREOFFICE_PATH 指向 soffice.exe。"
+        );
+    }
+
     private Path findConvertedPdf(Path inputDocx, Path outputDir) throws IOException {
         String expectedName = stripExtension(inputDocx.getFileName().toString()) + ".pdf";
         Path expected = outputDir.resolve(expectedName);
@@ -102,5 +122,33 @@ public class LibreOfficeRenderClient {
             return value;
         }
         return value.substring(0, MAX_ERROR_CHARS);
+    }
+
+    private boolean isLibreOfficeAvailable(String command) {
+        if (command == null || command.isBlank()) {
+            return false;
+        }
+        if (looksLikePath(command)) {
+            return Files.isRegularFile(Path.of(command));
+        }
+        String pathValue = System.getenv("PATH");
+        if (pathValue == null || pathValue.isBlank()) {
+            return false;
+        }
+        for (String entry : pathValue.split(java.io.File.pathSeparator)) {
+            if (entry.isBlank()) {
+                continue;
+            }
+            Path directory = Path.of(entry);
+            if (Files.isRegularFile(directory.resolve(command))
+                    || Files.isRegularFile(directory.resolve(command + ".exe"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean looksLikePath(String command) {
+        return command.contains("/") || command.contains("\\") || command.toLowerCase(Locale.ROOT).endsWith(".exe");
     }
 }
