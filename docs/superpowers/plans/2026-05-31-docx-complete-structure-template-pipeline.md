@@ -100,9 +100,9 @@ Completion evidence format:
 
 | Task | Status | Preferred Agent | Dependencies | Deliverable | Commit | Verification | Risk |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| T18 | 已完成 | Integration Agent | P10D | P10E contracts, final API boundaries, fixture baseline | 未提交（T18 进度更新） | `git status --short --branch`; speech fixture inspection command | Must preserve P10D APIs while adding P10E endpoints |
-| T19 | 已完成 | Backend Structure Agent | T18 | fact-first DOCX structure extraction | 未提交（T19 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Complex OOXML features become explicit risk nodes rather than silent omissions |
-| T20 | 未开始 | Backend Semantic Agent | T19 | independent semantic role suggester |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.*" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest"` | Role suggestions must not overwrite facts |
+| T18 | 已完成 | Integration Agent | P10D | P10E contracts, final API boundaries, fixture baseline | `9b8d517` | `git status --short --branch`; speech fixture inspection command | Must preserve P10D APIs while adding P10E endpoints |
+| T19 | 已完成 | Backend Structure Agent | T18 | fact-first DOCX structure extraction | `9b8d517` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Complex OOXML features become explicit risk nodes rather than silent omissions |
+| T20 | 已完成 | Backend Semantic Agent | T19 | independent semantic role suggester | 本提交（T20 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Suggestions remain advisory and facts remain unchanged; more document types can add heuristics later |
 | T21 | 未开始 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.*"` | Existing user-edited nodes must not be overwritten without explicit reinitialize request |
 | T22 | 未开始 | Frontend Template Agent | T20 | complete structure mapping workspace |  | `npm test -- src/App.test.tsx src/components/template/TemplateParseWorkspace.test.tsx`; `npm run build` | `App.tsx` must shrink through component extraction instead of growing further |
 | T23 | 未开始 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup |  | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build` | Workbench preview remains approximate and must be labelled correctly |
@@ -115,8 +115,9 @@ Completion evidence format:
 | Date | Task | Agent | Commit | Verification | Result | Risk |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-05-31 | Plan | Codex | plan document change | `git status --short --branch` | plan written on dirty P10D branch without touching feature code | implementation not started |
-| 2026-05-31 | T18 | Codex Integration Agent | 未提交（T18 进度更新） | `git status --short --branch`; Python fixture inspection | pass; checkpoint commit left branch clean, speech fixture has 20 main paragraphs, 1 table, header `内部测试资料`, footer `测试文档 \| 讲话稿范文示例` | implementation starts at T19; existing P10D APIs must remain compatible |
-| 2026-05-31 | T19 | Codex Backend Structure Agent | 未提交（T19 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; extractor now reads DOCX bytes directly, emits v2 fact nodes for body paragraphs, table cell paragraphs, headers and footers, and keeps old `DocumentNode` constructor compatibility | role suggestions intentionally remain `UNKNOWN` until T20 semantic suggester |
+| 2026-05-31 | T18 | Codex Integration Agent | `9b8d517` | `git status --short --branch`; Python fixture inspection | pass; checkpoint commit left branch clean, speech fixture has 20 main paragraphs, 1 table, header `内部测试资料`, footer `测试文档 \| 讲话稿范文示例` | implementation starts at T19; existing P10D APIs must remain compatible |
+| 2026-05-31 | T19 | Codex Backend Structure Agent | `9b8d517` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; extractor now reads DOCX bytes directly, emits v2 fact nodes for body paragraphs, table cell paragraphs, headers and footers, and keeps old `DocumentNode` constructor compatibility | role suggestions intentionally remain `UNKNOWN` until T20 semantic suggester |
+| 2026-05-31 | T20 | Codex Backend Semantic Agent | 本提交（T20 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | pass; upload now persists semantic suggestions for fact nodes, speech headings/date/recipient/body are suggested, and late body unit/meta keyword false positives are demoted | suggestions are deterministic heuristics and remain user-confirmable mapping defaults |
 
 ## Agent File Boundaries
 
@@ -709,7 +710,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Add failing speech semantic test**
+- [x] **Step 1: Add failing speech semantic test**
 
   In `DocumentSemanticSuggesterTest.java`, add:
 
@@ -731,7 +732,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 2: Add failing notice/reference semantic test**
+- [x] **Step 2: Add failing notice/reference semantic test**
 
   Add:
 
@@ -753,7 +754,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 3: Run failing semantic tests**
+- [x] **Step 3: Run failing semantic tests**
 
   Run:
 
@@ -766,7 +767,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - FAIL because the suggester does not exist.
 
-- [ ] **Step 4: Implement `DocumentSemanticContext`**
+- [x] **Step 4: Implement `DocumentSemanticContext`**
 
   Create:
 
@@ -784,7 +785,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 5: Implement `DocumentSemanticSuggester`**
+- [x] **Step 5: Implement `DocumentSemanticSuggester`**
 
   Required public method:
 
@@ -801,7 +802,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - Use `UNKNOWN` for table/header/footer unless obvious fixed text should become `STATIC_TEXT`.
   - Do not suggest `UNIT` or `META` after `seenBody=true`.
 
-- [ ] **Step 6: Wire suggester into upload profile persistence**
+- [x] **Step 6: Wire suggester into upload profile persistence**
 
   Modify `TemplateUploadService` or `DocumentStructureExtractor` integration so after `TemplateIntelligenceService.enrich(...)` determines document kind, persisted `DocumentStructureProfile` uses:
 
@@ -809,7 +810,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   semanticSuggester.suggest(structureProfile, profile.templateAnalysis().documentKind(), profile.templateAnalysis().documentTypeCode())
   ```
 
-- [ ] **Step 7: Demote semantic guessing in `TemplateProfileParser`**
+- [x] **Step 7: Demote semantic guessing in `TemplateProfileParser`**
 
   Keep `TemplateProfileParser` compatible for existing tests, but remove or narrow late-body keyword inference that causes `UNIT`/`META` body misclassification.
 
@@ -823,7 +824,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   This rule belongs in `refineMainParagraphType`, not in `inferStructureType`.
 
-- [ ] **Step 8: Run semantic/parser focused tests**
+- [x] **Step 8: Run semantic/parser focused tests**
 
   Run:
 
@@ -836,7 +837,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 9: Update Progress Board and Progress Log**
+- [x] **Step 9: Update Progress Board and Progress Log**
 
   Record exact test commands and result.
 

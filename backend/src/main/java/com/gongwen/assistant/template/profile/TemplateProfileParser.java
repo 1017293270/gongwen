@@ -246,6 +246,9 @@ public class TemplateProfileParser {
         if (isLikelyRecipientLine(text, seenTitle, seenBody, seenRecipient)) {
             return "RECIPIENT";
         }
+        if (seenBody && ("UNIT".equals(inferredType) || "META".equals(inferredType))) {
+            return "BODY";
+        }
         if ("UNKNOWN".equals(inferredType) && !seenTitle && isLikelyDocumentTitle(text, paragraph)) {
             return "TITLE";
         }

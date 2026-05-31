@@ -183,6 +183,22 @@ class TemplateProfileParserTest {
     }
 
     @Test
+    void doesNotClassifySpeechBodyUnitWordsAsUnitOrMetaAfterBodyStarts() {
+        TemplateProfile profile = parser.parse(DocxTestFactory.speechReferenceDocument());
+
+        assertThat(profile.structures().stream()
+                .filter(structure -> structure.textPreview().startsWith("今年以来，各部门各单位围绕中心"))
+                .findFirst()
+                .orElseThrow()
+                .structureType()).isEqualTo("BODY");
+        assertThat(profile.structures().stream()
+                .filter(structure -> structure.textPreview().startsWith("要健全闭环机制"))
+                .findFirst()
+                .orElseThrow()
+                .structureType()).isEqualTo("BODY");
+    }
+
+    @Test
     void parsesTablePlaceholders() {
         TemplateProfile profile = parser.parse(DocxTestFactory.docxWithTableCell("附件：{{附件}}"));
 

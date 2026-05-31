@@ -1,7 +1,9 @@
 package com.gongwen.assistant.template;
 
 import com.gongwen.assistant.documentstructure.DocumentStructureExtractor;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
+import com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggester;
 import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileParser;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
@@ -30,6 +32,7 @@ public class TemplateUploadService {
     private final TemplateRepository templateRepository;
     private final DocumentStructureExtractor documentStructureExtractor;
     private final DocumentStructureProfileRepository documentStructureProfileRepository;
+    private final DocumentSemanticSuggester documentSemanticSuggester;
 
     @Autowired
     public TemplateUploadService(
@@ -41,7 +44,8 @@ public class TemplateUploadService {
             TemplateIntelligenceService intelligenceService,
             TemplateRepository templateRepository,
             DocumentStructureExtractor documentStructureExtractor,
-            DocumentStructureProfileRepository documentStructureProfileRepository
+            DocumentStructureProfileRepository documentStructureProfileRepository,
+            DocumentSemanticSuggester documentSemanticSuggester
     ) {
         this.storage = storage;
         this.versionRepository = versionRepository;
@@ -52,6 +56,32 @@ public class TemplateUploadService {
         this.templateRepository = templateRepository;
         this.documentStructureExtractor = documentStructureExtractor;
         this.documentStructureProfileRepository = documentStructureProfileRepository;
+        this.documentSemanticSuggester = documentSemanticSuggester;
+    }
+
+    public TemplateUploadService(
+            TemplateStorage storage,
+            TemplateVersionRepository versionRepository,
+            TemplateProfileRepository profileRepository,
+            TemplateProfileParser profileParser,
+            TemplateProperties properties,
+            TemplateIntelligenceService intelligenceService,
+            TemplateRepository templateRepository,
+            DocumentStructureExtractor documentStructureExtractor,
+            DocumentStructureProfileRepository documentStructureProfileRepository
+    ) {
+        this(
+                storage,
+                versionRepository,
+                profileRepository,
+                profileParser,
+                properties,
+                intelligenceService,
+                templateRepository,
+                documentStructureExtractor,
+                documentStructureProfileRepository,
+                new DocumentSemanticSuggester()
+        );
     }
 
     public TemplateUploadService(
@@ -63,7 +93,7 @@ public class TemplateUploadService {
     ) {
         this(storage, versionRepository, profileRepository, profileParser, properties,
                 new TemplateIntelligenceService(new MockModelAdapter()), new InMemoryTemplateRepository(),
-                new DocumentStructureExtractor(), null);
+                new DocumentStructureExtractor(), null, new DocumentSemanticSuggester());
     }
 
     public TemplateUploadResponse upload(long templateId, String originalFileName, String contentType, byte[] content) {
@@ -90,7 +120,7 @@ public class TemplateUploadService {
             TemplateProfile profile = intelligenceService.enrich(documentTypeCode, originalFileName, content, profileParser.parse(content));
             String profileHash = sha256(content);
             profileRepository.save(version.id(), profile, profileHash);
-            saveDocumentStructureProfile(version.id(), content, profileHash);
+            saveDocumentStructureProfile(version.id(), content, profile, profileHash);
             versionRepository.markParsed(version.id(), profileHash);
 
             return new TemplateUploadResponse(
@@ -134,13 +164,21 @@ public class TemplateUploadService {
         versionRepository.markFailed(version.id(), "TEMPLATE_PARSE_FAILED", exception.getMessage());
     }
 
-    private void saveDocumentStructureProfile(long templateVersionId, byte[] content, String profileHash) {
+    private void saveDocumentStructureProfile(long templateVersionId, byte[] content, TemplateProfile profile, String profileHash) {
         if (documentStructureProfileRepository == null || documentStructureExtractor == null) {
             return;
         }
+        DocumentStructureProfile structureProfile = documentStructureExtractor.extract(content, profileHash);
+        if (documentSemanticSuggester != null && profile != null && profile.templateAnalysis() != null) {
+            structureProfile = documentSemanticSuggester.suggest(
+                    structureProfile,
+                    profile.templateAnalysis().documentKind(),
+                    profile.templateAnalysis().documentTypeCode()
+            );
+        }
         documentStructureProfileRepository.save(
                 templateVersionId,
-                documentStructureExtractor.extract(content, profileHash)
+                structureProfile
         );
     }
 

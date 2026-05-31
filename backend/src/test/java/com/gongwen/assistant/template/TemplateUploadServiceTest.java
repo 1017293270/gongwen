@@ -207,6 +207,9 @@ class TemplateUploadServiceTest {
         assertThat(structureProfile.nodes())
                 .extracting("text")
                 .contains("{{标题}}", "{{正文}}", "机关公文");
+        assertThat(structureProfile.nodes())
+                .extracting("roleSuggestion")
+                .contains("TITLE", "BODY", "STATIC_TEXT");
     }
 
     @Test
