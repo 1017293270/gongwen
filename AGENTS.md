@@ -338,8 +338,8 @@ Agent: 后端
 - Agent P10E-Semantic：已完成独立语义建议器；后续只协助 T25/T26 固化讲话稿、通知、请示、报告常见结构回归。
 - Agent P10E-Draft：已完成 `DraftNode` 初始化和 reinitialize 修正，按源节点文本生成；后续只协助 QA 验证不再复制旧 `BODY_PARAGRAPH` 污染。
 - Agent P10E-Frontend：模板解析工作台拆分、批量映射、工作台结构树、结构化编辑预览和显式 reinitialize 入口已完成；后续主要协助 T25/T26 做前端回归和小修。
-- Agent P10E-Export：无占位符参考/正式文档原 DOCX 节点原位替换导出已完成；后续协助 T25 覆盖更多 fixtures。
-- Agent P10E-QA：下一步优先以示例 DOCX 和动态 fixtures 固化结构、映射、初始化、原位替换导出和渲染回归。
+- Agent P10E-Export：无占位符参考/正式文档原 DOCX 节点原位替换导出已完成；后续只协助 T26 集成核对。
+- Agent P10E-QA：T25 fixture 回归已覆盖结构、映射、初始化、原位替换导出和 LibreOffice CLI 烟测；后续协助 T26 收口。
 - 集成 Agent：先查 `git status --short --branch`，确认没有覆盖用户未提交改动；对齐 API 字段后跑 focused 后端测试、前端 `npm run build`，必要时再跑更广测试。
 
 ## 13. 文档更新规则
@@ -404,7 +404,7 @@ P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新�
 
 P10D 后续修正已明确文种和模板边界：文种仅作为分类、列表归档、权限过滤和 AI 提示倾向，不再隐含固定格式；新建草稿不再自动塞“各部门、各直属单位”“附件：无”“办公室”和日期等通知骨架，草稿结构应来自已发布模板映射、上传范文或后续 AI 生成结果。旧 `DraftBlock` 兼容链路仍保留用于读取历史草稿、保存和导出 fallback。
 
-P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。P10E T18-T24 已落地：上传模板会持久化 `document-structure-v2` fact nodes（正文段落、表格段落、页眉页脚、位置、runs、编号事实），`DocumentSemanticSuggester` 在事实层上给出标题、主送、日期、正文、正文标题、发文机关、文号等建议，正文开始后不再因“单位/机关/号”等词误判为 `UNIT`/`META`；`DraftNode.initializeNodes` 对已有节点保持非破坏性，首次初始化优先使用源节点文本，显式 `POST /api/drafts/{draftId}/nodes/reinitialize` 才按当前发布映射重建，并可保留用户已编辑节点；前端模板解析工作台已拆到 `frontend/src/components/template/**`，完整展示 fact tree，分离事实节点类型和语义建议，支持选中节点批量标为正文、一级标题、固定文本或忽略，并继续复用保存草稿和发布映射 API；工作台已拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，纸面区明确标为结构化编辑预览，静态表格/页眉页脚/固定文本仅在结构树展示，不再插入纸面正文上方，重建结构按钮会调用 `POST /api/drafts/{draftId}/nodes/reinitialize` 并默认保留用户编辑；后端导出新增 `DocxNodeLocator` / `DocxNodeReplacementRenderer`，无占位符 `REFERENCE_DOCUMENT` / `OFFICIAL_DOCUMENT` 在存在映射节点时走原 DOCX 节点原位替换，保留占位符模板旧路径，导出记录通过 Flyway `V17` 新增 `export_strategy` 追踪 `PLACEHOLDER_REPLACEMENT`、`ORIGINAL_NODE_REPLACEMENT` 或 `GENERATED_SNAPSHOT`。
+P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。P10E T18-T25 已落地：上传模板会持久化 `document-structure-v2` fact nodes（正文段落、表格段落、页眉页脚、位置、runs、编号事实），`DocumentSemanticSuggester` 在事实层上给出标题、主送、日期、正文、正文标题、发文机关、文号等建议，正文开始后不再因“单位/机关/号”等词误判为 `UNIT`/`META`；`DraftNode.initializeNodes` 对已有节点保持非破坏性，首次初始化优先使用源节点文本，显式 `POST /api/drafts/{draftId}/nodes/reinitialize` 才按当前发布映射重建，并可保留用户已编辑节点；前端模板解析工作台已拆到 `frontend/src/components/template/**`，完整展示 fact tree，分离事实节点类型和语义建议，支持选中节点批量标为正文、一级标题、固定文本或忽略，并继续复用保存草稿和发布映射 API；工作台已拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，纸面区明确标为结构化编辑预览，静态表格/页眉页脚/固定文本仅在结构树展示，不再插入纸面正文上方，重建结构按钮会调用 `POST /api/drafts/{draftId}/nodes/reinitialize` 并默认保留用户编辑；后端导出新增 `DocxNodeLocator` / `DocxNodeReplacementRenderer`，无占位符 `REFERENCE_DOCUMENT` / `OFFICIAL_DOCUMENT` 在存在映射节点时走原 DOCX 节点原位替换，保留占位符模板旧路径，导出记录通过 Flyway `V17` 新增 `export_strategy` 追踪 `PLACEHOLDER_REPLACEMENT`、`ORIGINAL_NODE_REPLACEMENT` 或 `GENERATED_SNAPSHOT`；T25 新增 `DocxCompleteStructurePipelineTest` 覆盖 speech reference 上传、结构事实、语义建议、发布映射、DraftNode 初始化去重、原 DOCX 替换导出和本机 LibreOffice CLI PDF 烟测。
 
 当前核心 API：
 

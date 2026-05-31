@@ -31,6 +31,15 @@ describe('TemplateParseWorkspace', () => {
     expect(screen.getByText('政务会议讲话稿测试样例')).toBeInTheDocument();
   });
 
+  it('keeps no-placeholder reference documents mappable with unknown nodes visible', () => {
+    renderWorkspace();
+
+    expect(sampleTemplateProfile().placeholders).toHaveLength(0);
+    expect(screen.getByRole('button', { name: '保存草稿' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '发布映射' })).toBeEnabled();
+    expect(screen.getByLabelText('映射角色：政务会议讲话稿测试样例')).toHaveValue('UNKNOWN');
+  });
+
   it('applies batch roles to selected nodes and saves mapping draft', async () => {
     const onSaveMappingDraft = vi.fn();
 

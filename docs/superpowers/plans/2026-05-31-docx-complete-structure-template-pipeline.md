@@ -107,7 +107,7 @@ Completion evidence format:
 | T22 | 已完成 | Frontend Template Agent | T20 | complete structure mapping workspace | `e058ea1` | `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | `App.tsx` template workspace is extracted; workbench preview cleanup completed in T23 |
 | T23 | 已完成 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup | `dd8182a` | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | Workbench preview is explicitly structured-editing only; original DOCX in-place export completed in T24 |
 | T24 | 已完成 | Backend Export Agent | T19, T21 | original DOCX in-place replacement export for reference templates | 本提交（T24 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxNodeReplacementRendererTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest"` | Multi-line replacement currently uses line breaks in the original paragraph; broader fixtures remain T25 |
-| T25 | 未开始 | QA Agent | T19-T24 | fixture regression suite and render verification |  | focused backend regression; focused frontend regression; `npm run build`; render smoke when LibreOffice is available | Browser automation may still be unavailable; document exact fallback |
+| T25 | 已完成 | QA Agent | T19-T24 | fixture regression suite and render verification | 本提交（T25 实现） | `.\gradlew.bat --no-daemon --console=plain test --rerun-tasks --tests "com.gongwen.assistant.integration.DocxCompleteStructurePipelineTest" --tests "com.gongwen.assistant.documentstructure.*" --tests "com.gongwen.assistant.draft.node.*" --tests "com.gongwen.assistant.exporting.*"`; `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; LibreOffice CLI PDF smoke | Browser authenticated automation remains for T26/manual; LibreOffice smoke used direct CLI conversion |
 | T26 | 未开始 | Integration Agent | T18-T25 | final integration closure and docs sync |  | `git status --short --branch`; `git diff --check`; focused backend/frontend commands; migration/API grep | Full backend/frontend suites may remain optional per lightweight-test instruction, but focused coverage is mandatory |
 
 ## Progress Log
@@ -123,6 +123,7 @@ Completion evidence format:
 | 2026-05-31 | T22 | Codex Frontend Template Agent | `e058ea1` | `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; template parse workspace extracted from `App.tsx`, all fact nodes render with separate fact type and role suggestion, selected nodes support batch role changes, draft save and publish actions remain wired | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
 | 2026-05-31 | T23 | Codex Frontend Workbench Agent | `dd8182a` | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; workbench structure tree and structured editing preview were extracted, static facts stay visible in the tree but out of paper preview, and `从原稿重建结构` calls `POST /api/drafts/{draftId}/nodes/reinitialize` preserving user edits | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
 | 2026-05-31 | T24 | Codex Backend Export Agent | 本提交（T24 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxNodeReplacementRendererTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest"` | pass; no-placeholder `REFERENCE_DOCUMENT` export now uses original DOCX node replacement, preserves paragraph objects/header text, records `ORIGINAL_NODE_REPLACEMENT`, and persists `export_strategy` via Flyway `V17` | T25 still needs fixture-level pipeline coverage across upload, mapping, node init, export, and optional render smoke |
+| 2026-05-31 | T25 | Codex QA Agent | 本提交（T25 实现） | `.\gradlew.bat --no-daemon --console=plain test --rerun-tasks --tests "com.gongwen.assistant.integration.DocxCompleteStructurePipelineTest" --tests "com.gongwen.assistant.documentstructure.*" --tests "com.gongwen.assistant.draft.node.*" --tests "com.gongwen.assistant.exporting.*"`; `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; LibreOffice CLI PDF smoke | pass; speech reference fixture now covers upload, fact extraction, semantic suggestions, published mapping, duplicate-free DraftNode initialization, original DOCX node replacement export, and no-placeholder mapping UI behavior | browser authenticated workflow still needs T26/manual verification; full backend/frontend suites remain optional per lightweight-test direction |
 
 ## Agent File Boundaries
 
@@ -1484,7 +1485,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Add backend pipeline test**
+- [x] **Step 1: Add backend pipeline test**
 
   Create `DocxCompleteStructurePipelineTest.java` covering:
 
@@ -1497,7 +1498,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   -> DraftWordExportService exports with ORIGINAL_NODE_REPLACEMENT
   ```
 
-- [ ] **Step 2: Add duplicate guard assertion**
+- [x] **Step 2: Add duplicate guard assertion**
 
   In the pipeline test, assert:
 
@@ -1509,7 +1510,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   assertThat(bodyContents).doesNotHaveDuplicates();
   ```
 
-- [ ] **Step 3: Add frontend fixture behavior test**
+- [x] **Step 3: Add frontend fixture behavior test**
 
   In template workspace tests, assert:
 
@@ -1517,7 +1518,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - No-placeholder document still shows mapping controls.
   - Unknown nodes remain visible.
 
-- [ ] **Step 4: Run focused regression**
+- [x] **Step 4: Run focused regression**
 
   Run:
 
@@ -1533,7 +1534,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 5: Run optional local render smoke when LibreOffice exists**
+- [x] **Step 5: Run optional local render smoke when LibreOffice exists**
 
   Run:
 
