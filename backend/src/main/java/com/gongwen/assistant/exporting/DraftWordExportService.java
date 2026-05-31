@@ -11,6 +11,7 @@ import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
+import com.gongwen.assistant.exporting.word.DocxNodeReplacementRenderer;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import com.gongwen.assistant.template.TemplateRepository;
 import com.gongwen.assistant.template.TemplateSummary;
@@ -31,6 +32,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,8 +50,15 @@ public class DraftWordExportService {
     private static final String PLACEHOLDER_BODY = "\u6b63\u6587";
     private static final Set<String> DISALLOWED_DOCUMENT_KINDS =
             Set.of("MANUAL_OR_GUIDE", "POLICY_OR_REGULATION", "ORDINARY_DOCUMENT");
+    private static final Set<String> ORIGINAL_NODE_REPLACEMENT_KINDS =
+            Set.of("REFERENCE_DOCUMENT", "OFFICIAL_DOCUMENT");
+    private static final Set<String> NON_REPLACEABLE_ORIGINAL_ROLES =
+            Set.of("UNKNOWN", "STATIC_TEXT", "IGNORE", "HEADER", "FOOTER");
     private static final Set<String> REQUIRED_MAPPING_ROLES = Set.of("TITLE", "BODY");
     private static final Pattern CHINESE_DATE_LINE_PATTERN = Pattern.compile("^\\d{4}\u5e74\\d{1,2}\u6708\\d{1,2}\u65e5$");
+    private static final String STRATEGY_PLACEHOLDER_REPLACEMENT = "PLACEHOLDER_REPLACEMENT";
+    private static final String STRATEGY_ORIGINAL_NODE_REPLACEMENT = "ORIGINAL_NODE_REPLACEMENT";
+    private static final String STRATEGY_GENERATED_SNAPSHOT = "GENERATED_SNAPSHOT";
 
     private final DraftRepository draftRepository;
     private final TemplateVersionRepository templateVersionRepository;
@@ -62,6 +71,7 @@ public class DraftWordExportService {
     private final DraftNodeRepository draftNodeRepository;
     private final StructureMappingRepository structureMappingRepository;
     private final DocumentStructureProfileRepository documentStructureProfileRepository;
+    private final DocxNodeReplacementRenderer nodeReplacementRenderer;
 
     public DraftWordExportService(
             DraftRepository draftRepository,
@@ -137,6 +147,7 @@ public class DraftWordExportService {
         this.draftNodeRepository = draftNodeRepository;
         this.structureMappingRepository = structureMappingRepository;
         this.documentStructureProfileRepository = documentStructureProfileRepository;
+        this.nodeReplacementRenderer = new DocxNodeReplacementRenderer();
     }
 
     public WordExportResult exportDraft(long draftId) {
@@ -177,8 +188,9 @@ public class DraftWordExportService {
         ExportFormattingContext formattingContext = exportFormattingContext(profile, structureOverrides, draftNodes);
         Map<String, String> values = draftValues(draft, draftNodes);
         ensureRequiredSlots(values, structureContext.mappingProfile());
-
-        return wordExportService.export(readTemplateBytes(version.filePath()), WordExportRequest.draftExport(
+        byte[] templateBytes = readTemplateBytes(version.filePath());
+        String strategy = exportStrategy(templateBytes, profile, structureContext.mappingProfile(), draftNodes);
+        WordExportRequest request = WordExportRequest.draftExport(
                 template.templateName(),
                 version.versionNo(),
                 version.templateId(),
@@ -189,8 +201,67 @@ public class DraftWordExportService {
                 values,
                 formattingContext,
                 profile,
-                traceSnapshot(structureContext, formattingContext, draftNodes)
-        ));
+                traceSnapshot(structureContext, formattingContext, draftNodes, strategy)
+        );
+
+        if (STRATEGY_ORIGINAL_NODE_REPLACEMENT.equals(strategy)) {
+            return exportOriginalNodeReplacement(templateBytes, request, structureContext.mappingProfile(), draftNodes);
+        }
+        return wordExportService.export(templateBytes, request);
+    }
+
+    private WordExportResult exportOriginalNodeReplacement(
+            byte[] templateBytes,
+            WordExportRequest request,
+            StructureMappingProfile mapping,
+            List<DraftNode> draftNodes
+    ) {
+        try {
+            byte[] rendered = nodeReplacementRenderer.render(
+                    templateBytes,
+                    originalNodeReplacements(draftNodes),
+                    ignoredNodeKeys(mapping)
+            );
+            return wordExportService.exportRendered(request, rendered);
+        } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
+            throw new WordExportException(
+                    "EXPORT_NODE_LOCATOR_MISSING",
+                    "\u5bfc\u51fa\u8282\u70b9\u5b9a\u4f4d\u5931\u8d25\uff1a" + exception.nodeKey(),
+                    exception
+            );
+        }
+    }
+
+    private String exportStrategy(
+            byte[] templateBytes,
+            TemplateProfile profile,
+            StructureMappingProfile mapping,
+            List<DraftNode> draftNodes
+    ) {
+        if (wordExportService.hasPlaceholders(templateBytes)) {
+            return STRATEGY_PLACEHOLDER_REPLACEMENT;
+        }
+        if (isOriginalNodeReplacementSupported(profile, mapping, draftNodes)) {
+            return STRATEGY_ORIGINAL_NODE_REPLACEMENT;
+        }
+        return STRATEGY_GENERATED_SNAPSHOT;
+    }
+
+    private boolean isOriginalNodeReplacementSupported(
+            TemplateProfile profile,
+            StructureMappingProfile mapping,
+            List<DraftNode> draftNodes
+    ) {
+        return mapping != null
+                && ORIGINAL_NODE_REPLACEMENT_KINDS.contains(documentKind(profile))
+                && !originalNodeReplacements(draftNodes).isEmpty();
+    }
+
+    private String documentKind(TemplateProfile profile) {
+        if (profile == null || profile.templateAnalysis() == null) {
+            return "";
+        }
+        return profile.templateAnalysis().documentKind();
     }
 
     private CurrentUser currentUserOrNull() {
@@ -396,6 +467,35 @@ public class DraftWordExportService {
         return values;
     }
 
+    private Map<String, String> originalNodeReplacements(List<DraftNode> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> replacements = new LinkedHashMap<>();
+        nodes.stream()
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .filter(node -> !isBlank(node.templateNodeKey()))
+                .filter(node -> isReplaceableOriginalRole(node.role()))
+                .forEach(node -> replacements.put(node.templateNodeKey(), node.content() == null ? "" : node.content()));
+        return replacements;
+    }
+
+    private Set<String> ignoredNodeKeys(StructureMappingProfile mapping) {
+        if (mapping == null) {
+            return Set.of();
+        }
+        return mapping.items().stream()
+                .filter(item -> "IGNORE".equals(normalizeRole(item.role())))
+                .map(item -> item.nodeKey())
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .collect(Collectors.toSet());
+    }
+
+    private boolean isReplaceableOriginalRole(String role) {
+        String normalizedRole = normalizeRole(role);
+        return !normalizedRole.isBlank() && !NON_REPLACEABLE_ORIGINAL_ROLES.contains(normalizedRole);
+    }
+
     private String firstNodeValue(List<DraftNode> nodes, String role, String fallback) {
         return nodes.stream()
                 .filter(node -> role.equals(normalizeRole(node.role())))
@@ -448,7 +548,8 @@ public class DraftWordExportService {
     private ExportTraceSnapshot traceSnapshot(
             ExportStructureContext structureContext,
             ExportFormattingContext formatting,
-            List<DraftNode> nodes
+            List<DraftNode> nodes,
+            String strategy
     ) {
         StructureMappingProfile mapping = structureContext.mappingProfile();
         return new ExportTraceSnapshot(
@@ -457,7 +558,8 @@ public class DraftWordExportService {
                 structureContext.structureProfile(),
                 mapping,
                 formatting,
-                nodeSnapshots(nodes)
+                nodeSnapshots(nodes),
+                strategy
         );
     }
 

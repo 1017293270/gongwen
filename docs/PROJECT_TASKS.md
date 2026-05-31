@@ -71,10 +71,11 @@
 - P10E T21 草稿节点初始化修正：`DraftNode.initializeNodes` 首次初始化优先使用源节点文本，避免把首个旧 `BODY_PARAGRAPH` 复制到所有正文节点；已有节点默认保持非破坏性，新增 `POST /api/drafts/{draftId}/nodes/reinitialize` 可按当前已发布映射显式重建，并可保留用户已编辑节点。
 - P10E T22 模板解析工作台前端：已从 `frontend/src/App.tsx` 拆出 `TemplateParseWorkspace`、`StructureNodeTree` 和 `MappingBulkToolbar`，完整展示 fact tree、分离事实节点类型与语义建议、支持选中节点批量标为正文/一级标题/固定文本/忽略，并保留保存草稿和发布映射入口；无占位符参考范文不再阻断映射。
 - P10E T23 工作台结构化预览前端：已从 `frontend/src/App.tsx` 拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，结构树展示完整工作台节点和静态事实，静态表格/页眉页脚/固定文本不再进入纸面编辑预览；新增“从原稿重建结构”入口调用 `POST /api/drafts/{draftId}/nodes/reinitialize`，默认保留用户已编辑节点并标记真实预览待刷新。
+- P10E T24 无占位符参考文档导出：新增 DOCX 节点定位与原位替换渲染器，`REFERENCE_DOCUMENT` / `OFFICIAL_DOCUMENT` 在无占位符且存在映射节点时走原 DOCX 节点替换；占位符模板保持旧路径，`STATIC_TEXT`、页眉页脚和表格静态文本默认保留，`IGNORE` 节点清空而不物理删除；导出 trace 新增 `export_strategy` 持久化字段（Flyway `V17`）。
 
 当前推荐下一阶段：
 
-- P10E DOCX 完整结构事实与无占位符范文套版：T18-T23 已完成。下一步优先派 T24 后端导出 Agent 做无占位符参考文档原 DOCX 节点原位替换导出，T25 QA Agent 固化端到端样本回归，T26 Integration Agent 做最终收口。
+- P10E DOCX 完整结构事实与无占位符范文套版：T18-T24 已完成。下一步优先派 T25 QA Agent 固化端到端样本回归，T26 Integration Agent 做最终收口。
 - P10D DOCX 原貌预览与结构化工作台：T0-T17 已完成。下一步优先做前端工作台拆分，把 `frontend/src/App.tsx` 中的 workbench/template/export 表面拆到 feature components，再继续 P11/P9 这类 UI-heavy 切片。
 - P10D 文种/模板解耦继续下沉：后续“范文导入成草稿”应复用 `DocumentStructureProfile` 和 `DraftNode`，不要再恢复文种硬编码字段。
 - P11 导出体验继续增强，补更复杂正文块填充、导出记录分页/筛选和历史文件不可用时的运维处理提示。
@@ -876,12 +877,11 @@
 
 ## 当前开发队列
 
-1. P10E T24 后端导出：无占位符参考文档走原 DOCX 节点原位替换，保留占位符模板旧路径。
-2. P10E T25 QA：用示例 DOCX 固化结构、映射、初始化、导出和渲染回归。
-3. P10E T26 集成收口：核对 API、迁移、前后端 focused 命令、浏览器/渲染烟测和文档状态。
-4. P11 导出体验增强。
-5. P9 权限继续收口：材料/导出文件下载鉴权、模板管理员细粒度权限、审计日志和权限不足 UI。
-6. P12 部署与环境。
+1. P10E T25 QA：用示例 DOCX 固化结构、映射、初始化、导出和渲染回归。
+2. P10E T26 集成收口：核对 API、迁移、前后端 focused 命令、浏览器/渲染烟测和文档状态。
+3. P11 导出体验增强。
+4. P9 权限继续收口：材料/导出文件下载鉴权、模板管理员细粒度权限、审计日志和权限不足 UI。
+5. P12 部署与环境。
 
 P10D 执行纪律：
 

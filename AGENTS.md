@@ -334,12 +334,12 @@ Agent: 后端
 - Agent B 前端 P11：工作台导出入口与基础质检入口保持独立，导出只自动保存当前草稿并展示导出失败/成功反馈；后续导出记录页只做列表入口，不扩大成完整审计后台。
 - Agent C 后端/前端 P10：继续模板后台字段映射、模板启停和版本详情；必须复用已存在 `GET/POST /api/templates`、版本上传和 profile API。
 - Agent D QA/文档：P10D T16/T17 已完成；后续优先协助前端工作台拆分与轻量回归。
-- Agent P10E-Structure：按 `docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md` 升级 `DocumentStructureProfile` 为 fact-first OOXML 结构层，禁止把语义猜测写死为事实。
-- Agent P10E-Semantic：独立语义建议器，覆盖讲话稿、通知、请示、报告常见结构；正文开始后不得因“单位/机关/号”等词把正文误判为 `UNIT`/`META`。
-- Agent P10E-Draft：修 `DraftNode` 初始化和 reinitialize，按源节点文本生成，消除旧 `DraftBlock` / `BODY_PARAGRAPH` 复制污染。
+- Agent P10E-Structure：已完成 fact-first OOXML 结构层升级；后续只协助 T25/T26 补 fixture 覆盖。
+- Agent P10E-Semantic：已完成独立语义建议器；后续只协助 T25/T26 固化讲话稿、通知、请示、报告常见结构回归。
+- Agent P10E-Draft：已完成 `DraftNode` 初始化和 reinitialize 修正，按源节点文本生成；后续只协助 QA 验证不再复制旧 `BODY_PARAGRAPH` 污染。
 - Agent P10E-Frontend：模板解析工作台拆分、批量映射、工作台结构树、结构化编辑预览和显式 reinitialize 入口已完成；后续主要协助 T25/T26 做前端回归和小修。
-- Agent P10E-Export：实现无占位符参考文档的原 DOCX 原位替换导出，保留占位符模板原有导出路径。
-- Agent P10E-QA：以示例 DOCX 和动态 fixtures 固化结构、映射、初始化、导出和渲染回归。
+- Agent P10E-Export：无占位符参考/正式文档原 DOCX 节点原位替换导出已完成；后续协助 T25 覆盖更多 fixtures。
+- Agent P10E-QA：下一步优先以示例 DOCX 和动态 fixtures 固化结构、映射、初始化、原位替换导出和渲染回归。
 - 集成 Agent：先查 `git status --short --branch`，确认没有覆盖用户未提交改动；对齐 API 字段后跑 focused 后端测试、前端 `npm run build`，必要时再跑更广测试。
 
 ## 13. 文档更新规则
@@ -364,7 +364,7 @@ Agent: 后端
 
 ## 14. 当前状态
 
-当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前结构阻断、导出记录列表、导出详情、失败重试和历史文件下载；基础质检保持独立入口，不再作为 Word 导出的强制前置动作。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、DraftNode 格式覆盖后端合同、右栏节点级格式面板、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、右栏真实预览状态与刷新入口、导出记录页、导出消费结构映射与 DraftNode 正文/格式合并结果、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 已通过 Docker Compose 启动并健康，Flyway 已应用到 v11。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
+当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前结构阻断、导出记录列表、导出详情、失败重试和历史文件下载；基础质检保持独立入口，不再作为 Word 导出的强制前置动作。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、DraftNode 格式覆盖后端合同、右栏节点级格式面板、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、右栏真实预览状态与刷新入口、导出记录页、导出消费结构映射与 DraftNode 正文/格式合并结果、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析、无占位符参考/正式文档原 DOCX 节点原位替换导出，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 曾通过 Docker Compose 启动并健康；仓库 Flyway 迁移已到 V17。当前本机可用 JDK 21 路径为 `C:\Users\10172\.jdks\ms-21.0.11`；本轮发现 `scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
 
 P10D DOCX 原貌预览与结构化工作台已完成 T0 契约冻结。冻结内容见 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`：下一迁移号从 `V12` 开始，后续 T3/T4/T6/T8/T14 分别预留 `V12`/`V13`/`V14`/`V15`/`V16`；共享枚举、API 边界、Agent 文件边界和进度更新规则已固定；本机 `18081` 只视为手动联调后端，不作为自动测试前置条件。
 
@@ -404,7 +404,7 @@ P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新�
 
 P10D 后续修正已明确文种和模板边界：文种仅作为分类、列表归档、权限过滤和 AI 提示倾向，不再隐含固定格式；新建草稿不再自动塞“各部门、各直属单位”“附件：无”“办公室”和日期等通知骨架，草稿结构应来自已发布模板映射、上传范文或后续 AI 生成结果。旧 `DraftBlock` 兼容链路仍保留用于读取历史草稿、保存和导出 fallback。
 
-P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。P10E T18-T23 已落地：上传模板会持久化 `document-structure-v2` fact nodes（正文段落、表格段落、页眉页脚、位置、runs、编号事实），`DocumentSemanticSuggester` 在事实层上给出标题、主送、日期、正文、正文标题、发文机关、文号等建议，正文开始后不再因“单位/机关/号”等词误判为 `UNIT`/`META`；`DraftNode.initializeNodes` 对已有节点保持非破坏性，首次初始化优先使用源节点文本，显式 `POST /api/drafts/{draftId}/nodes/reinitialize` 才按当前发布映射重建，并可保留用户已编辑节点；前端模板解析工作台已拆到 `frontend/src/components/template/**`，完整展示 fact tree，分离事实节点类型和语义建议，支持选中节点批量标为正文、一级标题、固定文本或忽略，并继续复用保存草稿和发布映射 API；工作台已拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，纸面区明确标为结构化编辑预览，静态表格/页眉页脚/固定文本仅在结构树展示，不再插入纸面正文上方，重建结构按钮会调用 `POST /api/drafts/{draftId}/nodes/reinitialize` 并默认保留用户编辑。
+P10E DOCX 完整结构事实与无占位符范文套版实施计划已新增：`docs/superpowers/plans/2026-05-31-docx-complete-structure-template-pipeline.md`。该阶段不推翻 P10D，而是把 `DocumentStructureProfile` 从 `TemplateProfile.structures` 派生的浅层结构升级为 fact-first OOXML 事实层；语义角色改为可校正建议；`DraftNode` 初始化必须按源节点文本生成，不能再复制首个 `BODY_PARAGRAPH`；无占位符 `REFERENCE_DOCUMENT` 导出应走原 DOCX 节点原位替换，而不是清空并重组正文。P10E T18-T24 已落地：上传模板会持久化 `document-structure-v2` fact nodes（正文段落、表格段落、页眉页脚、位置、runs、编号事实），`DocumentSemanticSuggester` 在事实层上给出标题、主送、日期、正文、正文标题、发文机关、文号等建议，正文开始后不再因“单位/机关/号”等词误判为 `UNIT`/`META`；`DraftNode.initializeNodes` 对已有节点保持非破坏性，首次初始化优先使用源节点文本，显式 `POST /api/drafts/{draftId}/nodes/reinitialize` 才按当前发布映射重建，并可保留用户已编辑节点；前端模板解析工作台已拆到 `frontend/src/components/template/**`，完整展示 fact tree，分离事实节点类型和语义建议，支持选中节点批量标为正文、一级标题、固定文本或忽略，并继续复用保存草稿和发布映射 API；工作台已拆出 `WorkbenchStructureTree` 和 `WorkbenchPreview`，纸面区明确标为结构化编辑预览，静态表格/页眉页脚/固定文本仅在结构树展示，不再插入纸面正文上方，重建结构按钮会调用 `POST /api/drafts/{draftId}/nodes/reinitialize` 并默认保留用户编辑；后端导出新增 `DocxNodeLocator` / `DocxNodeReplacementRenderer`，无占位符 `REFERENCE_DOCUMENT` / `OFFICIAL_DOCUMENT` 在存在映射节点时走原 DOCX 节点原位替换，保留占位符模板旧路径，导出记录通过 Flyway `V17` 新增 `export_strategy` 追踪 `PLACEHOLDER_REPLACEMENT`、`ORIGINAL_NODE_REPLACEMENT` 或 `GENERATED_SNAPSHOT`。
 
 当前核心 API：
 

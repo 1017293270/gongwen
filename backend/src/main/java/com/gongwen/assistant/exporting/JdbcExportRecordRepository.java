@@ -42,13 +42,14 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
                             status,
                             error_code,
                             error_message,
+                            export_strategy,
                             structure_mapping_profile_id,
                             structure_mapping_version,
                             structure_profile_snapshot_json,
                             mapping_profile_snapshot_json,
                             formatting_snapshot_json,
                             node_snapshot_json
-                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), cast(? as jsonb))
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), cast(? as jsonb))
                         """,
                 record.templateId(),
                 record.templateVersionId(),
@@ -62,6 +63,7 @@ public class JdbcExportRecordRepository implements ExportRecordRepository {
                 record.status(),
                 record.errorCode(),
                 record.errorMessage(),
+                record.traceSnapshot().strategy(),
                 record.traceSnapshot().structureMappingProfileId(),
                 record.traceSnapshot().structureMappingVersion(),
                 toJson(record.traceSnapshot().structureProfileSnapshot()),

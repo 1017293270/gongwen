@@ -31,12 +31,15 @@ import com.gongwen.assistant.template.profile.TemplateStructureProfile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -477,6 +480,59 @@ class DraftWordExportServiceTest {
     }
 
     @Test
+    void referenceDocumentExportUsesOriginalNodeReplacementStrategy() throws Exception {
+        long draftId = 35L;
+        long templateVersionId = 9L;
+        long mappingProfileId = 58L;
+        byte[] templateBytes = DocxTestFactory.speechReferenceDocument();
+        Path templatePath = tempDir.resolve("reference-document-template.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = emptyProfile().withTemplateAnalysis(new TemplateAnalysisProfile(
+                "REFERENCE_DOCUMENT",
+                0.95d,
+                "UNKNOWN",
+                List.of(),
+                List.of(),
+                "reference document",
+                "TEST",
+                "REFERENCE_DOCUMENT",
+                List.of("COMPLETE_REFERENCE_DOCUMENT"),
+                "REVIEW_AND_MAP",
+                List.of()
+        ));
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("paragraph-0", "TITLE", "TITLE", 10),
+                mappingItem("paragraph-4", "BODY", "BODY_PARAGRAPH", 20)
+        );
+        InMemoryExportRecordRepository records = new InMemoryExportRecordRepository();
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Legacy draft")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(records),
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(301L, draftId, mappingProfileId, "paragraph-0", "TITLE", "TITLE", "替换后的讲话标题", 10, DraftNodeFormatOverride.empty()),
+                        draftNode(302L, draftId, mappingProfileId, "paragraph-4", "BODY", "BODY_PARAGRAPH", "替换后的第一段正文", 20, DraftNodeFormatOverride.empty())
+                )),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("paragraph-0", "paragraph-4"))
+        );
+
+        WordExportResult result = service.exportDraft(draftId);
+
+        assertThat(records.savedRecord.traceSnapshot().strategy()).isEqualTo("ORIGINAL_NODE_REPLACEMENT");
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(result.content()))) {
+            assertThat(document.getParagraphs().get(0).getText()).isEqualTo("替换后的讲话标题");
+            assertThat(document.getParagraphs().get(4).getText()).isEqualTo("替换后的第一段正文");
+            assertThat(document.getParagraphs()).hasSize(20);
+        }
+    }
+
+    @Test
     void exportsDraftWithoutRequiringQualityCheckResult() throws Exception {
         byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE, PLACEHOLDER_BODY);
         Path templatePath = tempDir.resolve("quality-independent-template.docx");
@@ -806,9 +862,11 @@ class DraftWordExportServiceTest {
 
     private static final class InMemoryExportRecordRepository implements ExportRecordRepository {
         private String savedStatus;
+        private ExportRecord savedRecord;
 
         @Override
         public void save(ExportRecord record) {
+            this.savedRecord = record;
             this.savedStatus = record.status();
         }
     }

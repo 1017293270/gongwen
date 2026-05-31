@@ -62,6 +62,23 @@ public class WordExportService {
         }
     }
 
+    public boolean hasPlaceholders(byte[] templateBytes) {
+        return renderer.hasPlaceholders(templateBytes);
+    }
+
+    public WordExportResult exportRendered(WordExportRequest request, byte[] content) {
+        String fileName = buildFileName(request);
+        try {
+            String filePath = saveExportFile(request, fileName, content);
+            exportRecordRepository.save(ExportRecord.success(request, fileName, filePath));
+            return new WordExportResult(fileName, content);
+        } catch (WordExportException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw recordFailure(request, fileName, RENDER_FAILED, normalizeRenderFailureMessage(exception), exception);
+        }
+    }
+
     private String buildFileName(WordExportRequest request) {
         String safeName = request.templateName() == null || request.templateName().isBlank()
                 ? "公文模板"

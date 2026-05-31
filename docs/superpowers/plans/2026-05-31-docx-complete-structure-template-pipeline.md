@@ -105,8 +105,8 @@ Completion evidence format:
 | T20 | 已完成 | Backend Semantic Agent | T19 | independent semantic role suggester | `d27e917` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest"` | Suggestions remain advisory and facts remain unchanged; more document types can add heuristics later |
 | T21 | 已完成 | Backend Draft Agent | T19, T20 | clean draft node initialization and reinitialization | `416f912` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | Existing nodes are kept until explicit reinitialize; frontend action completed in T23 |
 | T22 | 已完成 | Frontend Template Agent | T20 | complete structure mapping workspace | `e058ea1` | `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | `App.tsx` template workspace is extracted; workbench preview cleanup completed in T23 |
-| T23 | 已完成 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup | 本提交（T23 实现） | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | Workbench preview is explicitly structured-editing only; original DOCX in-place export remains T24 |
-| T24 | 未开始 | Backend Export Agent | T19, T21 | original DOCX in-place replacement export for reference templates |  | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.*" --tests "com.gongwen.assistant.exporting.word.*"` | Multi-paragraph replacement into one original paragraph needs deterministic behavior |
+| T23 | 已完成 | Frontend Workbench Agent | T21, T22 | structured editing preview and node tree cleanup | `dd8182a` | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | Workbench preview is explicitly structured-editing only; original DOCX in-place export completed in T24 |
+| T24 | 已完成 | Backend Export Agent | T19, T21 | original DOCX in-place replacement export for reference templates | 本提交（T24 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxNodeReplacementRendererTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest"` | Multi-line replacement currently uses line breaks in the original paragraph; broader fixtures remain T25 |
 | T25 | 未开始 | QA Agent | T19-T24 | fixture regression suite and render verification |  | focused backend regression; focused frontend regression; `npm run build`; render smoke when LibreOffice is available | Browser automation may still be unavailable; document exact fallback |
 | T26 | 未开始 | Integration Agent | T18-T25 | final integration closure and docs sync |  | `git status --short --branch`; `git diff --check`; focused backend/frontend commands; migration/API grep | Full backend/frontend suites may remain optional per lightweight-test instruction, but focused coverage is mandatory |
 
@@ -121,7 +121,8 @@ Completion evidence format:
 | 2026-05-31 | T21 | Codex Backend Draft Agent | `416f912` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; initialize now uses each source node text, avoids duplicate legacy body copy, keeps existing nodes non-destructively, and adds explicit reinitialize endpoint with preserve-user-edits behavior | frontend reinitialize action and preview cleanup completed in T23 |
 | 2026-05-31 | T18-T21 | Codex Integration Agent | `416f912` | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.documentstructure.DocumentStructureExtractorTest" --tests "com.gongwen.assistant.template.TemplateUploadServiceTest" --tests "com.gongwen.assistant.documentstructure.semantic.DocumentSemanticSuggesterTest" --tests "com.gongwen.assistant.template.profile.TemplateProfileParserTest" --tests "com.gongwen.assistant.draft.node.DraftNodeServiceTest" --tests "com.gongwen.assistant.draft.node.DraftNodeControllerTest"` | pass; fact extraction, upload persistence, semantic suggestions, parser demotion, and draft node initialize/reinitialize contracts pass together | full backend/frontend suites remain for T25/T26 or CI |
 | 2026-05-31 | T22 | Codex Frontend Template Agent | `e058ea1` | `npm test -- src/components/template/TemplateParseWorkspace.test.tsx src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; template parse workspace extracted from `App.tsx`, all fact nodes render with separate fact type and role suggestion, selected nodes support batch role changes, draft save and publish actions remain wired | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
-| 2026-05-31 | T23 | Codex Frontend Workbench Agent | 本提交（T23 实现） | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; workbench structure tree and structured editing preview were extracted, static facts stay visible in the tree but out of paper preview, and `从原稿重建结构` calls `POST /api/drafts/{draftId}/nodes/reinitialize` preserving user edits | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
+| 2026-05-31 | T23 | Codex Frontend Workbench Agent | `dd8182a` | `npm test -- src/workbenchNodes.test.ts src/App.test.tsx`; `npm run build`; Browser smoke at `http://localhost:5173/` | pass; workbench structure tree and structured editing preview were extracted, static facts stay visible in the tree but out of paper preview, and `从原稿重建结构` calls `POST /api/drafts/{draftId}/nodes/reinitialize` preserving user edits | browser smoke reached login page only; authenticated template workflow remains manual or T25/T26 |
+| 2026-05-31 | T24 | Codex Backend Export Agent | 本提交（T24 实现） | `.\gradlew.bat --no-daemon --console=plain test --tests "com.gongwen.assistant.exporting.word.DocxNodeReplacementRendererTest" --tests "com.gongwen.assistant.exporting.DraftWordExportServiceTest" --tests "com.gongwen.assistant.exporting.word.DocxTemplateRendererTest"` | pass; no-placeholder `REFERENCE_DOCUMENT` export now uses original DOCX node replacement, preserves paragraph objects/header text, records `ORIGINAL_NODE_REPLACEMENT`, and persists `export_strategy` via Flyway `V17` | T25 still needs fixture-level pipeline coverage across upload, mapping, node init, export, and optional render smoke |
 
 ## Agent File Boundaries
 
@@ -1345,7 +1346,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
 **Steps:**
 
-- [ ] **Step 1: Add failing renderer test for paragraph in-place replacement**
+- [x] **Step 1: Add failing renderer test for paragraph in-place replacement**
 
   In `DocxNodeReplacementRendererTest.java`, add:
 
@@ -1368,7 +1369,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 2: Add failing service strategy test**
+- [x] **Step 2: Add failing service strategy test**
 
   In `DraftWordExportServiceTest.java`, add:
 
@@ -1385,7 +1386,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   }
   ```
 
-- [ ] **Step 3: Run failing export tests**
+- [x] **Step 3: Run failing export tests**
 
   Run:
 
@@ -1398,7 +1399,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - FAIL because renderer/strategy do not exist.
 
-- [ ] **Step 4: Implement `DocxNodeLocator`**
+- [x] **Step 4: Implement `DocxNodeLocator`**
 
   Required methods:
 
@@ -1413,7 +1414,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - `header-{h}-paragraph-{p}` maps to header paragraph.
   - `footer-{f}-paragraph-{p}` maps to footer paragraph.
 
-- [ ] **Step 5: Implement `DocxNodeReplacementRenderer`**
+- [x] **Step 5: Implement `DocxNodeReplacementRenderer`**
 
   Required method:
 
@@ -1428,7 +1429,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - For replacement nodes, replace paragraph text while preserving paragraph-level formatting and first-run formatting.
   - Write to byte array.
 
-- [ ] **Step 6: Wire export strategy**
+- [x] **Step 6: Wire export strategy**
 
   In `DraftWordExportService`, choose:
 
@@ -1447,7 +1448,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
   - `REFERENCE_DOCUMENT` cannot use the old clear-body `renderReferenceDraft`.
   - If locator is missing for a required node, fail with stable code `EXPORT_NODE_LOCATOR_MISSING`.
 
-- [ ] **Step 7: Run export tests**
+- [x] **Step 7: Run export tests**
 
   Run:
 
@@ -1460,7 +1461,7 @@ For P10E, `REFERENCE_DOCUMENT` must not use a body-clearing rebuild path.
 
   - PASS.
 
-- [ ] **Step 8: Update Progress Board and Progress Log**
+- [x] **Step 8: Update Progress Board and Progress Log**
 
   Record commands and result.
 
