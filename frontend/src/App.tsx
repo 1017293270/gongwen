@@ -45,6 +45,7 @@ import {
   getExportRecordDetail,
   getAiProviderSettings,
   getCurrentUser,
+  getDraftRenderPreview,
   getRenderPreview,
   getStructureMapping,
   getTemplateProfile,
@@ -573,7 +574,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       ? await Promise.all([
         getTemplateProfile(loadedDraft.templateVersionId).catch(() => null),
         getTemplateStructureFormatting(loadedDraft.templateVersionId).catch(() => ({})),
-        getRenderPreview(loadedDraft.templateVersionId).catch(() => null),
+        getDraftRenderPreview(loadedDraft.id).catch(() => null),
       ])
       : [null, {}, null];
     return {
@@ -750,7 +751,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }, {});
   }, [blocks]);
   const draftNodeValues = useMemo(() => {
-    return draftNodes.reduce<Record<string, string>>((acc, node) => {
+    return draftNodes.filter((node) => node.status !== 'DELETED').reduce<Record<string, string>>((acc, node) => {
       if (node.role && !acc[node.role]) {
         acc[node.role] = node.content;
       }
@@ -1080,6 +1081,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setLocalOperationError('');
     setLocalOperationStatus('idle');
     setSelectedNodeId(null);
+    const persistedNodeIds = [node.headingDraftNodeId, node.draftNodeId].filter((nodeId): nodeId is number => Boolean(nodeId));
+    if (persistedNodeIds.length > 0) {
+      setDraftNodes((currentNodes) => currentNodes.map((draftNode) => (
+        persistedNodeIds.includes(draftNode.id) ? { ...draftNode, status: 'DELETED' } : draftNode
+      )));
+      setDirtyDraftNodeIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        persistedNodeIds.forEach((nodeId) => nextIds.add(nodeId));
+        return nextIds;
+      });
+    }
     setDeletedNodeIds((current) => {
       const next = new Set(current);
       next.add(node.nodeId);

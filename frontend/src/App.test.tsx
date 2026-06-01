@@ -497,6 +497,66 @@ describe('App', () => {
     expect(JSON.parse(window.localStorage.getItem('gongwen.deletedNodes.1.9') ?? '[]')).toContain('template:body-3');
   });
 
+  it('persists removed draft nodes so true preview and reopened workbench stay aligned', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const draft = { ...sampleDraft('鍒犻櫎鑺傜偣鑽夌'), templateVersionId: 9 };
+    const nodeRows = sampleDraftNodes();
+    const deletedNodes = nodeRows.map((node) => node.id === 102 || node.id === 103
+      ? { ...node, status: 'DELETED' }
+      : node);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '閫氱煡', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(draft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/render-preview') && !init?.method) {
+        return Promise.resolve(jsonResponse(renderPreviewFixture('PENDING')));
+      }
+      if (url.endsWith('/api/drafts/1/nodes') && !init?.method) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/102') && init?.method === 'PUT') {
+        return Promise.resolve(jsonResponse(deletedNodes.find((node) => node.id === 102)));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/103') && init?.method === 'PUT') {
+        return Promise.resolve(jsonResponse(deletedNodes.find((node) => node.id === 103)));
+      }
+      if (url.endsWith('/api/drafts/1/blocks') && init?.method === 'PUT') {
+        const payload = JSON.parse(String(init.body));
+        return Promise.resolve(jsonResponse({ ...draft, blocks: payload.blocks, nodes: deletedNodes }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    const { container } = render(<App />);
+
+    await openWorkbench();
+    const deleteButton = container.querySelector('.paragraph-index-delete');
+    expect(deleteButton).not.toBeNull();
+    await userEvent.click(deleteButton as HTMLElement);
+    await userEvent.click(screen.getByRole('button', { name: /保存草稿/ }));
+
+    const nodeSaveCalls = fetchMock.mock.calls.filter(([input, init]) => (
+      String(input).includes('/api/drafts/1/nodes/') && init?.method === 'PUT'
+    ));
+    expect(nodeSaveCalls).toHaveLength(2);
+    expect(nodeSaveCalls.map(([, init]) => JSON.parse(String(init?.body)).status)).toEqual(['DELETED', 'DELETED']);
+  });
+
   it('uploads a material and shows a unified success toast', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([
@@ -1128,6 +1188,7 @@ describe('App', () => {
       ]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(renderPreviewFixture('PENDING')))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(docxResponse('测试模板-v2.docx'));
     stubFetch(fetchMock);
@@ -1165,6 +1226,7 @@ describe('App', () => {
       ]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(renderPreviewFixture('PENDING')))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(docxResponse('测试模板-v2.docx'));
     stubFetch(fetchMock);
@@ -1204,8 +1266,11 @@ describe('App', () => {
       if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
         return Promise.resolve(jsonResponse({}));
       }
-      if (url.endsWith('/api/templates/versions/9/render-preview')) {
+      if (url.endsWith('/api/drafts/1/render-preview') && !init?.method) {
         return Promise.resolve(jsonResponse({ ...renderPreviewFixture('READY'), templateVersionId: 9 }));
+      }
+      if (url.endsWith('/api/templates/versions/9/render-preview')) {
+        return Promise.reject(new Error('Workbench must not load template preview as draft preview'));
       }
       if (url.endsWith('/api/drafts/1/blocks') && init?.method === 'PUT') {
         return Promise.resolve(jsonResponse({
@@ -1224,6 +1289,10 @@ describe('App', () => {
 
     await openWorkbench();
     const titleInput = await screen.findByLabelText('标题');
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/render-preview', expect.objectContaining({
+      headers: expect.any(Object),
+    }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/templates/versions/9/render-preview'))).toBe(false);
     await userEvent.clear(titleInput);
     await userEvent.type(titleInput, '预览刷新后的标题');
 
@@ -1247,6 +1316,7 @@ describe('App', () => {
       ]))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(renderPreviewFixture('PENDING')))
       .mockResolvedValueOnce(jsonResponse(exportDraft))
       .mockResolvedValueOnce(errorResponse('EXPORT_REQUIRED_SLOT_EMPTY', '导出必填结构槽位为空：BODY（正文）'));
     stubFetch(fetchMock);

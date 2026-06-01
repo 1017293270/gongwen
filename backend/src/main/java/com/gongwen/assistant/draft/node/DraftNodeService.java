@@ -30,7 +30,8 @@ public class DraftNodeService {
             "QUALITY_ERROR",
             "EXPORT_BLOCKED",
             "FORMAT_OVERRIDDEN",
-            "LOCKED"
+            "LOCKED",
+            "DELETED"
     );
     private static final Set<String> SKIPPED_ROLES = Set.of("IGNORE");
     private static final Set<String> PRESERVABLE_REINITIALIZE_STATUSES = Set.of(

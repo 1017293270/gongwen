@@ -39,7 +39,9 @@ export function deriveWorkbenchNodes(
 
 function nodesFromDraftNodes(draftNodes: DraftNode[]) {
   const nodes: WorkbenchNode[] = [];
-  const sortedNodes = [...draftNodes].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  const sortedNodes = draftNodes
+    .filter((draftNode) => draftNode.status !== 'DELETED')
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
   let pendingHeading: DraftNode | null = null;
 
   for (const draftNode of sortedNodes) {

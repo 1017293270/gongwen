@@ -382,6 +382,10 @@ export function getRenderPreview(templateVersionId: number) {
   return requestJson<DocumentRenderPreview>(`/api/templates/versions/${templateVersionId}/render-preview`);
 }
 
+export function getDraftRenderPreview(draftId: number) {
+  return requestJson<DocumentRenderPreview>(`/api/drafts/${draftId}/render-preview`);
+}
+
 export function requestRenderPreview(templateVersionId: number) {
   return requestJson<DocumentRenderPreview>(`/api/templates/versions/${templateVersionId}/render-preview`, {
     method: 'POST',

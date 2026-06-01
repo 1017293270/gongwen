@@ -172,6 +172,81 @@ describe('WorkbenchPreview', () => {
     expect(view.getByText('Editable body text')).toBeInTheDocument();
   });
 
+  it('does not switch away from structured editing when a refreshed rendered preview becomes ready', () => {
+    const title = node('title', 'TITLE', 'Rendered notice title', 10);
+    const body = node('body', 'BODY_SECTION', 'Editable body text', 20);
+    const { container, rerender } = render(
+      <WorkbenchPreview
+        attachment=""
+        attachmentNode={null}
+        bodySectionNodes={[body]}
+        bodyStyleForNode={() => ({})}
+        date=""
+        dateNode={null}
+        nodes={[title, body]}
+        onRemoveBodyNode={vi.fn()}
+        onSelectNode={vi.fn()}
+        onUpdateAttachment={vi.fn()}
+        onUpdateBodyContent={vi.fn()}
+        onUpdateBodyHeading={vi.fn()}
+        onUpdateDate={vi.fn()}
+        onUpdateRecipient={vi.fn()}
+        onUpdateSignature={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        recipient=""
+        recipientNode={null}
+        registerNodeRef={vi.fn()}
+        renderPreview={readyPreview()}
+        selectedNodeId={null}
+        signature=""
+        signatureNode={null}
+        syncParagraphEditorHeight={vi.fn()}
+        title={title.content}
+        titleNode={title}
+      />,
+    );
+    const view = within(container);
+    fireEvent.click(view.getByRole('button', { name: '结构编辑' }));
+
+    rerender(
+      <WorkbenchPreview
+        attachment=""
+        attachmentNode={null}
+        bodySectionNodes={[body]}
+        bodyStyleForNode={() => ({})}
+        date=""
+        dateNode={null}
+        nodes={[title, body]}
+        onRemoveBodyNode={vi.fn()}
+        onSelectNode={vi.fn()}
+        onUpdateAttachment={vi.fn()}
+        onUpdateBodyContent={vi.fn()}
+        onUpdateBodyHeading={vi.fn()}
+        onUpdateDate={vi.fn()}
+        onUpdateRecipient={vi.fn()}
+        onUpdateSignature={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        recipient=""
+        recipientNode={null}
+        registerNodeRef={vi.fn()}
+        renderPreview={{
+          ...readyPreview(),
+          id: 10,
+          updatedAt: '2026-06-01T00:01:00Z',
+        }}
+        selectedNodeId={null}
+        signature=""
+        signatureNode={null}
+        syncParagraphEditorHeight={vi.fn()}
+        title={title.content}
+        titleNode={title}
+      />,
+    );
+
+    expect(view.getByText('Editable body text')).toBeInTheDocument();
+    expect(view.queryByRole('img', { name: '真实预览第 1 页' })).not.toBeInTheDocument();
+  });
+
   it('lets users open the rendered preview state even before pages are ready', () => {
     const title = node('title', 'TITLE', 'Rendered notice title', 10);
     const body = node('body', 'BODY_SECTION', 'Editable body text', 20);

@@ -253,7 +253,7 @@ public class DraftWordExportService {
             byte[] rendered = nodeReplacementRenderer.render(
                     templateBytes,
                     originalNodeReplacements(draftNodes),
-                    ignoredNodeKeys(mapping)
+                    ignoredNodeKeys(mapping, draftNodes)
             );
             return wordExportService.exportRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
@@ -275,7 +275,7 @@ public class DraftWordExportService {
             byte[] rendered = nodeReplacementRenderer.render(
                     templateBytes,
                     originalNodeReplacements(draftNodes),
-                    ignoredNodeKeys(mapping)
+                    ignoredNodeKeys(mapping, draftNodes)
             );
             return wordExportService.renderRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
@@ -428,6 +428,7 @@ public class DraftWordExportService {
             String role
     ) {
         Optional<DraftNode> node = draftNodes.stream()
+                .filter(candidate -> !isDeletedDraftNode(candidate))
                 .filter(candidate -> role.equals(normalizeRole(candidate.role())))
                 .findFirst();
         if (node.isEmpty()) {
@@ -503,6 +504,7 @@ public class DraftWordExportService {
     private Map<String, String> draftNodeValues(DraftDetailDto draft, List<DraftNode> nodes) {
         Map<String, String> values = new HashMap<>();
         List<DraftNode> sortedNodes = nodes.stream()
+                .filter(node -> !isDeletedDraftNode(node))
                 .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
                 .toList();
         String title = firstNodeValue(sortedNodes, "TITLE", draft.title());
@@ -534,21 +536,41 @@ public class DraftWordExportService {
         Map<String, String> replacements = new LinkedHashMap<>();
         nodes.stream()
                 .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .filter(node -> !isDeletedDraftNode(node))
                 .filter(node -> !isBlank(node.templateNodeKey()))
                 .filter(node -> isReplaceableOriginalRole(node.role()))
                 .forEach(node -> replacements.put(node.templateNodeKey(), node.content() == null ? "" : node.content()));
         return replacements;
     }
 
-    private Set<String> ignoredNodeKeys(StructureMappingProfile mapping) {
-        if (mapping == null) {
-            return Set.of();
+    private Set<String> ignoredNodeKeys(StructureMappingProfile mapping, List<DraftNode> draftNodes) {
+        Set<String> mappedIgnoredKeys = mapping == null
+                ? Set.of()
+                : mapping.items().stream()
+                        .filter(item -> "IGNORE".equals(normalizeRole(item.role())))
+                        .map(item -> item.nodeKey())
+                        .filter(nodeKey -> !isBlank(nodeKey))
+                        .collect(Collectors.toSet());
+        Set<String> draftDeletedKeys = draftNodes == null
+                ? Set.of()
+                : draftNodes.stream()
+                        .filter(this::isDeletedDraftNode)
+                        .map(DraftNode::templateNodeKey)
+                        .filter(nodeKey -> !isBlank(nodeKey))
+                        .collect(Collectors.toSet());
+        if (mappedIgnoredKeys.isEmpty()) {
+            return draftDeletedKeys;
         }
-        return mapping.items().stream()
-                .filter(item -> "IGNORE".equals(normalizeRole(item.role())))
-                .map(item -> item.nodeKey())
-                .filter(nodeKey -> !isBlank(nodeKey))
-                .collect(Collectors.toSet());
+        if (draftDeletedKeys.isEmpty()) {
+            return mappedIgnoredKeys;
+        }
+        Set<String> ignoredKeys = new java.util.HashSet<>(mappedIgnoredKeys);
+        ignoredKeys.addAll(draftDeletedKeys);
+        return ignoredKeys;
+    }
+
+    private boolean isDeletedDraftNode(DraftNode node) {
+        return node != null && "DELETED".equalsIgnoreCase(node.status());
     }
 
     private boolean isReplaceableOriginalRole(String role) {

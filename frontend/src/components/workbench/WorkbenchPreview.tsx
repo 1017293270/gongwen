@@ -1,4 +1,4 @@
-import { CSSProperties, useEffect, useState } from 'react';
+import { CSSProperties, useEffect, useRef, useState } from 'react';
 import { RefreshCw, Trash2 } from 'lucide-react';
 import { getRenderPreviewPageUrl } from '../../api';
 import {
@@ -89,6 +89,7 @@ export function WorkbenchPreview({
   const [previewMode, setPreviewMode] = useState<'rendered' | 'structured'>(
     canShowRenderedPreview ? 'rendered' : 'structured',
   );
+  const userSelectedPreviewModeRef = useRef(false);
   const previewNodes = nodes.length > 0
     ? [...nodes].sort((a, b) => a.sortOrder - b.sortOrder || a.nodeId.localeCompare(b.nodeId))
     : legacyPreviewNodes({
@@ -128,7 +129,7 @@ export function WorkbenchPreview({
   };
 
   useEffect(() => {
-    if (canShowRenderedPreview) {
+    if (canShowRenderedPreview && !userSelectedPreviewModeRef.current) {
       setPreviewMode('rendered');
     }
   }, [canShowRenderedPreview, renderPreview?.id, renderPreview?.updatedAt]);
@@ -154,7 +155,10 @@ export function WorkbenchPreview({
               aria-pressed={showRenderedPreviewMode}
               className={showRenderedPreviewMode ? 'selected' : ''}
               disabled={!canOpenRenderedMode}
-              onClick={() => setPreviewMode('rendered')}
+              onClick={() => {
+                userSelectedPreviewModeRef.current = true;
+                setPreviewMode('rendered');
+              }}
               type="button"
             >
               真实预览
@@ -162,7 +166,10 @@ export function WorkbenchPreview({
             <button
               aria-pressed={previewMode === 'structured'}
               className={previewMode === 'structured' ? 'selected' : ''}
-              onClick={() => setPreviewMode('structured')}
+              onClick={() => {
+                userSelectedPreviewModeRef.current = true;
+                setPreviewMode('structured');
+              }}
               type="button"
             >
               结构编辑

@@ -570,6 +570,59 @@ class DraftWordExportServiceTest {
     }
 
     @Test
+    void referenceDocumentExportRemovesDraftDeletedOriginalNodes() throws Exception {
+        long draftId = 36L;
+        long templateVersionId = 9L;
+        long mappingProfileId = 59L;
+        byte[] templateBytes = DocxTestFactory.speechReferenceDocument();
+        Path templatePath = tempDir.resolve("reference-document-template-with-deleted-node.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = emptyProfile().withTemplateAnalysis(new TemplateAnalysisProfile(
+                "REFERENCE_DOCUMENT",
+                0.95d,
+                "UNKNOWN",
+                List.of(),
+                List.of(),
+                "reference document",
+                "TEST",
+                "REFERENCE_DOCUMENT",
+                List.of("COMPLETE_REFERENCE_DOCUMENT"),
+                "REVIEW_AND_MAP",
+                List.of()
+        ));
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("paragraph-0", "TITLE", "TITLE", 10),
+                mappingItem("paragraph-4", "BODY", "BODY_PARAGRAPH", 20),
+                mappingItem("paragraph-5", "BODY", "BODY_PARAGRAPH", 30)
+        );
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Legacy draft")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(301L, draftId, mappingProfileId, "paragraph-0", "TITLE", "TITLE", "替换后的讲话标题", 10, DraftNodeFormatOverride.empty()),
+                        draftNode(302L, draftId, mappingProfileId, "paragraph-4", "BODY", "BODY_PARAGRAPH", "删除后不应写入", 20, DraftNodeFormatOverride.empty(), "DELETED"),
+                        draftNode(303L, draftId, mappingProfileId, "paragraph-5", "BODY", "BODY_PARAGRAPH", "保留的正文段落", 30, DraftNodeFormatOverride.empty())
+                )),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("paragraph-0", "paragraph-4", "paragraph-5"))
+        );
+
+        WordExportResult result = service.exportDraft(draftId);
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(result.content()))) {
+            assertThat(document.getParagraphs()).hasSize(19);
+            assertThat(document.getParagraphs())
+                    .noneMatch(paragraph -> paragraph.getText().contains("删除后不应写入"));
+        }
+    }
+
+    @Test
     void exportsDraftWithoutRequiringQualityCheckResult() throws Exception {
         byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE, PLACEHOLDER_BODY);
         Path templatePath = tempDir.resolve("quality-independent-template.docx");
@@ -711,6 +764,22 @@ class DraftWordExportServiceTest {
             int sortOrder,
             DraftNodeFormatOverride formatOverride
     ) {
+        return draftNode(id, draftId, mappingProfileId, nodeKey, role, slotKey, content, sortOrder, formatOverride,
+                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED");
+    }
+
+    private static DraftNode draftNode(
+            long id,
+            long draftId,
+            long mappingProfileId,
+            String nodeKey,
+            String role,
+            String slotKey,
+            String content,
+            int sortOrder,
+            DraftNodeFormatOverride formatOverride,
+            String status
+    ) {
         return new DraftNode(
                 id,
                 draftId,
@@ -723,7 +792,7 @@ class DraftWordExportServiceTest {
                 role,
                 content,
                 sortOrder,
-                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
+                status,
                 formatOverride,
                 Instant.now(),
                 Instant.now()
