@@ -1204,8 +1204,17 @@ describe('App', () => {
       if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
         return Promise.resolve(jsonResponse({}));
       }
-      if (url.endsWith('/api/templates/versions/9/render-preview') && init?.method === 'POST') {
+      if (url.endsWith('/api/templates/versions/9/render-preview')) {
         return Promise.resolve(jsonResponse({ ...renderPreviewFixture('READY'), templateVersionId: 9 }));
+      }
+      if (url.endsWith('/api/drafts/1/blocks') && init?.method === 'PUT') {
+        return Promise.resolve(jsonResponse({
+          ...draft,
+          title: '预览刷新后的标题',
+        }));
+      }
+      if (url.endsWith('/api/drafts/1/render-preview') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ...renderPreviewFixture('READY'), draftId: 1, templateVersionId: 9 }));
       }
       return Promise.reject(new Error(`Unexpected request: ${url}`));
     });
@@ -1221,7 +1230,10 @@ describe('App', () => {
     expect(await screen.findByText('真实预览待刷新')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '刷新预览' }));
 
-    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/templates/versions/9/render-preview', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
+      method: 'PUT',
+    }));
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/render-preview', expect.objectContaining({
       method: 'POST',
     }));
     expect(await screen.findByText('真实预览已是当前版本')).toBeInTheDocument();
@@ -1493,7 +1505,31 @@ describe('App', () => {
     }));
   });
 
-  it('creates a document type from the new management page', async () => {
+  it('does not expose document type management as a separate sidebar module', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([
+          { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+        ]));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('侧边栏草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: '草稿列表' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '文种管理' })).not.toBeInTheDocument();
+  });
+
+  it('creates a document type from the draft list document type folders', async () => {
     let documentTypes = [
       { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
     ];
@@ -1523,7 +1559,7 @@ describe('App', () => {
 
     render(<App />);
 
-    await userEvent.click(await screen.findByRole('button', { name: '文种管理' }));
+    await userEvent.click(await screen.findByRole('button', { name: '草稿列表' }));
     await userEvent.click(screen.getByRole('button', { name: '新增文种' }));
     await userEvent.type(screen.getByLabelText('文种编码'), 'ANNOUNCEMENT');
     await userEvent.type(screen.getByLabelText('文种名称'), '公告');
@@ -1534,6 +1570,123 @@ describe('App', () => {
     expect((await screen.findAllByText('文种已创建')).length).toBeGreaterThan(0);
     expect(createCalls).toEqual([{ code: 'ANNOUNCEMENT', name: '公告', sortOrder: 4 }]);
     expect(screen.getByText('公告')).toBeInTheDocument();
+  });
+
+  it('creates a document type from the template management document type folders', async () => {
+    let documentTypes = [
+      { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+    ];
+    const createCalls: unknown[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types') && init?.method === 'POST') {
+        createCalls.push(JSON.parse(String(init.body)));
+        documentTypes = [
+          ...documentTypes,
+          { code: 'LETTER', name: '函', status: 'ACTIVE', sortOrder: 5 },
+        ];
+        return Promise.resolve(jsonResponse(documentTypes[1]));
+      }
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse(documentTypes));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('模板文种草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
+    await userEvent.click(screen.getByRole('button', { name: '新增文种' }));
+    await userEvent.type(screen.getByLabelText('文种编码'), 'LETTER');
+    await userEvent.type(screen.getByLabelText('文种名称'), '函');
+    await userEvent.clear(screen.getByLabelText('排序'));
+    await userEvent.type(screen.getByLabelText('排序'), '5');
+    await userEvent.click(screen.getByRole('button', { name: '创建文种' }));
+
+    expect((await screen.findAllByText('文种已创建')).length).toBeGreaterThan(0);
+    expect(createCalls).toEqual([{ code: 'LETTER', name: '函', sortOrder: 5 }]);
+    expect(screen.getByText('函')).toBeInTheDocument();
+  });
+
+  it('deletes a document type from the draft list document type card', async () => {
+    let documentTypes = [
+      { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      { code: 'REQUEST', name: '请示', status: 'ACTIVE', sortOrder: 2 },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types/REQUEST') && init?.method === 'DELETE') {
+        documentTypes = documentTypes.filter((type) => type.code !== 'REQUEST');
+        return Promise.resolve(jsonResponse(null));
+      }
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse(documentTypes));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('删除文种草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '草稿列表' }));
+    await userEvent.click((await screen.findAllByRole('button', { name: '删除文种' }))[1]);
+    await userEvent.click(within(await screen.findByRole('dialog', { name: '删除文种？' })).getByRole('button', { name: '删除文种' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/document-types/REQUEST', expect.objectContaining({
+      method: 'DELETE',
+    }));
+    expect(await screen.findByText('文种已删除')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '请示' })).not.toBeInTheDocument();
+  });
+
+  it('deletes a document type from the template management document type card', async () => {
+    let documentTypes = [
+      { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      { code: 'REPORT', name: '报告', status: 'ACTIVE', sortOrder: 3 },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types/REPORT') && init?.method === 'DELETE') {
+        documentTypes = documentTypes.filter((type) => type.code !== 'REPORT');
+        return Promise.resolve(jsonResponse(null));
+      }
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse(documentTypes));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('模板删除文种草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
+    await userEvent.click((await screen.findAllByRole('button', { name: '删除文种' }))[1]);
+    await userEvent.click(within(await screen.findByRole('dialog', { name: '删除文种？' })).getByRole('button', { name: '删除文种' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/document-types/REPORT', expect.objectContaining({
+      method: 'DELETE',
+    }));
+    expect(await screen.findByText('文种已删除')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '报告' })).not.toBeInTheDocument();
   });
 
   it('creates a department and an account from admin pages', async () => {
@@ -2022,10 +2175,10 @@ describe('App', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: '草稿列表' }));
     expect(container.querySelector('.drafts-page .settings-panel.template-admin-panel')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /请示/ })).toHaveClass('template-folder-card');
+    expect(screen.getByRole('button', { name: '请示' })).toHaveClass('template-folder-card');
     expect(screen.queryByText('请示草稿')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /请示/ }));
+    await userEvent.click(screen.getByRole('button', { name: '请示' }));
     expect(await screen.findByRole('button', { name: '返回文种' })).toBeInTheDocument();
     expect(await screen.findByText('当前文种暂无草稿')).toBeInTheDocument();
     expect(screen.getByText('当前文种暂无草稿').closest('.template-empty-panel')).toBeInTheDocument();
@@ -2103,7 +2256,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '草稿列表' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     expect(await screen.findByRole('heading', { name: '待删除通知草稿' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '删除草稿：待删除通知草稿' }));
@@ -2159,7 +2312,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '草稿列表' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     await userEvent.click(await screen.findByRole('button', { name: '重命名草稿：待重命名通知草稿' }));
     const nameInput = await screen.findByLabelText('草稿名称');
     await userEvent.clear(nameInput);
@@ -2220,7 +2373,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     expect(await screen.findByRole('heading', { name: '待删除模板' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: '删除模板：待删除模板' }));
@@ -2283,7 +2436,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
 
     const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
@@ -2348,7 +2501,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
 
     const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
@@ -2446,7 +2599,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
 
     const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });
@@ -2548,7 +2701,7 @@ describe('App', () => {
     render(<App />);
 
     await userEvent.click(await screen.findByRole('button', { name: '模板管理' }));
-    await userEvent.click(await screen.findByRole('button', { name: /通知/ }));
+    await userEvent.click(await screen.findByRole('button', { name: '通知' }));
     await userEvent.click(await screen.findByRole('button', { name: '解析结果' }));
 
     const dialog = await screen.findByRole('dialog', { name: '模板解析工作台' });

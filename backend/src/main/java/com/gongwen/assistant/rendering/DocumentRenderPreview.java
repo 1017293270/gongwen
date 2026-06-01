@@ -4,6 +4,7 @@ import java.time.Instant;
 
 public record DocumentRenderPreview(
         Long id,
+        Long draftId,
         long templateVersionId,
         String sourceFileHash,
         String renderer,
@@ -26,6 +27,7 @@ public record DocumentRenderPreview(
     public static DocumentRenderPreview pending(long templateVersionId, String sourceFileHash, String renderer) {
         Instant now = Instant.now();
         return new DocumentRenderPreview(
+                null,
                 null,
                 templateVersionId,
                 sourceFileHash,

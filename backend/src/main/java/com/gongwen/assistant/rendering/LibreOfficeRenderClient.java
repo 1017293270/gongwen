@@ -47,7 +47,7 @@ public class LibreOfficeRenderClient {
                     .redirectOutput(ProcessBuilder.Redirect.to(logFile.toFile()))
                     .start();
             boolean finished = process.waitFor(properties.timeoutSeconds(), TimeUnit.SECONDS);
-            String output = Files.exists(logFile) ? Files.readString(logFile, StandardCharsets.UTF_8) : "";
+            String output = readProcessLog(logFile);
             if (!finished) {
                 process.destroyForcibly();
                 throw new RenderPreviewException("RENDER_PREVIEW_TIMEOUT", "LibreOffice render preview timed out");
@@ -132,6 +132,17 @@ public class LibreOfficeRenderClient {
             return value;
         }
         return value.substring(0, MAX_ERROR_CHARS);
+    }
+
+    String readProcessLog(Path logFile) {
+        if (!Files.exists(logFile)) {
+            return "";
+        }
+        try {
+            return new String(Files.readAllBytes(logFile), StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            return "";
+        }
     }
 
     private String resolvedLibreOfficeCommand() {

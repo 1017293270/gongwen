@@ -36,6 +36,16 @@ public class DocumentRenderPreviewController {
         return ApiResponse.ok(service.requestRender(versionId));
     }
 
+    @GetMapping("/drafts/{draftId}/render-preview")
+    public ApiResponse<DocumentRenderPreview> getDraftStatus(@PathVariable long draftId) {
+        return ApiResponse.ok(service.getDraftStatus(draftId));
+    }
+
+    @PostMapping("/drafts/{draftId}/render-preview")
+    public ApiResponse<DocumentRenderPreview> requestDraftRender(@PathVariable long draftId) {
+        return ApiResponse.ok(service.requestDraftRender(draftId));
+    }
+
     @GetMapping("/render-previews/environment")
     public ApiResponse<RenderPreviewEnvironmentStatus> getEnvironmentStatus() {
         return ApiResponse.ok(renderClient.environmentStatus());

@@ -43,13 +43,7 @@ public class WordExportService {
     public WordExportResult export(byte[] templateBytes, WordExportRequest request) {
         String fileName = buildFileName(request);
         try {
-            byte[] content = renderer.hasPlaceholders(templateBytes)
-                    ? renderer.render(templateBytes, request.values(), request.formatting())
-                    : renderer.renderReferenceDraft(
-                            templateBytes,
-                            request.values(),
-                            request.formatting(),
-                            request.templateProfile());
+            byte[] content = renderContent(templateBytes, request);
             String filePath = saveExportFile(request, fileName, content);
             exportRecordRepository.save(ExportRecord.success(request, fileName, filePath));
             return new WordExportResult(fileName, content);
@@ -66,6 +60,10 @@ public class WordExportService {
         return renderer.hasPlaceholders(templateBytes);
     }
 
+    public WordExportResult render(byte[] templateBytes, WordExportRequest request) {
+        return new WordExportResult(buildFileName(request), renderContent(templateBytes, request));
+    }
+
     public WordExportResult exportRendered(WordExportRequest request, byte[] content) {
         String fileName = buildFileName(request);
         try {
@@ -77,6 +75,20 @@ public class WordExportService {
         } catch (RuntimeException exception) {
             throw recordFailure(request, fileName, RENDER_FAILED, normalizeRenderFailureMessage(exception), exception);
         }
+    }
+
+    public WordExportResult renderRendered(WordExportRequest request, byte[] content) {
+        return new WordExportResult(buildFileName(request), content);
+    }
+
+    private byte[] renderContent(byte[] templateBytes, WordExportRequest request) {
+        return renderer.hasPlaceholders(templateBytes)
+                ? renderer.render(templateBytes, request.values(), request.formatting())
+                : renderer.renderReferenceDraft(
+                        templateBytes,
+                        request.values(),
+                        request.formatting(),
+                        request.templateProfile());
     }
 
     private String buildFileName(WordExportRequest request) {

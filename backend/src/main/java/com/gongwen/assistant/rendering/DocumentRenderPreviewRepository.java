@@ -18,5 +18,7 @@ public interface DocumentRenderPreviewRepository {
 
     Optional<DocumentRenderPreview> findLatestByTemplateVersionId(long templateVersionId);
 
+    Optional<DocumentRenderPreview> findLatestByDraftId(long draftId);
+
     Optional<DocumentRenderPreview> findById(long id);
 }

@@ -76,4 +76,21 @@ class LibreOfficeRenderClientTest {
         assertThat(status.libreOfficePath()).isEqualTo(installedSoffice.toString());
         assertThat(command.getFirst()).isEqualTo(installedSoffice.toString());
     }
+
+    @Test
+    void readsLibreOfficeLogWithNonUtf8BytesLossily() throws IOException {
+        LibreOfficeRenderClient client = new LibreOfficeRenderClient(new RenderPreviewProperties(
+                "storage/previews",
+                "libreoffice",
+                "soffice",
+                180,
+                20
+        ));
+        Path logFile = tempDir.resolve("libreoffice-render.log");
+        Files.write(logFile, new byte[]{(byte) 0xd0, (byte) 0xc2, (byte) 0xca, (byte) 0xd4});
+
+        String output = client.readProcessLog(logFile);
+
+        assertThat(output).isNotBlank();
+    }
 }

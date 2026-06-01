@@ -389,6 +389,13 @@ export function requestRenderPreview(templateVersionId: number) {
   });
 }
 
+export function requestDraftRenderPreview(draftId: number) {
+  return requestJson<DocumentRenderPreview>(`/api/drafts/${draftId}/render-preview`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 export function getRenderPreviewPageUrl(previewId: number, pageNumber: number) {
   return `${apiBaseUrl()}/api/render-previews/${previewId}/pages/${pageNumber}`;
 }

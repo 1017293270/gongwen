@@ -29,6 +29,7 @@ public class JdbcDocumentRenderPreviewRepository implements DocumentRenderPrevie
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement("""
                     insert into document_render_preview (
+                        draft_id,
                         template_version_id,
                         source_file_hash,
                         renderer,
@@ -40,18 +41,23 @@ public class JdbcDocumentRenderPreviewRepository implements DocumentRenderPrevie
                         error_code,
                         error_message
                     )
-                    values (?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?)
                     """, new String[]{"id"});
-            statement.setLong(1, preview.templateVersionId());
-            statement.setString(2, preview.sourceFileHash());
-            statement.setString(3, preview.renderer());
-            statement.setString(4, preview.rendererVersion());
-            statement.setString(5, preview.status().name());
-            statement.setInt(6, preview.pageCount());
-            statement.setString(7, preview.storagePath());
-            statement.setString(8, toJson(preview.manifest()));
-            statement.setString(9, preview.errorCode());
-            statement.setString(10, preview.errorMessage());
+            if (preview.draftId() == null) {
+                statement.setObject(1, null);
+            } else {
+                statement.setLong(1, preview.draftId());
+            }
+            statement.setLong(2, preview.templateVersionId());
+            statement.setString(3, preview.sourceFileHash());
+            statement.setString(4, preview.renderer());
+            statement.setString(5, preview.rendererVersion());
+            statement.setString(6, preview.status().name());
+            statement.setInt(7, preview.pageCount());
+            statement.setString(8, preview.storagePath());
+            statement.setString(9, toJson(preview.manifest()));
+            statement.setString(10, preview.errorCode());
+            statement.setString(11, preview.errorMessage());
             return statement;
         }, keyHolder);
         return findById(keyHolder.getKey().longValue()).orElseThrow();
@@ -96,11 +102,27 @@ public class JdbcDocumentRenderPreviewRepository implements DocumentRenderPrevie
                         select *
                         from document_render_preview
                         where template_version_id = ?
+                          and draft_id is null
                         order by created_at desc, id desc
                         limit 1
                         """,
                         this::mapRow,
                         templateVersionId)
+                .stream()
+                .findFirst();
+    }
+
+    @Override
+    public Optional<DocumentRenderPreview> findLatestByDraftId(long draftId) {
+        return jdbcTemplate.query("""
+                        select *
+                        from document_render_preview
+                        where draft_id = ?
+                        order by created_at desc, id desc
+                        limit 1
+                        """,
+                        this::mapRow,
+                        draftId)
                 .stream()
                 .findFirst();
     }
@@ -115,6 +137,7 @@ public class JdbcDocumentRenderPreviewRepository implements DocumentRenderPrevie
     private DocumentRenderPreview mapRow(ResultSet rs, int rowNum) throws SQLException {
         return new DocumentRenderPreview(
                 rs.getLong("id"),
+                nullableLong(rs, "draft_id"),
                 rs.getLong("template_version_id"),
                 rs.getString("source_file_hash"),
                 rs.getString("renderer"),
@@ -128,6 +151,11 @@ public class JdbcDocumentRenderPreviewRepository implements DocumentRenderPrevie
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant()
         );
+    }
+
+    private Long nullableLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
     }
 
     private DocumentRenderPreviewManifest fromJson(String json) {

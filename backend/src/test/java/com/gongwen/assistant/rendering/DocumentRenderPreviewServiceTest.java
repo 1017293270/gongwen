@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -91,17 +92,58 @@ class DocumentRenderPreviewServiceTest {
                         assertThat(((RenderPreviewException) exception).errorCode()).isEqualTo("RENDER_PREVIEW_PATH_INVALID"));
     }
 
+    @Test
+    void draftRenderJobUsesCurrentDraftDocumentInsteadOfTemplateSource() throws IOException {
+        Path sourceDocx = Files.writeString(tempDir.resolve("notice.docx"), "template docx");
+        InMemoryTemplateVersionRepository versions = new InMemoryTemplateVersionRepository();
+        versions.save(version(7L, sourceDocx));
+        InMemoryDocumentRenderPreviewRepository previews = new InMemoryDocumentRenderPreviewRepository();
+        CapturingRenderer renderer = new CapturingRenderer();
+        DocumentRenderPreviewService service = service(
+                versions,
+                previews,
+                renderer,
+                draftId -> new DraftRenderPreviewDocument(
+                        7L,
+                        "draft-hash",
+                        "draft-preview.docx",
+                        "current draft docx".getBytes(StandardCharsets.UTF_8)
+                )
+        );
+
+        DocumentRenderPreview preview = service.requestDraftRender(42L);
+
+        assertThat(preview.status()).isEqualTo(DocumentRenderPreviewStatus.READY);
+        assertThat(preview.draftId()).isEqualTo(42L);
+        assertThat(preview.templateVersionId()).isEqualTo(7L);
+        assertThat(preview.sourceFileHash()).isEqualTo("draft-hash");
+        assertThat(Path.of(preview.storagePath())).startsWith(previewRoot().resolve("draft-42"));
+        assertThat(renderer.sourceContent()).isEqualTo("current draft docx");
+        assertThat(service.getDraftStatus(42L).id()).isEqualTo(preview.id());
+        assertThat(previews.findLatestByTemplateVersionId(7L)).isEmpty();
+    }
+
     private DocumentRenderPreviewService service(
             InMemoryTemplateVersionRepository versions,
             InMemoryDocumentRenderPreviewRepository previews,
             DocumentRenderPreviewRenderer renderer
+    ) {
+        return service(versions, previews, renderer, null);
+    }
+
+    private DocumentRenderPreviewService service(
+            InMemoryTemplateVersionRepository versions,
+            InMemoryDocumentRenderPreviewRepository previews,
+            DocumentRenderPreviewRenderer renderer,
+            DraftRenderPreviewSource draftRenderPreviewSource
     ) {
         return new DocumentRenderPreviewService(
                 previews,
                 versions,
                 renderer,
                 new RenderPreviewProperties(previewRoot().toString(), renderer.rendererName(), "soffice", 150, 5),
-                Runnable::run
+                Runnable::run,
+                draftRenderPreviewSource
         );
     }
 
@@ -145,6 +187,24 @@ class DocumentRenderPreviewServiceTest {
         @Override
         public String rendererName() {
             return "fake";
+        }
+    }
+
+    private static class CapturingRenderer extends FakeRenderer {
+        private String sourceContent;
+
+        @Override
+        public RenderedDocumentPreview render(Path sourceDocx, Path outputDir) {
+            try {
+                sourceContent = Files.readString(sourceDocx, StandardCharsets.UTF_8);
+            } catch (IOException exception) {
+                throw new IllegalStateException(exception);
+            }
+            return super.render(sourceDocx, outputDir);
+        }
+
+        String sourceContent() {
+            return sourceContent;
         }
     }
 
@@ -213,6 +273,14 @@ class DocumentRenderPreviewServiceTest {
         public Optional<DocumentRenderPreview> findLatestByTemplateVersionId(long templateVersionId) {
             return previews.values().stream()
                     .filter(preview -> preview.templateVersionId() == templateVersionId)
+                    .filter(preview -> preview.draftId() == null)
+                    .max(Comparator.comparing(DocumentRenderPreview::createdAt));
+        }
+
+        @Override
+        public Optional<DocumentRenderPreview> findLatestByDraftId(long draftId) {
+            return previews.values().stream()
+                    .filter(preview -> preview.draftId() != null && preview.draftId() == draftId)
                     .max(Comparator.comparing(DocumentRenderPreview::createdAt));
         }
 
@@ -235,6 +303,7 @@ class DocumentRenderPreviewServiceTest {
             Instant now = Instant.now();
             return new DocumentRenderPreview(
                     id,
+                    preview.draftId(),
                     preview.templateVersionId(),
                     preview.sourceFileHash(),
                     preview.renderer(),

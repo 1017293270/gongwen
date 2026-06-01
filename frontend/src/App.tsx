@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Eye,
-  FileCog,
   FileDown,
   FileText,
   FolderOpen,
@@ -70,6 +69,7 @@ import {
   resetUserPassword,
   reinitializeDraftNodes,
   publishStructureMapping,
+  requestDraftRenderPreview,
   requestRenderPreview,
   restoreDraftNodeFormatOverride,
   retryExportRecord,
@@ -81,7 +81,6 @@ import {
   testAiProviderConnection,
   updateAiProviderSettings,
   updateDepartment,
-  updateDocumentType,
   updateDraftTitle,
   updateDraftTemplateVersion,
   updateTemplateStructureFormatting,
@@ -180,7 +179,6 @@ type AppView =
   | 'workbench'
   | 'drafts'
   | 'templates'
-  | 'document-types'
   | 'materials'
   | 'exports'
   | 'ai-tasks'
@@ -248,7 +246,6 @@ const NAV_ITEMS: Array<{
   { view: 'workbench', label: '工作台', description: '起草与 AI 生成', icon: FileText },
   { view: 'drafts', label: '草稿列表', description: '待补列表接口', icon: FolderOpen },
   { view: 'templates', label: '模板管理', description: 'P10 管理后台', icon: LibraryBig },
-  { view: 'document-types', label: '文种管理', description: '文种 CRUD', icon: FileCog },
   { view: 'materials', label: '材料库', description: '材料归集入口', icon: Archive },
   { view: 'exports', label: '导出记录', description: 'Word 导出追踪', icon: FileDown },
   { view: 'ai-tasks', label: 'AI 任务', description: '生成与质检队列', icon: Sparkles },
@@ -362,6 +359,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [reinitializeNodeStatus, setReinitializeNodeStatus] = useState<ReinitializeNodeStatus>('idle');
   const [reinitializeNodeMessage, setReinitializeNodeMessage] = useState('');
   const [renderPreviewOutdated, setRenderPreviewOutdated] = useState(false);
+  const [renderPreviewRevision, setRenderPreviewRevision] = useState(0);
   const [workbenchRenderPreview, setWorkbenchRenderPreview] = useState<DocumentRenderPreview | null>(null);
   const [workbenchRenderPreviewStatus, setWorkbenchRenderPreviewStatus] = useState<WorkbenchPreviewRequestStatus>('idle');
   const [workbenchRenderPreviewMessage, setWorkbenchRenderPreviewMessage] = useState('');
@@ -401,6 +399,16 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     qualityRequestRef.current?.abort();
     localOperationRequestRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (!draft?.id || !draft.templateVersionId || !renderPreviewOutdated) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void handleRefreshWorkbenchPreview(true);
+    }, 1000);
+    return () => window.clearTimeout(timeoutId);
+  }, [draft?.id, draft?.templateVersionId, renderPreviewOutdated, renderPreviewRevision]);
 
   useEffect(() => {
     let mounted = true;
@@ -912,13 +920,18 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   function markDraftContentDirty() {
     setStatus('idle');
     setStatusMessage('草稿有未保存修改，质检和真预览需刷新');
-    setRenderPreviewOutdated(true);
+    markRenderPreviewOutdated();
     setQualityCheck(null);
     setQualityCheckStatus('idle');
     setQualityCheckError('');
     setExportStatus('idle');
     setExportError('');
     setLocalOperationSuggestion(null);
+  }
+
+  function markRenderPreviewOutdated() {
+    setRenderPreviewOutdated(true);
+    setRenderPreviewRevision((revision) => revision + 1);
   }
 
   function updateDraftNodeLocal(nodeId: number | undefined, content: string, statusValue = 'USER_FILLED') {
@@ -1101,7 +1114,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setDeletedNodeIds(new Set());
       writeDeletedNodeIds(deletedNodeStorageKey(draft.id, draft.templateVersionId), new Set());
       setSelectedNodeId(null);
-      setRenderPreviewOutdated(true);
+      markRenderPreviewOutdated();
       setQualityCheck(null);
       setQualityCheckStatus('idle');
       setQualityCheckError('');
@@ -1324,7 +1337,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setWorkbenchRenderPreview(null);
       setWorkbenchRenderPreviewStatus('idle');
       setWorkbenchRenderPreviewMessage('');
-      setRenderPreviewOutdated(Boolean(templateVersionId));
+      if (templateVersionId) {
+        markRenderPreviewOutdated();
+      } else {
+        setRenderPreviewOutdated(false);
+      }
       setDirtyDraftNodeIds(new Set());
       setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(updatedDraft.id, updatedDraft.templateVersionId)));
       setSelectedTemplateProfile(updatedProfile);
@@ -1399,7 +1416,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setDraft(generated.draft);
       setBlocks(generated.draft.blocks);
       syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
-      setRenderPreviewOutdated(true);
+      markRenderPreviewOutdated();
       setParagraphStatuses((current) => ({ ...current, [key]: 'success' }));
       setStatus('saved');
       setStatusMessage('正文已生成并保存');
@@ -1435,7 +1452,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         setDraft(generated.draft);
         setBlocks(generated.draft.blocks);
         syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
-        setRenderPreviewOutdated(true);
+        markRenderPreviewOutdated();
         setParagraphStatuses((current) => ({ ...current, [section.heading]: 'success' }));
       }
       setAllParagraphStatus('success');
@@ -1660,7 +1677,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         }
         setLocalOperationSuggestion(null);
         setLocalOperationStatus('saved');
-        setRenderPreviewOutdated(true);
+        markRenderPreviewOutdated();
         setStatus('saved');
         setStatusMessage('节点建议已采纳并保存');
         showToast({ title: '建议已采纳', tone: 'success' });
@@ -1683,7 +1700,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       }
       setLocalOperationSuggestion(null);
       setLocalOperationStatus('saved');
-      setRenderPreviewOutdated(true);
+      markRenderPreviewOutdated();
       setStatus('saved');
       setStatusMessage('局部建议已采纳并保存');
       showToast({ title: '建议已采纳', tone: 'success' });
@@ -1706,7 +1723,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setNodeFormatError('');
       const updatedNode = await saveDraftNodeFormatOverride(draft.id, selectedNode.draftNodeId, formatOverride);
       syncGeneratedDraftNodes(undefined, updatedNode);
-      setRenderPreviewOutdated(true);
+      markRenderPreviewOutdated();
       setNodeFormatStatus('saved');
       setStatus('saved');
       setStatusMessage('节点格式已保存');
@@ -1730,7 +1747,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setNodeFormatError('');
       const updatedNode = await restoreDraftNodeFormatOverride(draft.id, selectedNode.draftNodeId);
       syncGeneratedDraftNodes(undefined, updatedNode);
-      setRenderPreviewOutdated(true);
+      markRenderPreviewOutdated();
       setNodeFormatStatus('restored');
       setStatus('saved');
       setStatusMessage('已恢复模板默认格式');
@@ -1743,7 +1760,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
-  async function handleRefreshWorkbenchPreview() {
+  async function handleRefreshWorkbenchPreview(silent = false) {
     if (!draft?.templateVersionId) {
       setWorkbenchRenderPreviewStatus('error');
       setWorkbenchRenderPreviewMessage('请先选择套版模板');
@@ -1752,26 +1769,34 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     try {
       setWorkbenchRenderPreviewStatus('requesting');
       setWorkbenchRenderPreviewMessage('正在刷新真实预览');
-      const preview = await requestRenderPreview(draft.templateVersionId);
+      const updatedDraft = await saveCurrentDraft('正在同步真实预览');
+      if (!updatedDraft) {
+        return;
+      }
+      const preview = await requestDraftRenderPreview(updatedDraft.id);
       const resultMessage = renderPreviewResultMessage(preview);
       setWorkbenchRenderPreview(preview);
       setRenderPreviewOutdated(false);
       setWorkbenchRenderPreviewStatus('idle');
       setWorkbenchRenderPreviewMessage(resultMessage);
-      showToast({
-        title: preview.status === 'READY'
-          ? '真实预览已刷新'
-          : preview.status === 'FAILED' || preview.status === 'UNSUPPORTED'
-            ? '真实预览不可用'
-            : '预览任务已提交',
-        description: resultMessage,
-        tone: preview.status === 'READY' ? 'success' : preview.status === 'FAILED' || preview.status === 'UNSUPPORTED' ? 'error' : 'info',
-      });
+      if (!silent) {
+        showToast({
+          title: preview.status === 'READY'
+            ? '真实预览已刷新'
+            : preview.status === 'FAILED' || preview.status === 'UNSUPPORTED'
+              ? '真实预览不可用'
+              : '预览任务已提交',
+          description: resultMessage,
+          tone: preview.status === 'READY' ? 'success' : preview.status === 'FAILED' || preview.status === 'UNSUPPORTED' ? 'error' : 'info',
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '真实预览刷新失败';
       setWorkbenchRenderPreviewStatus('error');
       setWorkbenchRenderPreviewMessage(message);
-      showToast({ title: message, tone: 'error' });
+      if (!silent) {
+        showToast({ title: message, tone: 'error' });
+      }
     }
   }
 
@@ -2277,6 +2302,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               message={draftListMessage}
               onCreateBlankDraft={(documentTypeCode) => void createBlankDraftInDraftList(documentTypeCode)}
               onDeleteDraft={(draftId) => deleteDraftFromList(draftId)}
+              onDocumentTypesChange={setDocumentTypes}
               onOpenDraft={(draftId) => void openDraftInWorkbench(draftId)}
               onRenameDraft={(draftId, title) => renameDraftFromList(draftId, title)}
               onSelectDocumentType={setSelectedDraftDocumentTypeCode}
@@ -2288,6 +2314,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             <TemplateManagementPage
               defaultDocumentTypeCode={draft?.documentTypeCode ?? 'NOTICE'}
               documentTypes={documentTypes}
+              onDocumentTypesChange={setDocumentTypes}
               structureOverrides={templateStructureOverrides}
               onStructureOverridesLoaded={(templateVersionId, overrides) => {
                 setTemplateStructureOverrides((current) => ({
@@ -2314,11 +2341,6 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   setTemplateVersions(await listTemplateVersions(draft.documentTypeCode));
                 }
               }}
-            />
-          ) : activeView === 'document-types' ? (
-            <DocumentTypeManagementPage
-              documentTypes={documentTypes}
-              onDocumentTypesChange={setDocumentTypes}
             />
           ) : activeView === 'exports' ? (
             <ExportRecordsPage
@@ -2654,6 +2676,7 @@ function OverviewPage({
 function TemplateManagementPage({
   defaultDocumentTypeCode,
   documentTypes,
+  onDocumentTypesChange,
   structureOverrides,
   onStructureOverridesLoaded,
   onStructureOverrideChange,
@@ -2661,6 +2684,7 @@ function TemplateManagementPage({
 }: {
   defaultDocumentTypeCode: string;
   documentTypes: DocumentType[];
+  onDocumentTypesChange: (documentTypes: DocumentType[]) => void;
   structureOverrides: TemplateStructureOverridesByVersion;
   onStructureOverridesLoaded: (templateVersionId: number, overrides: TemplateStructureOverrideMap) => void;
   onStructureOverrideChange: (
@@ -2671,7 +2695,9 @@ function TemplateManagementPage({
   onTemplateVersionCreated: () => Promise<void>;
 }) {
   const { showToast } = useToast();
-  const fallbackDocumentTypes = documentTypes.length > 0 ? documentTypes : [{ code: defaultDocumentTypeCode, name: '通知' }];
+  const fallbackDocumentTypes = documentTypes.length > 0
+    ? documentTypes
+    : [{ code: defaultDocumentTypeCode, name: '通知', status: 'ACTIVE', sortOrder: 1 }];
   const [documentTypeCode, setDocumentTypeCode] = useState<string | null>(null);
   const [pageMode, setPageMode] = useState<'folders' | 'list' | 'create'>('folders');
   const [templateName, setTemplateName] = useState('');
@@ -3086,7 +3112,9 @@ function TemplateManagementPage({
               </h2>
               <p>{activeDocumentType ? '新增模板后会解析占位符和风险。' : '先选择文种，再管理该文种下的模板。'}</p>
             </div>
-            {pageMode !== 'folders' && (
+            {pageMode === 'folders' ? (
+              <DocumentTypeCreateButton onDocumentTypesChange={onDocumentTypesChange} />
+            ) : (
               <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
                 {status === 'uploading' ? '解析中' : `${templates.length} 个模板 · ${versions.length} 个版本`}
               </span>
@@ -3094,20 +3122,11 @@ function TemplateManagementPage({
           </div>
 
         {pageMode === 'folders' && (
-          <div className="template-folder-grid">
-            {fallbackDocumentTypes.map((type) => (
-              <button
-                className="template-folder-card"
-                key={type.code}
-                onClick={() => handleSelectDocumentType(type.code)}
-                type="button"
-              >
-                <FolderOpen aria-hidden="true" />
-                <span>{type.name}</span>
-                <small>{type.code}</small>
-              </button>
-            ))}
-          </div>
+          <DocumentTypeFolderGrid
+            documentTypes={fallbackDocumentTypes}
+            onDocumentTypesChange={onDocumentTypesChange}
+            onSelectDocumentType={handleSelectDocumentType}
+          />
         )}
 
         {pageMode === 'list' && (
@@ -4702,38 +4721,114 @@ function AccountManagementPage({
   );
 }
 
-function DocumentTypeManagementPage({
+function DocumentTypeFolderGrid({
+  ariaLabel,
+  disabled = false,
   documentTypes,
   onDocumentTypesChange,
+  onSelectDocumentType,
 }: {
+  ariaLabel?: string;
+  disabled?: boolean;
   documentTypes: DocumentType[];
+  onDocumentTypesChange: (documentTypes: DocumentType[]) => void;
+  onSelectDocumentType: (documentTypeCode: string) => void;
+}) {
+  const { showToast } = useToast();
+  const [typeToDelete, setTypeToDelete] = useState<DocumentType | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  async function reloadDocumentTypes() {
+    onDocumentTypesChange(await listDocumentTypes());
+  }
+
+  async function handleConfirmDeleteDocumentType() {
+    if (!typeToDelete) {
+      return;
+    }
+    try {
+      setIsDeleting(true);
+      await deleteDocumentType(typeToDelete.code);
+      await reloadDocumentTypes();
+      setTypeToDelete(null);
+      showToast({ title: '文种已删除', tone: 'success' });
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : '文种删除失败';
+      showToast({ title: nextMessage, tone: 'error' });
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="template-folder-grid" aria-label={ariaLabel}>
+        {documentTypes.map((type) => (
+          <article className="document-type-folder-card" key={type.code}>
+            <button
+              aria-label={type.name}
+              className="template-folder-card"
+              disabled={disabled || isDeleting}
+              onClick={() => onSelectDocumentType(type.code)}
+              type="button"
+            >
+              <FolderOpen aria-hidden="true" />
+              <span>{type.name}</span>
+              <small>{type.code}</small>
+            </button>
+            <div className="template-card-controls document-type-folder-controls">
+              <button
+                aria-label="删除文种"
+                className="template-card-icon-button danger"
+                disabled={disabled || isDeleting}
+                onClick={() => setTypeToDelete(type)}
+                title={`删除文种：${type.name}`}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+      <ConfirmDialog
+        cancelLabel="取消"
+        confirmLabel="删除文种"
+        description={typeToDelete ? `将删除“${typeToDelete.name}”。若已有草稿或模板依赖该文种，后端会阻断本次操作。` : undefined}
+        isConfirming={isDeleting}
+        onCancel={() => setTypeToDelete(null)}
+        onConfirm={() => void handleConfirmDeleteDocumentType()}
+        open={Boolean(typeToDelete)}
+        title="删除文种？"
+      />
+    </>
+  );
+}
+
+function DocumentTypeCreateButton({
+  disabled = false,
+  onDocumentTypesChange,
+}: {
+  disabled?: boolean;
   onDocumentTypesChange: (documentTypes: DocumentType[]) => void;
 }) {
   const { showToast } = useToast();
-  const [status, setStatus] = useState<AdminPageStatus>('idle');
+  const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({ code: '', name: '', sortOrder: '10' });
-  const [editingType, setEditingType] = useState<DocumentType | null>(null);
-  const [typeToDelete, setTypeToDelete] = useState<DocumentType | null>(null);
   const [typeDialogOpen, setTypeDialogOpen] = useState(false);
 
   function startCreateType() {
-    setEditingType(null);
     setForm({ code: '', name: '', sortOrder: '10' });
     setMessage('');
-    setTypeDialogOpen(true);
-  }
-
-  function startEditType(type: DocumentType) {
-    setEditingType(type);
-    setForm({ code: type.code, name: type.name, sortOrder: String(type.sortOrder) });
-    setMessage('');
+    setStatus('idle');
     setTypeDialogOpen(true);
   }
 
   function resetTypeForm() {
-    setEditingType(null);
     setForm({ code: '', name: '', sortOrder: '10' });
+    setMessage('');
+    setStatus('idle');
     setTypeDialogOpen(false);
   }
 
@@ -4755,19 +4850,11 @@ function DocumentTypeManagementPage({
         name: form.name.trim(),
         sortOrder: Number(form.sortOrder || 0),
       };
-      if (editingType) {
-        await updateDocumentType(editingType.code, {
-          name: payload.name,
-          sortOrder: payload.sortOrder,
-        });
-      } else {
-        await createDocumentType(payload);
-      }
+      await createDocumentType(payload);
       await reloadDocumentTypes();
       resetTypeForm();
       setStatus('idle');
-      setMessage(editingType ? '文种已更新' : '文种已创建');
-      showToast({ title: editingType ? '文种已更新' : '文种已创建', tone: 'success' });
+      showToast({ title: '文种已创建', tone: 'success' });
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : '文种保存失败';
       setStatus('error');
@@ -4776,104 +4863,11 @@ function DocumentTypeManagementPage({
     }
   }
 
-  async function handleDeleteDocumentType() {
-    if (!typeToDelete) {
-      return;
-    }
-    try {
-      setStatus('saving');
-      await deleteDocumentType(typeToDelete.code);
-      await reloadDocumentTypes();
-      setTypeToDelete(null);
-      setStatus('idle');
-      setMessage('文种已停用');
-      showToast({ title: '文种已停用', tone: 'success' });
-    } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : '文种停用失败';
-      setStatus('error');
-      setMessage(nextMessage);
-      showToast({ title: nextMessage, tone: 'error' });
-    }
-  }
-
   return (
     <>
-      <main className="settings-page" aria-busy={status === 'saving'} aria-label="文种管理">
-        <section className="settings-panel template-admin-panel">
-          <div className="settings-header">
-            <div>
-              <div className="eyebrow">Document Types</div>
-              <h2>文种管理</h2>
-              <p>维护通知、请示、报告等文种。这里和草稿、模板保持同一套文种卡片层级。</p>
-            </div>
-            <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
-              {documentTypes.length} 个文种
-            </span>
-          </div>
-
-          <div className="template-list-toolbar">
-            <div className="template-toolbar-context">
-              <FileCog aria-hidden="true" className="row-icon" />
-              <div>
-                <strong>文种配置</strong>
-                <span className="template-card-meta">新增文种后会进入草稿列表和模板管理的文种入口。</span>
-              </div>
-            </div>
-            <Button icon={<Plus aria-hidden="true" />} onClick={startCreateType}>
-              新增文种
-            </Button>
-          </div>
-
-          {message && <StatusMessage title={message} tone={status === 'error' ? 'warning' : 'success'} />}
-
-          {documentTypes.length === 0 ? (
-            <div className="template-empty-panel">
-              <FileCog aria-hidden="true" />
-              <div>
-                <strong>暂无文种</strong>
-                <span>创建第一个文种后，可以继续配置模板、草稿和导出。</span>
-              </div>
-            </div>
-          ) : (
-            <div className="template-card-grid" aria-label="文种列表">
-              {documentTypes.map((type) => (
-                <article className="template-card" key={type.code}>
-                  <div className="template-card-controls">
-                    <button
-                      aria-label={`编辑文种：${type.name}`}
-                      className="template-card-icon-button"
-                      disabled={status === 'saving'}
-                      onClick={() => startEditType(type)}
-                      title="编辑文种"
-                      type="button"
-                    >
-                      <Pencil aria-hidden="true" />
-                    </button>
-                    <button
-                      aria-label={`停用文种：${type.name}`}
-                      className="template-card-icon-button danger"
-                      disabled={status === 'saving'}
-                      onClick={() => setTypeToDelete(type)}
-                      title="停用文种"
-                      type="button"
-                    >
-                      <Trash2 aria-hidden="true" />
-                    </button>
-                  </div>
-                  <div className="template-card-title">
-                    <FileCog aria-hidden="true" />
-                    <div>
-                      <h3>{type.name}</h3>
-                      <span className="template-card-meta">{type.code} · {type.status}</span>
-                    </div>
-                  </div>
-                  <p className="template-card-file">排序 {type.sortOrder}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
+      <Button disabled={disabled || status === 'saving'} icon={<Plus aria-hidden="true" />} onClick={startCreateType}>
+        新增文种
+      </Button>
       <Dialog
         actions={(
           <>
@@ -4887,18 +4881,19 @@ function DocumentTypeManagementPage({
               loadingLabel="正在保存"
               type="submit"
             >
-              {editingType ? '保存文种' : '创建文种'}
+              创建文种
             </Button>
           </>
         )}
-        description={editingType ? `正在编辑“${editingType.name}”的文种名称和排序。` : '新增文种后会出现在草稿列表和模板管理的文种入口中。'}
+        description="新增文种后会出现在草稿列表和模板管理的文种入口中。"
         onClose={resetTypeForm}
         open={typeDialogOpen}
-        title={editingType ? '编辑文种' : '新增文种'}
+        title="新增文种"
       >
+        {message && <StatusMessage title={message} tone="warning" />}
         <form className="settings-grid management-dialog-form" id="document-type-management-form" onSubmit={(event) => void handleSaveDocumentType(event)}>
           <TextField
-            disabled={status === 'saving' || Boolean(editingType)}
+            disabled={status === 'saving'}
             label="文种编码"
             onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
             placeholder="NOTICE"
@@ -4920,16 +4915,6 @@ function DocumentTypeManagementPage({
           />
         </form>
       </Dialog>
-      <ConfirmDialog
-        cancelLabel="取消"
-        confirmLabel="停用文种"
-        description={typeToDelete ? `将停用“${typeToDelete.name}”。若已有草稿或模板依赖该文种，后端会按当前规则处理或阻断。` : undefined}
-        isConfirming={status === 'saving'}
-        onCancel={() => setTypeToDelete(null)}
-        onConfirm={() => void handleDeleteDocumentType()}
-        open={Boolean(typeToDelete)}
-        title="停用文种？"
-      />
     </>
   );
 }
@@ -5182,6 +5167,7 @@ function DraftListPage({
   message,
   onCreateBlankDraft,
   onDeleteDraft,
+  onDocumentTypesChange,
   onOpenDraft,
   onRenameDraft,
   onSelectDocumentType,
@@ -5195,6 +5181,7 @@ function DraftListPage({
   message: string;
   onCreateBlankDraft: (documentTypeCode: string) => void;
   onDeleteDraft: (draftId: number) => Promise<void>;
+  onDocumentTypesChange: (documentTypes: DocumentType[]) => void;
   onOpenDraft: (draftId: number) => void;
   onRenameDraft: (draftId: number, title: string) => Promise<void>;
   onSelectDocumentType: (documentTypeCode: string) => void;
@@ -5272,7 +5259,9 @@ function DraftListPage({
             </h2>
             <p>{pageMode === 'list' ? '新建草稿会留在当前文种列表中，再进入工作台继续编辑。' : '先选择文种，再管理该文种下的草稿。'}</p>
           </div>
-          {pageMode !== 'folders' && (
+          {pageMode === 'folders' ? (
+            <DocumentTypeCreateButton disabled={isBusy} onDocumentTypesChange={onDocumentTypesChange} />
+          ) : (
             <span className={`status-chip ${status === 'error' ? 'danger' : ''}`}>
               {status === 'loading' ? '加载中' : `${drafts.length} 个草稿`}
             </span>
@@ -5280,22 +5269,13 @@ function DraftListPage({
         </div>
 
         {pageMode === 'folders' && (
-          <div className="template-folder-grid" aria-label="文种">
-            {documentTypes.map((type) => (
-              <button
-                aria-label={type.name}
-                className="template-folder-card"
-                disabled={isBusy}
-                key={type.code}
-                onClick={() => handleSelectDocumentType(type.code)}
-                type="button"
-              >
-                <FolderOpen aria-hidden="true" />
-                <span>{type.name}</span>
-                <small>{type.code}</small>
-              </button>
-            ))}
-          </div>
+          <DocumentTypeFolderGrid
+            ariaLabel="文种"
+            disabled={isBusy}
+            documentTypes={documentTypes}
+            onDocumentTypesChange={onDocumentTypesChange}
+            onSelectDocumentType={handleSelectDocumentType}
+          />
         )}
 
         {pageMode === 'list' && (

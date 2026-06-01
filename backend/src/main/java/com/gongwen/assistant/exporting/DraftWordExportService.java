@@ -151,6 +151,35 @@ public class DraftWordExportService {
     }
 
     public WordExportResult exportDraft(long draftId) {
+        DraftExportPlan plan = draftExportPlan(draftId, true);
+        if (STRATEGY_ORIGINAL_NODE_REPLACEMENT.equals(plan.strategy())) {
+            return exportOriginalNodeReplacement(
+                    plan.templateBytes(),
+                    plan.request(),
+                    plan.mapping(),
+                    plan.draftNodes()
+            );
+        }
+        return wordExportService.export(plan.templateBytes(), plan.request());
+    }
+
+    public DraftWordRenderResult renderDraftForPreview(long draftId) {
+        DraftExportPlan plan = draftExportPlan(draftId, false);
+        WordExportResult result;
+        if (STRATEGY_ORIGINAL_NODE_REPLACEMENT.equals(plan.strategy())) {
+            result = renderOriginalNodeReplacementForPreview(
+                    plan.templateBytes(),
+                    plan.request(),
+                    plan.mapping(),
+                    plan.draftNodes()
+            );
+        } else {
+            result = wordExportService.render(plan.templateBytes(), plan.request());
+        }
+        return new DraftWordRenderResult(plan.templateVersionId(), result.fileName(), result.content());
+    }
+
+    private DraftExportPlan draftExportPlan(long draftId, boolean requirePublishedMapping) {
         CurrentUser currentUser = currentUserOrNull();
         DraftDetailDto draft = draftRepository.findById(draftId, currentUser);
         Long templateVersionId = draft.templateVersionId();
@@ -181,7 +210,7 @@ public class DraftWordExportService {
 
         TemplateProfile profile = templateProfile(templateVersionId);
         ensureDocumentKindAllowsExport(profile);
-        ExportStructureContext structureContext = exportStructureContext(templateVersionId);
+        ExportStructureContext structureContext = exportStructureContext(templateVersionId, requirePublishedMapping);
         List<DraftNode> draftNodes = draftNodes(draft.id());
         Map<String, TemplateStructureFormattingProfile> structureOverrides =
                 templateStructureFormattingRepository.findOverrides(templateVersionId);
@@ -204,10 +233,14 @@ public class DraftWordExportService {
                 traceSnapshot(structureContext, formattingContext, draftNodes, strategy)
         );
 
-        if (STRATEGY_ORIGINAL_NODE_REPLACEMENT.equals(strategy)) {
-            return exportOriginalNodeReplacement(templateBytes, request, structureContext.mappingProfile(), draftNodes);
-        }
-        return wordExportService.export(templateBytes, request);
+        return new DraftExportPlan(
+                templateVersionId,
+                templateBytes,
+                request,
+                structureContext.mappingProfile(),
+                draftNodes,
+                strategy
+        );
     }
 
     private WordExportResult exportOriginalNodeReplacement(
@@ -223,6 +256,28 @@ public class DraftWordExportService {
                     ignoredNodeKeys(mapping)
             );
             return wordExportService.exportRendered(request, rendered);
+        } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
+            throw new WordExportException(
+                    "EXPORT_NODE_LOCATOR_MISSING",
+                    "\u5bfc\u51fa\u8282\u70b9\u5b9a\u4f4d\u5931\u8d25\uff1a" + exception.nodeKey(),
+                    exception
+            );
+        }
+    }
+
+    private WordExportResult renderOriginalNodeReplacementForPreview(
+            byte[] templateBytes,
+            WordExportRequest request,
+            StructureMappingProfile mapping,
+            List<DraftNode> draftNodes
+    ) {
+        try {
+            byte[] rendered = nodeReplacementRenderer.render(
+                    templateBytes,
+                    originalNodeReplacements(draftNodes),
+                    ignoredNodeKeys(mapping)
+            );
+            return wordExportService.renderRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
             throw new WordExportException(
                     "EXPORT_NODE_LOCATOR_MISSING",
@@ -295,21 +350,26 @@ public class DraftWordExportService {
         );
     }
 
-    private ExportStructureContext exportStructureContext(long templateVersionId) {
+    private ExportStructureContext exportStructureContext(long templateVersionId, boolean requirePublishedMapping) {
         if (structureMappingRepository == null) {
             return ExportStructureContext.EMPTY;
         }
-        StructureMappingProfile mapping = structureMappingRepository
-                .findLatestByStatus(templateVersionId, "PUBLISHED")
-                .orElseThrow(() -> new WordExportException(
-                        "STRUCTURE_MAPPING_REQUIRED",
-                        "导出前需要当前模板版本已有已发布的结构映射。请在模板解析工作台保存草稿并发布映射后，再回到工作台重建结构并导出。",
-                        null
-                ));
+        Optional<StructureMappingProfile> publishedMapping = structureMappingRepository
+                .findLatestByStatus(templateVersionId, "PUBLISHED");
+        if (publishedMapping.isEmpty() && requirePublishedMapping) {
+            throw new WordExportException(
+                    "STRUCTURE_MAPPING_REQUIRED",
+                    "导出前需要当前模板版本已有已发布的结构映射。请在模板解析工作台保存草稿并发布映射后，再回到工作台重建结构并导出。",
+                    null
+            );
+        }
+        StructureMappingProfile mapping = publishedMapping.orElse(null);
         DocumentStructureProfile structureProfile = documentStructureProfileRepository == null
                 ? null
                 : documentStructureProfileRepository.findByTemplateVersionId(templateVersionId).orElse(null);
-        ensureRequiredMappingRoles(mapping);
+        if (mapping != null) {
+            ensureRequiredMappingRoles(mapping);
+        }
         return new ExportStructureContext(structureProfile, mapping);
     }
 
@@ -713,6 +773,16 @@ public class DraftWordExportService {
             StructureMappingProfile mappingProfile
     ) {
         private static final ExportStructureContext EMPTY = new ExportStructureContext(null, null);
+    }
+
+    private record DraftExportPlan(
+            long templateVersionId,
+            byte[] templateBytes,
+            WordExportRequest request,
+            StructureMappingProfile mapping,
+            List<DraftNode> draftNodes,
+            String strategy
+    ) {
     }
 
     private record ExportNodeSnapshot(

@@ -311,6 +311,7 @@ export type DocumentRenderPreviewPage = {
 
 export type DocumentRenderPreview = {
   id: number | null;
+  draftId?: number | null;
   templateVersionId: number;
   sourceFileHash: string;
   renderer: string;

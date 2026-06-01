@@ -401,8 +401,44 @@ class DraftWordExportServiceTest {
         assertThatThrownBy(() -> service.exportDraft(32L))
                 .isInstanceOf(WordExportException.class)
                 .satisfies(error -> assertThat(((WordExportException) error).errorCode())
-                        .isEqualTo("STRUCTURE_MAPPING_REQUIRED"))
+                .isEqualTo("STRUCTURE_MAPPING_REQUIRED"))
                 .hasMessageContaining("导出前需要当前模板版本已有已发布的结构映射");
+    }
+
+    @Test
+    void renderDraftForPreviewAllowsMissingPublishedMappingWithoutWritingExportRecord() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(
+                PLACEHOLDER_TITLE,
+                PLACEHOLDER_RECIPIENT,
+                PLACEHOLDER_BODY,
+                PLACEHOLDER_ATTACHMENT,
+                PLACEHOLDER_SIGNATURE,
+                PLACEHOLDER_DATE
+        );
+        Path templatePath = tempDir.resolve("preview-without-mapping-template.docx");
+        Files.write(templatePath, templateBytes);
+        InMemoryExportRecordRepository records = new InMemoryExportRecordRepository();
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(42L, 9L, "Preview without mapping")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(emptyProfile()),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(records),
+                null,
+                new FixedDraftNodeRepository(List.of()),
+                new FixedStructureMappingRepository(null),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("title-1", "body-1"))
+        );
+
+        DraftWordRenderResult result = service.renderDraftForPreview(42L);
+
+        String text = DocxTestFactory.readText(result.content());
+        assertThat(result.templateVersionId()).isEqualTo(9L);
+        assertThat(text).contains("Year-end archive notice");
+        assertThat(text).contains("Headquarters conference room");
+        assertThat(records.savedRecord).isNull();
     }
 
     @Test

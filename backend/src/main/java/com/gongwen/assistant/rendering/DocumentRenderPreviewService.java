@@ -15,19 +15,22 @@ public class DocumentRenderPreviewService {
     private final DocumentRenderPreviewRenderer renderer;
     private final RenderPreviewProperties properties;
     private final RenderPreviewJobExecutor jobExecutor;
+    private final DraftRenderPreviewSource draftRenderPreviewSource;
 
     public DocumentRenderPreviewService(
             DocumentRenderPreviewRepository repository,
             TemplateVersionRepository templateVersionRepository,
             DocumentRenderPreviewRenderer renderer,
             RenderPreviewProperties properties,
-            RenderPreviewJobExecutor jobExecutor
+            RenderPreviewJobExecutor jobExecutor,
+            DraftRenderPreviewSource draftRenderPreviewSource
     ) {
         this.repository = repository;
         this.templateVersionRepository = templateVersionRepository;
         this.renderer = renderer;
         this.properties = properties;
         this.jobExecutor = jobExecutor;
+        this.draftRenderPreviewSource = draftRenderPreviewSource;
     }
 
     public DocumentRenderPreview getStatus(long templateVersionId) {
@@ -44,6 +47,7 @@ public class DocumentRenderPreviewService {
         TemplateVersion version = findTemplateVersion(templateVersionId);
         DocumentRenderPreview job = repository.create(new DocumentRenderPreview(
                 null,
+                null,
                 templateVersionId,
                 version.profileHash(),
                 renderer.rendererName(),
@@ -58,6 +62,51 @@ public class DocumentRenderPreviewService {
                 null
         ));
         jobExecutor.submit(() -> runRenderJob(job, version));
+        return repository.findById(job.id()).orElse(job);
+    }
+
+    public DocumentRenderPreview getDraftStatus(long draftId) {
+        return repository.findLatestByDraftId(draftId)
+                .orElseGet(() -> {
+                    DraftRenderPreviewDocument document = draftPreviewDocument(draftId);
+                    return new DocumentRenderPreview(
+                            null,
+                            draftId,
+                            document.templateVersionId(),
+                            document.sourceFileHash(),
+                            renderer.rendererName(),
+                            null,
+                            DocumentRenderPreviewStatus.PENDING,
+                            0,
+                            null,
+                            DocumentRenderPreviewManifest.empty(),
+                            null,
+                            null,
+                            null,
+                            null
+                    );
+                });
+    }
+
+    public DocumentRenderPreview requestDraftRender(long draftId) {
+        DraftRenderPreviewDocument document = draftPreviewDocument(draftId);
+        DocumentRenderPreview job = repository.create(new DocumentRenderPreview(
+                null,
+                draftId,
+                document.templateVersionId(),
+                document.sourceFileHash(),
+                renderer.rendererName(),
+                null,
+                DocumentRenderPreviewStatus.RENDERING,
+                0,
+                null,
+                DocumentRenderPreviewManifest.empty(),
+                null,
+                null,
+                null,
+                null
+        ));
+        jobExecutor.submit(() -> runDraftRenderJob(job, document));
         return repository.findById(job.id()).orElse(job);
     }
 
@@ -129,6 +178,53 @@ public class DocumentRenderPreviewService {
         }
     }
 
+    private void runDraftRenderJob(DocumentRenderPreview job, DraftRenderPreviewDocument document) {
+        Path outputDir = null;
+        try {
+            Path root = storageRoot();
+            outputDir = root.resolve("draft-" + job.draftId())
+                    .resolve("preview-" + job.id())
+                    .normalize();
+            requireInside(root, outputDir);
+            Files.createDirectories(outputDir);
+
+            Path sourceDocx = outputDir.resolve(safeDraftFileName(document.fileName())).normalize();
+            requireInside(outputDir, sourceDocx);
+            Files.write(sourceDocx, document.content());
+
+            RenderedDocumentPreview rendered = renderer.render(sourceDocx, outputDir);
+            DocumentRenderPreviewManifest manifest = new DocumentRenderPreviewManifest(
+                    1,
+                    rendered.pdfFileName(),
+                    rendered.pages()
+            );
+            repository.updateResult(
+                    job.id(),
+                    DocumentRenderPreviewStatus.READY,
+                    manifest.pages().size(),
+                    outputDir.toString(),
+                    manifest,
+                    rendered.rendererVersion(),
+                    null,
+                    null
+            );
+        } catch (RenderPreviewException exception) {
+            markFailed(job.id(), outputDir, exception);
+        } catch (IOException exception) {
+            markFailed(job.id(), outputDir, new RenderPreviewException(
+                    "DRAFT_RENDER_PREVIEW_STORAGE_FAILED",
+                    "Draft render preview storage failed",
+                    exception
+            ));
+        } catch (RuntimeException exception) {
+            markFailed(job.id(), outputDir, new RenderPreviewException(
+                    "DRAFT_RENDER_PREVIEW_FAILED",
+                    "Draft render preview failed",
+                    exception
+            ));
+        }
+    }
+
     private void markFailed(long jobId, Path outputDir, RenderPreviewException exception) {
         repository.updateResult(
                 jobId,
@@ -145,6 +241,24 @@ public class DocumentRenderPreviewService {
     private TemplateVersion findTemplateVersion(long templateVersionId) {
         return templateVersionRepository.findById(templateVersionId)
                 .orElseThrow(() -> new RenderPreviewException("TEMPLATE_VERSION_NOT_FOUND", "Template version not found"));
+    }
+
+    private DraftRenderPreviewDocument draftPreviewDocument(long draftId) {
+        if (draftRenderPreviewSource == null) {
+            throw new RenderPreviewException(
+                    "DRAFT_RENDER_PREVIEW_UNAVAILABLE",
+                    "Draft render preview is not configured"
+            );
+        }
+        return draftRenderPreviewSource.renderDraft(draftId);
+    }
+
+    private String safeDraftFileName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return "draft-preview.docx";
+        }
+        String safeName = fileName.replaceAll("[\\\\/:*?\"<>|]", "_");
+        return safeName.toLowerCase().endsWith(".docx") ? safeName : safeName + ".docx";
     }
 
     private Path storageRoot() {
