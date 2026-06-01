@@ -401,7 +401,8 @@ class DraftWordExportServiceTest {
         assertThatThrownBy(() -> service.exportDraft(32L))
                 .isInstanceOf(WordExportException.class)
                 .satisfies(error -> assertThat(((WordExportException) error).errorCode())
-                        .isEqualTo("STRUCTURE_MAPPING_REQUIRED"));
+                        .isEqualTo("STRUCTURE_MAPPING_REQUIRED"))
+                .hasMessageContaining("导出前需要当前模板版本已有已发布的结构映射");
     }
 
     @Test

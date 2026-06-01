@@ -83,18 +83,43 @@ public class JdbcDepartmentRepository implements DepartmentRepository {
 
     @Override
     public int countChildren(long id) {
-        Integer count = jdbcTemplate.queryForObject("select count(*) from department where parent_id = ? and status = 'ACTIVE'", Integer.class, id);
+        Integer count = jdbcTemplate.queryForObject("select count(*) from department where parent_id = ?", Integer.class, id);
         return count == null ? 0 : count;
     }
 
     @Override
     public int countUsers(long id) {
-        Integer count = jdbcTemplate.queryForObject("select count(*) from app_user where department_id = ? and status = 'ACTIVE'", Integer.class, id);
+        Integer count = jdbcTemplate.queryForObject("select count(*) from app_user where department_id = ?", Integer.class, id);
         return count == null ? 0 : count;
     }
 
     @Override
-    public boolean disable(long id) {
-        return jdbcTemplate.update("update department set status = 'DISABLED', updated_at = now() where id = ?", id) > 0;
+    public int countBusinessReferences(long id) {
+        Integer count = jdbcTemplate.queryForObject("""
+                        select
+                            (select count(*) from document_type where department_id = ?) +
+                            (select count(*) from document_template where department_id = ?) +
+                            (select count(*) from draft where department_id = ?) +
+                            (select count(*) from material where department_id = ?) +
+                            (select count(*) from ai_generation_trace where department_id = ?) +
+                            (select count(*) from ai_provider_settings where department_id = ?) +
+                            (select count(*) from export_record where department_id = ?) +
+                            (select count(*) from structure_mapping_profile where department_id = ?)
+                        """,
+                Integer.class,
+                id,
+                id,
+                id,
+                id,
+                id,
+                id,
+                id,
+                id);
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public boolean delete(long id) {
+        return jdbcTemplate.update("delete from department where id = ?", id) > 0;
     }
 }

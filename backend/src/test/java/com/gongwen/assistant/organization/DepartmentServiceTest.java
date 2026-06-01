@@ -60,6 +60,19 @@ class DepartmentServiceTest {
         assertThatThrownBy(() -> service.delete(1L))
                 .isInstanceOf(DepartmentException.class)
                 .hasMessageContaining("users");
+
+        repository.userCount = 0;
+        repository.businessReferenceCount = 1;
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(DepartmentException.class)
+                .hasMessageContaining("business data");
+    }
+
+    @Test
+    void deletesDepartmentWhenItHasNoChildrenOrUsers() {
+        service.delete(1L);
+
+        assertThat(repository.deletedDepartmentId).isEqualTo(1L);
     }
 
     private static final class InMemoryDepartmentRepository implements DepartmentRepository {
@@ -96,8 +109,17 @@ class DepartmentServiceTest {
         }
 
         @Override
-        public boolean disable(long id) {
+        public int countBusinessReferences(long id) {
+            return businessReferenceCount;
+        }
+
+        @Override
+        public boolean delete(long id) {
+            deletedDepartmentId = id;
             return true;
         }
+
+        private Long deletedDepartmentId;
+        private int businessReferenceCount;
     }
 }

@@ -14,5 +14,7 @@ public interface DepartmentRepository {
 
     int countUsers(long id);
 
-    boolean disable(long id);
+    int countBusinessReferences(long id);
+
+    boolean delete(long id);
 }

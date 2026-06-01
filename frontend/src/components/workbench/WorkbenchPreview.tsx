@@ -1,10 +1,11 @@
-import { CSSProperties } from 'react';
-import { Trash2 } from 'lucide-react';
+import { CSSProperties, useEffect, useState } from 'react';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { getRenderPreviewPageUrl } from '../../api';
 import {
   bodyNodeEditorLabel,
   bodyNodeLabel,
 } from '../../workbenchNodes';
-import type { WorkbenchNode } from '../../draftTypes';
+import type { DocumentRenderPreview, WorkbenchNode } from '../../draftTypes';
 import { Button } from '../ui';
 
 type WorkbenchPreviewProps = {
@@ -27,6 +28,10 @@ type WorkbenchPreviewProps = {
   signatureStyle?: CSSProperties;
   dateStyle?: CSSProperties;
   bodyStyleForNode: (node: WorkbenchNode) => CSSProperties;
+  renderPreview?: DocumentRenderPreview | null;
+  renderPreviewOutdated?: boolean;
+  isRefreshingRenderPreview?: boolean;
+  onRefreshRenderPreview?: () => void;
   registerNodeRef: (nodeId: string, element: HTMLElement | null) => void;
   syncParagraphEditorHeight: (element: HTMLTextAreaElement) => void;
   onSelectNode: (nodeId: string) => void;
@@ -60,6 +65,10 @@ export function WorkbenchPreview({
   signatureStyle,
   dateStyle,
   bodyStyleForNode,
+  renderPreview,
+  renderPreviewOutdated = false,
+  isRefreshingRenderPreview = false,
+  onRefreshRenderPreview,
   registerNodeRef,
   syncParagraphEditorHeight,
   onSelectNode,
@@ -72,6 +81,14 @@ export function WorkbenchPreview({
   onUpdateBodyContent,
   onRemoveBodyNode,
 }: WorkbenchPreviewProps) {
+  const canShowRenderedPreview = Boolean(
+    renderPreview?.status === 'READY'
+    && renderPreview.id
+    && renderPreview.manifest.pages.length > 0,
+  );
+  const [previewMode, setPreviewMode] = useState<'rendered' | 'structured'>(
+    canShowRenderedPreview ? 'rendered' : 'structured',
+  );
   const previewNodes = nodes.length > 0
     ? [...nodes].sort((a, b) => a.sortOrder - b.sortOrder || a.nodeId.localeCompare(b.nodeId))
     : legacyPreviewNodes({
@@ -110,9 +127,59 @@ export function WorkbenchPreview({
     }
   };
 
+  useEffect(() => {
+    if (canShowRenderedPreview) {
+      setPreviewMode('rendered');
+    }
+  }, [canShowRenderedPreview, renderPreview?.id, renderPreview?.updatedAt]);
+
+  const showRenderedPreviewMode = previewMode === 'rendered';
+  const showRenderedPages = canShowRenderedPreview && showRenderedPreviewMode;
+  const canOpenRenderedMode = canShowRenderedPreview || Boolean(onRefreshRenderPreview);
+
   return (
     <section aria-label="公文预览">
       <div className="document-stage">
+        <div className="document-preview-toolbar">
+          <div>
+            <div className="document-preview-label">
+              {showRenderedPreviewMode ? '真实渲染预览' : '预览模式'}
+            </div>
+            {showRenderedPages && renderPreviewOutdated && (
+              <div className="document-preview-hint">正文或格式已更新，真实预览待刷新。</div>
+            )}
+          </div>
+          <div className="document-preview-mode" role="group" aria-label="预览模式">
+            <button
+              aria-pressed={showRenderedPreviewMode}
+              className={showRenderedPreviewMode ? 'selected' : ''}
+              disabled={!canOpenRenderedMode}
+              onClick={() => setPreviewMode('rendered')}
+              type="button"
+            >
+              真实预览
+            </button>
+            <button
+              aria-pressed={previewMode === 'structured'}
+              className={previewMode === 'structured' ? 'selected' : ''}
+              onClick={() => setPreviewMode('structured')}
+              type="button"
+            >
+              结构编辑
+            </button>
+          </div>
+        </div>
+        {showRenderedPages ? (
+          <RenderedPreview preview={renderPreview as DocumentRenderPreview} />
+        ) : showRenderedPreviewMode ? (
+          <RenderedPreviewUnavailable
+            isRefreshing={isRefreshingRenderPreview}
+            onRefresh={onRefreshRenderPreview}
+            preview={renderPreview}
+            previewOutdated={renderPreviewOutdated}
+          />
+        ) : (
+          <>
         <div className="document-preview-label">结构化编辑预览</div>
         <article className="document-paper">
           {previewNodes.length > 0 ? previewNodes.map((node) => renderPreviewNode({
@@ -134,8 +201,79 @@ export function WorkbenchPreview({
             onRemoveBodyNode,
           })) : <p>请在左侧填写正文内容。</p>}
         </article>
+          </>
+        )}
       </div>
     </section>
+  );
+}
+
+function RenderedPreviewUnavailable({
+  isRefreshing,
+  onRefresh,
+  preview,
+  previewOutdated,
+}: {
+  isRefreshing: boolean;
+  onRefresh?: () => void;
+  preview?: DocumentRenderPreview | null;
+  previewOutdated: boolean;
+}) {
+  return (
+    <div className="document-rendered-empty" role="status">
+      <div className="document-rendered-empty-title">{renderedPreviewUnavailableTitle(preview)}</div>
+      <p>{renderedPreviewUnavailableMessage(preview, previewOutdated)}</p>
+      {onRefresh && (
+        <Button
+          icon={<RefreshCw aria-hidden="true" />}
+          isLoading={isRefreshing}
+          loadingLabel="正在刷新"
+          onClick={onRefresh}
+          variant="secondary"
+        >
+          刷新真实预览
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function renderedPreviewUnavailableTitle(preview?: DocumentRenderPreview | null) {
+  if (preview?.status === 'RENDERING') {
+    return '真实预览生成中';
+  }
+  if (preview?.status === 'FAILED' || preview?.status === 'UNSUPPORTED') {
+    return '真实预览不可用';
+  }
+  return '真实预览未就绪';
+}
+
+function renderedPreviewUnavailableMessage(preview?: DocumentRenderPreview | null, previewOutdated = false) {
+  if (preview?.status === 'RENDERING') {
+    return '真实预览正在生成，稍后可刷新查看。';
+  }
+  if (preview?.status === 'FAILED' || preview?.status === 'UNSUPPORTED') {
+    return preview.errorMessage ?? preview.errorCode ?? '真实预览生成失败，请检查 LibreOffice 或重新刷新。';
+  }
+  if (previewOutdated) {
+    return '正文或格式已变化，建议刷新真实预览后再对照。';
+  }
+  return '真实预览还没有可用页面。';
+}
+
+function RenderedPreview({ preview }: { preview: DocumentRenderPreview }) {
+  return (
+    <div aria-label="真实渲染预览" className="document-rendered-preview">
+      {preview.manifest.pages.map((page) => (
+        <img
+          alt={`真实预览第 ${page.pageNumber} 页`}
+          className="document-rendered-page"
+          key={page.pageNumber}
+          src={getRenderPreviewPageUrl(preview.id as number, page.pageNumber)}
+          style={{ aspectRatio: `${page.widthPixels} / ${page.heightPixels}` }}
+        />
+      ))}
+    </div>
   );
 }
 

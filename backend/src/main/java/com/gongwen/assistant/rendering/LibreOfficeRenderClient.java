@@ -1,11 +1,13 @@
 package com.gongwen.assistant.rendering;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -17,9 +19,16 @@ public class LibreOfficeRenderClient {
     private static final int MAX_ERROR_CHARS = 1200;
 
     private final RenderPreviewProperties properties;
+    private final List<Path> knownInstallPaths;
 
+    @Autowired
     public LibreOfficeRenderClient(RenderPreviewProperties properties) {
+        this(properties, defaultKnownInstallPaths());
+    }
+
+    LibreOfficeRenderClient(RenderPreviewProperties properties, List<Path> knownInstallPaths) {
         this.properties = properties;
+        this.knownInstallPaths = knownInstallPaths == null ? List.of() : List.copyOf(knownInstallPaths);
     }
 
     public Path renderToPdf(Path inputDocx, Path outputDir) {
@@ -65,7 +74,7 @@ public class LibreOfficeRenderClient {
 
     public List<String> buildCommand(Path inputDocx, Path outputDir) {
         return List.of(
-                properties.libreOfficePath(),
+                resolvedLibreOfficeCommand(),
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -84,11 +93,12 @@ public class LibreOfficeRenderClient {
                     "当前渲染器不是 LibreOffice，原貌预览不可用。"
             );
         }
-        boolean available = isLibreOfficeAvailable(properties.libreOfficePath());
+        String libreOfficeCommand = resolvedLibreOfficeCommand();
+        boolean available = isLibreOfficeAvailable(libreOfficeCommand);
         return new RenderPreviewEnvironmentStatus(
                 properties.renderer(),
                 available,
-                properties.libreOfficePath(),
+                libreOfficeCommand,
                 available
                         ? "LibreOffice 可用，原貌预览可以生成。"
                         : "未找到 LibreOffice。请安装 LibreOffice，或配置 GONGWEN_LIBREOFFICE_PATH 指向 soffice.exe。"
@@ -124,6 +134,19 @@ public class LibreOfficeRenderClient {
         return value.substring(0, MAX_ERROR_CHARS);
     }
 
+    private String resolvedLibreOfficeCommand() {
+        String configuredCommand = properties.libreOfficePath();
+        if (isLibreOfficeAvailable(configuredCommand) || looksLikePath(configuredCommand)) {
+            return configuredCommand;
+        }
+        for (Path knownInstallPath : knownInstallPaths) {
+            if (Files.isRegularFile(knownInstallPath)) {
+                return knownInstallPath.toString();
+            }
+        }
+        return configuredCommand;
+    }
+
     private boolean isLibreOfficeAvailable(String command) {
         if (command == null || command.isBlank()) {
             return false;
@@ -150,5 +173,21 @@ public class LibreOfficeRenderClient {
 
     private boolean looksLikePath(String command) {
         return command.contains("/") || command.contains("\\") || command.toLowerCase(Locale.ROOT).endsWith(".exe");
+    }
+
+    private static List<Path> defaultKnownInstallPaths() {
+        List<Path> paths = new ArrayList<>();
+        addKnownInstallPath(paths, System.getenv("ProgramFiles"));
+        addKnownInstallPath(paths, System.getenv("ProgramFiles(x86)"));
+        addKnownInstallPath(paths, "C:\\Program Files");
+        addKnownInstallPath(paths, "C:\\Program Files (x86)");
+        return paths;
+    }
+
+    private static void addKnownInstallPath(List<Path> paths, String root) {
+        if (root == null || root.isBlank()) {
+            return;
+        }
+        paths.add(Path.of(root, "LibreOffice", "program", "soffice.exe"));
     }
 }

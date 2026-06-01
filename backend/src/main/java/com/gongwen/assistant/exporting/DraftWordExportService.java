@@ -303,7 +303,7 @@ public class DraftWordExportService {
                 .findLatestByStatus(templateVersionId, "PUBLISHED")
                 .orElseThrow(() -> new WordExportException(
                         "STRUCTURE_MAPPING_REQUIRED",
-                        "发布映射前必须确认模板结构映射。",
+                        "导出前需要当前模板版本已有已发布的结构映射。请在模板解析工作台保存草稿并发布映射后，再回到工作台重建结构并导出。",
                         null
                 ));
         DocumentStructureProfile structureProfile = documentStructureProfileRepository == null

@@ -1768,6 +1768,115 @@ textarea.field {
   line-height: var(--leading-body);
 }
 
+.document-preview-toolbar {
+  display: flex;
+  width: min(100%, 760px);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 auto var(--space-3);
+}
+
+.document-preview-toolbar .document-preview-label {
+  width: auto;
+  margin: 0;
+}
+
+.document-preview-hint {
+  margin-top: var(--space-1);
+  color: var(--color-warning);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.document-preview-mode {
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.document-preview-mode button {
+  min-height: 32px;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0 var(--space-3);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.document-preview-mode button:last-child {
+  border-right: 0;
+}
+
+.document-preview-mode button:hover:not(:disabled) {
+  background: var(--color-bg-muted);
+  color: var(--color-text);
+}
+
+.document-preview-mode button:focus-visible {
+  outline: 2px solid rgba(var(--rgb-accent), 0.45);
+  outline-offset: -2px;
+}
+
+.document-preview-mode button.selected {
+  background: var(--color-accent-muted);
+  color: var(--color-text);
+}
+
+.document-preview-mode button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.document-rendered-preview {
+  display: grid;
+  width: min(100%, 760px);
+  gap: var(--space-4);
+  margin: 0 auto;
+}
+
+.document-rendered-empty {
+  display: grid;
+  width: min(100%, 760px);
+  min-height: 320px;
+  place-items: center;
+  align-content: center;
+  gap: var(--space-3);
+  margin: 0 auto;
+  border: 1px dashed var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.document-rendered-empty-title {
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.document-rendered-empty p {
+  max-width: 420px;
+  margin: 0;
+  line-height: var(--leading-body);
+}
+
+.document-rendered-page {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  object-fit: contain;
+}
+
 .document-paper {
   width: min(100%, 760px);
   min-height: 860px;

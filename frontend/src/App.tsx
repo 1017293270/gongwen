@@ -34,6 +34,7 @@ import {
   createDocumentType,
   createTemplate,
   createUser,
+  ApiRequestError,
   deleteDepartment,
   deleteDraft,
   deleteDocumentType,
@@ -201,6 +202,7 @@ type DraftWorkspaceData = {
   loadedTemplateVersions: TemplateVersionSummary[];
   loadedTemplateProfile: TemplateProfile | null;
   loadedStructureOverrides: TemplateStructureOverrideMap;
+  loadedRenderPreview: DocumentRenderPreview | null;
 };
 
 function pickLatestTemplateVersions(versions: TemplateVersionSummary[]) {
@@ -297,10 +299,10 @@ function AuthenticatedApp() {
     setAuthMessage('');
   }
 
-  function handleLogoutComplete() {
+  function handleLogoutComplete(message = '已退出登录。') {
     setCurrentUser(null);
     setAuthStatus('login');
-    setAuthMessage('已退出登录。');
+    setAuthMessage(message);
   }
 
   if (authStatus === 'loading') {
@@ -314,7 +316,7 @@ function AuthenticatedApp() {
   return <Workbench currentUser={currentUser} onLogout={handleLogoutComplete} />;
 }
 
-function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout: () => void }) {
+function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout: (message?: string) => void }) {
   const { showToast } = useToast();
   const [activeView, setActiveView] = useState<AppView>('overview');
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([]);
@@ -559,12 +561,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     const loadedMaterials = await listDraftMaterials(loadedDraft.id);
     const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode).catch(() => []);
     const loadedDraftNodes = await loadDraftNodesForWorkbench(loadedDraft);
-    const [loadedTemplateProfile, loadedStructureOverrides] = loadedDraft.templateVersionId
+    const [loadedTemplateProfile, loadedStructureOverrides, loadedRenderPreview] = loadedDraft.templateVersionId
       ? await Promise.all([
         getTemplateProfile(loadedDraft.templateVersionId).catch(() => null),
         getTemplateStructureFormatting(loadedDraft.templateVersionId).catch(() => ({})),
+        getRenderPreview(loadedDraft.templateVersionId).catch(() => null),
       ])
-      : [null, {}];
+      : [null, {}, null];
     return {
       loadedDraft,
       loadedDraftNodes,
@@ -572,6 +575,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       loadedTemplateVersions,
       loadedTemplateProfile,
       loadedStructureOverrides,
+      loadedRenderPreview,
     };
   }
 
@@ -595,6 +599,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       loadedTemplateVersions,
       loadedTemplateProfile,
       loadedStructureOverrides,
+      loadedRenderPreview,
     } = workspaceData;
     setDraft(loadedDraft);
     setBlocks(loadedDraft.blocks);
@@ -604,9 +609,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setMaterials(loadedMaterials);
     setTemplateVersions(loadedTemplateVersions);
     setSelectedTemplateProfile(loadedTemplateProfile);
-    setWorkbenchRenderPreview(null);
+    setWorkbenchRenderPreview(loadedRenderPreview);
     setWorkbenchRenderPreviewStatus('idle');
-    setWorkbenchRenderPreviewMessage('');
+    setWorkbenchRenderPreviewMessage(loadedRenderPreview ? renderPreviewResultMessage(loadedRenderPreview) : '');
     setRenderPreviewOutdated(false);
     setSelectedNodeId(null);
     setOutline(null);
@@ -1109,11 +1114,19 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setStatusMessage(preserveUserEditedNodes ? '结构节点已重建并保留编辑，真实预览待刷新' : '结构节点已按原稿重建，真实预览待刷新');
       showToast({ title: preserveUserEditedNodes ? '结构节点已重建，并保留已编辑内容' : '结构节点已按原稿重建', tone: 'success' });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '结构重建失败';
+      const message = reinitializeDraftNodesErrorMessage(error);
       setReinitializeNodeStatus('error');
       setReinitializeNodeMessage(message);
       showToast({ title: message, tone: 'error' });
     }
+  }
+
+  function reinitializeDraftNodesErrorMessage(error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('Published structure mapping is required before nodes can be reinitialized')) {
+      return '需要先在模板解析工作台发布映射，工作台才能按新映射重建结构。仅保存映射草稿不会影响当前工作台。';
+    }
+    return message || '结构重建失败';
   }
 
   function draftBlockPayload(
@@ -1237,6 +1250,24 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     return error instanceof DOMException && error.name === 'AbortError';
   }
 
+  function isAuthenticationRequiredError(error: unknown) {
+    if (error instanceof ApiRequestError) {
+      return error.status === 401
+        || error.errorCode === 'AUTHENTICATION_REQUIRED'
+        || error.errorCode === 'AUTHENTICATION_FAILED';
+    }
+    return error instanceof Error
+      && (error.message.includes('Authentication required') || error.message.includes('Authentication failed'));
+  }
+
+  function handleAuthenticationRequiredError(error: unknown) {
+    if (!isAuthenticationRequiredError(error)) {
+      return false;
+    }
+    onLogout('登录状态已过期，请重新登录后继续使用。');
+    return true;
+  }
+
   function openOutlineDialog() {
     setActiveAiDialog('outline');
     void handleGenerateOutline();
@@ -1338,6 +1369,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         showToast({ title: '提纲生成已取消', tone: 'info' });
         return;
       }
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : '提纲生成失败';
       setOutlineStatus('error');
       setOutlineError(message);
@@ -1371,6 +1405,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setStatusMessage('正文已生成并保存');
       showToast({ title: '正文已生成', description: section.heading, tone: 'success' });
     } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : '正文生成失败';
       setParagraphStatuses((current) => ({ ...current, [key]: 'error' }));
       setParagraphErrors((current) => ({ ...current, [key]: message }));
@@ -1406,6 +1443,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setStatusMessage('全部正文已生成并保存');
       showToast({ title: '全部正文已生成', description: `${outline.sections.length} 个段落已保存`, tone: 'success' });
     } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : '全部正文生成失败';
       setAllParagraphStatus('error');
       setAllParagraphError(activeSectionHeading ? `${activeSectionHeading}：${message}` : message);
@@ -1458,6 +1498,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         showToast({ title: '段落建议生成已取消', tone: 'info' });
         return;
       }
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : '段落建议生成失败';
       setLocalOperationStatus('error');
       setLocalOperationError(message);
@@ -1491,6 +1534,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         showToast({ title: '质检已取消', tone: 'info' });
         return;
       }
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : '质检失败';
       setQualityCheckStatus('error');
       setQualityCheckError(message);
@@ -1514,11 +1560,23 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setExportStatus('success');
       showToast({ title: 'Word 已导出', description: result.fileName, tone: 'success' });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Word 导出失败';
+      const message = exportWordErrorMessage(error);
       setExportStatus('error');
       setExportError(message);
       showToast({ title: message, tone: 'error' });
     }
+  }
+
+  function exportWordErrorMessage(error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+    if (
+      message.includes('发布映射前必须确认模板结构映射')
+      || message.includes('导出前需要当前模板版本已有已发布的结构映射')
+      || message.includes('Structure mapping')
+    ) {
+      return '导出前需要先发布当前模板的结构映射。请到模板解析工作台点击“保存草稿”并“发布映射”，再回工作台重建结构后导出。';
+    }
+    return message || 'Word 导出失败';
   }
 
   async function handleDownloadExportRecord(record: ExportRecordSummary) {
@@ -2036,7 +2094,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               date={date}
               dateNode={dateNode}
               dateStyle={dateNodePreviewStyle}
+              isRefreshingRenderPreview={workbenchRenderPreviewStatus === 'requesting'}
               nodes={workbenchNodes}
+              onRefreshRenderPreview={handleRefreshWorkbenchPreview}
+              renderPreview={workbenchRenderPreview}
+              renderPreviewOutdated={renderPreviewOutdated}
               onRemoveBodyNode={removeBodyNode}
               onSelectNode={(nodeId) => selectNode(nodeId, false)}
               onUpdateAttachment={(content) => updateWorkbenchNodeContent(attachmentNode, content)}
@@ -3896,7 +3958,7 @@ function DepartmentManagementPage({
     [departments, selectedDepartmentId],
   );
   const visibleDepartments = useMemo(
-    () => sortDepartments(selectedDepartment ? selectedDepartment.children ?? [] : departments),
+    () => (selectedDepartment ? flattenDepartmentDescendants(selectedDepartment) : sortDepartments(departments)),
     [departments, selectedDepartment],
   );
   const parentOptions = useMemo(
@@ -4025,10 +4087,10 @@ function DepartmentManagementPage({
       }
       setDepartmentToDelete(null);
       setStatus('idle');
-      setMessage('部门已停用');
-      showToast({ title: '部门已停用', tone: 'success' });
+      setMessage('部门已删除');
+      showToast({ title: '部门已删除', tone: 'success' });
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : '部门停用失败';
+      const nextMessage = error instanceof Error ? error.message : '部门删除失败';
       setStatus('error');
       setMessage(nextMessage);
       showToast({ title: nextMessage, tone: 'error' });
@@ -4078,14 +4140,14 @@ function DepartmentManagementPage({
             编辑
           </Button>
           <Button
-            aria-label={`停用部门：${department.name}`}
+            aria-label={`删除部门：${department.name}`}
             icon={<Trash2 aria-hidden="true" />}
             iconOnly
             onClick={() => setDepartmentToDelete(department)}
-            title="停用部门"
+            title="删除部门"
             variant="danger"
           >
-            停用
+            删除
           </Button>
         </div>
       ),
@@ -4170,13 +4232,13 @@ function DepartmentManagementPage({
       )}
       <ConfirmDialog
         cancelLabel="取消"
-        confirmLabel="停用部门"
-        description={departmentToDelete ? `将停用“${departmentToDelete.name}”。若存在子部门或账号，后端会阻断本次操作。` : undefined}
+        confirmLabel="删除部门"
+        description={departmentToDelete ? `将删除“${departmentToDelete.name}”。仅允许删除没有子部门、账号或业务数据引用的空部门，此操作不可撤销。` : undefined}
         isConfirming={status === 'saving'}
         onCancel={() => setDepartmentToDelete(null)}
         onConfirm={() => void handleDeleteDepartment()}
         open={Boolean(departmentToDelete)}
-        title="停用部门？"
+        title="删除部门？"
       />
       <Dialog
         actions={(
@@ -5544,6 +5606,13 @@ function flattenDepartments(departments: Department[], depth = 0): Array<{ depar
   return sortDepartments(departments).flatMap((department) => [
     { department, depth },
     ...flattenDepartments(department.children ?? [], depth + 1),
+  ]);
+}
+
+function flattenDepartmentDescendants(department: Department): Department[] {
+  return sortDepartments(department.children ?? []).flatMap((child) => [
+    child,
+    ...flattenDepartmentDescendants(child),
   ]);
 }
 

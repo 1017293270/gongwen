@@ -1337,6 +1337,26 @@ describe('App', () => {
     expect(screen.getAllByText('AI 服务暂不可用，请稍后重试').length).toBeGreaterThan(0);
   });
 
+  it('returns to login when AI generation receives an authentication error', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(sampleDraft('AI 登录过期草稿')))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(errorResponse('AUTHENTICATION_REQUIRED', 'Authentication required', 401));
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await screen.findByDisplayValue('AI 登录过期草稿');
+    await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: '生成提纲' }));
+
+    expect(await screen.findByText('登录状态已过期，请重新登录后继续使用。')).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: '登录' })).toBeInTheDocument();
+  });
+
   it('opens on an overview page and navigates through the sidebar', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([
@@ -1615,6 +1635,71 @@ describe('App', () => {
       roles: ['DRAFTER'],
     }]);
     expect(screen.getByText('张三')).toBeInTheDocument();
+  });
+
+  it('shows all descendant departments when selecting a department branch', async () => {
+    const departments: Department[] = [
+      {
+        id: 1,
+        parentId: null,
+        code: 'ROOT',
+        name: '总部',
+        status: 'ACTIVE',
+        sortOrder: 1,
+        children: [
+          {
+            id: 2,
+            parentId: 1,
+            code: 'A01A01',
+            name: '综合管理部',
+            status: 'ACTIVE',
+            sortOrder: 10,
+            children: [
+              {
+                id: 3,
+                parentId: 2,
+                code: 'A01A01A01',
+                name: '档案室',
+                status: 'ACTIVE',
+                sortOrder: 10,
+                children: [],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleDraft('部门列表草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/departments')) {
+        return Promise.resolve(jsonResponse(departments));
+      }
+      if (url.endsWith('/api/users')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole('button', { name: '系统设置' }));
+    await userEvent.click(await screen.findByRole('tab', { name: '部门管理' }));
+    const departmentTree = await screen.findByLabelText('部门树');
+    await userEvent.click(within(departmentTree).getByRole('button', { name: /^总部/ }));
+
+    const branchTable = screen.getByRole('table', { name: '总部下级部门' });
+    expect(within(branchTable).getByText('综合管理部')).toBeInTheDocument();
+    expect(within(branchTable).getByText('档案室')).toBeInTheDocument();
   });
 
   it('enters a focused workbench mode that hides the global sidebar and shows a back-to-directory action', async () => {
@@ -2559,9 +2644,10 @@ function jsonResponse<T>(data: T) {
   } as Response;
 }
 
-function errorResponse(errorCode: string, message: string) {
+function errorResponse(errorCode: string, message: string, status = 400) {
   return {
     ok: false,
+    status,
     json: async () => ({ success: false, data: null, errorCode, message }),
   } as Response;
 }

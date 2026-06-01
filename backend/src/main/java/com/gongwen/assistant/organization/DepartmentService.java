@@ -64,7 +64,10 @@ public class DepartmentService {
         if (departmentRepository.countUsers(id) > 0) {
             throw new DepartmentException("DEPARTMENT_HAS_USERS", "Department has users and cannot be deleted");
         }
-        if (!departmentRepository.disable(id)) {
+        if (departmentRepository.countBusinessReferences(id) > 0) {
+            throw new DepartmentException("DEPARTMENT_HAS_BUSINESS_DATA", "Department has business data and cannot be deleted");
+        }
+        if (!departmentRepository.delete(id)) {
             throw new DepartmentException("DEPARTMENT_NOT_FOUND", "Department not found");
         }
     }

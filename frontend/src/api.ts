@@ -43,6 +43,18 @@ function apiBaseUrl() {
 
 let csrfToken: string | null = null;
 
+export class ApiRequestError extends Error {
+  errorCode: string | null;
+  status: number;
+
+  constructor(message: string, errorCode: string | null, status: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.errorCode = errorCode;
+    this.status = status;
+  }
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const headers = {
@@ -57,7 +69,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const payload = (await response.json()) as ApiResponse<T>;
   if (!response.ok || !payload.success) {
-    throw new Error(payload.message ?? '请求失败');
+    throw new ApiRequestError(payload.message ?? '请求失败', payload.errorCode ?? null, response.status);
   }
   return payload.data;
 }
@@ -72,7 +84,7 @@ async function requestFormData<T>(path: string, formData: FormData): Promise<T> 
   });
   const payload = (await response.json()) as ApiResponse<T>;
   if (!response.ok || !payload.success) {
-    throw new Error(payload.message ?? '请求失败');
+    throw new ApiRequestError(payload.message ?? '请求失败', payload.errorCode ?? null, response.status);
   }
   return payload.data;
 }
@@ -89,7 +101,7 @@ async function requestBlob(path: string, init?: RequestInit): Promise<{ blob: Bl
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as ApiResponse<null> | null;
-    throw new Error(payload?.message ?? '请求失败');
+    throw new ApiRequestError(payload?.message ?? '请求失败', payload?.errorCode ?? null, response.status);
   }
   return {
     blob: await response.blob(),
