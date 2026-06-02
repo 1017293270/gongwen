@@ -373,6 +373,8 @@ B3 lightweight 已完成后端候选正文生成入口：`ModelAdapter.generateP
 
 B4 lightweight 已完成后端候选批处理任务 SSE 包装：`POST /api/drafts/{draftId}/ai/paragraph-candidates/jobs` 基于现有批量创建生成内存 job，`GET /jobs/{jobId}/events` 通过当前 `retry` 流同步发出 `batch_started`、`candidate_started`、`candidate_ready`/`candidate_error`、`batch_done`/`batch_cancelled` 事件，`POST /jobs/{jobId}/cancel` 标记内存取消并尽量把 `PENDING`/`RETRYING` 候选更新为 `CANCELLED`；真实 DeepSeek token 流式输出仍 deferred。
 
+B5/B6 lightweight 已完成右栏正文候选画布与工作台集成：前端新增 `ParagraphCandidateCanvas`，按提纲批量生成正文候选，候选在右栏展示并支持生成中、失败、停止、重试、编辑、丢弃、逐段确认和批量确认；确认前不替换中间 `DraftNode`，确认后写回目标节点和兼容 `DraftBlock`，并标记真实预览待刷新。候选持久化迁移使用 `V20__ai_paragraph_candidate.sql`，候选节点同草稿约束后移到 `V21__paragraph_candidate_node_draft_constraint.sql`，避免修改已应用的 V20 引发 Flyway checksum mismatch。
+
 P10D DOCX 原貌预览与结构化工作台已完成 T0 契约冻结。冻结内容见 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`：下一迁移号从 `V12` 开始，后续 T3/T4/T6/T8/T14 分别预留 `V12`/`V13`/`V14`/`V15`/`V16`；共享枚举、API 边界、Agent 文件边界和进度更新规则已固定；本机 `18081` 只视为手动联调后端，不作为自动测试前置条件。
 
 P10D T1 字体与行距基线已落地：`TemplateStructureFormattingProfile` 继续保留兼容字段 `fontFamily`、`spacingBetween`，同时新增 `eastAsiaFontFamily`、`latinFontFamily` 和结构化 `lineSpacing`；解析时中文字体优先读取 OOXML `w:rFonts/@w:eastAsia`，西文字体读取 `ascii`/`hAnsi`，行距可区分 `AUTO` 倍数和 `EXACT`/`AT_LEAST` 固定值。后续前端、质检和导出应优先使用新字段，旧字段仅作为兼容兜底。

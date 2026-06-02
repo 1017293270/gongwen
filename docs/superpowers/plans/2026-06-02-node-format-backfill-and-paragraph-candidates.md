@@ -21,10 +21,18 @@
 
 - Current branch: `codex/p10d-docx-structure-workbench`
 - Current migration baseline from `AGENTS.md`: Flyway has reached `V19`.
-- Next migration for this plan: `V20__ai_paragraph_candidate.sql`.
+- Migrations for this plan: `V20__ai_paragraph_candidate.sql` creates the candidate table; `V21__paragraph_candidate_node_draft_constraint.sql` adds the target node same-draft constraint without mutating already-applied V20.
 - Existing direct paragraph endpoint: `POST /api/drafts/{draftId}/ai/paragraph`.
 - Existing node format endpoint: `PUT/DELETE /api/drafts/{draftId}/nodes/{nodeId}/format-override`.
 - Existing candidate-free generation writes immediately in `backend/src/main/java/com/gongwen/assistant/ai/AiParagraphService.java`.
+
+## Lightweight Execution Status
+
+- A1/A2 completed: `DraftNode` DTOs now include backend-resolved base/effective formatting, and the workbench format panel backfills the effective style while persisting only overrides.
+- B1/B2 completed: paragraph candidates are draft-scoped, editable, discardable, acceptable singly or in batch, and accept writes the target `DraftNode` plus compatible `DraftBlock`.
+- B3/B4 completed lightweight: generation and batch job events are available, while real provider token-level streaming remains deferred.
+- B5/B6 completed: the right-side candidate canvas is wired into the workbench so batch paragraph generation no longer replaces body text before confirmation.
+- C1 completed lightweight: docs were synchronized and verification stayed focused per user request.
 
 ## File Structure
 
@@ -1753,7 +1761,7 @@ git status --short --branch
 Expected:
 
 - `git diff --check` returns no whitespace errors.
-- Migration list includes `V20__ai_paragraph_candidate.sql` after `V19`.
+- Migration list includes `V20__ai_paragraph_candidate.sql` after `V19` and `V21__paragraph_candidate_node_draft_constraint.sql` after `V20`.
 - Only intended files are modified.
 
 - [ ] **Step 5: Browser verification**
