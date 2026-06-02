@@ -31,7 +31,7 @@ class JdbcAiParagraphCandidateRepositoryTest {
 
     @Test
     void migrationConstrainsTargetNodeToCandidateDraft() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/db/migration/V20__ai_paragraph_candidate.sql"));
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/V21__paragraph_candidate_node_draft_constraint.sql"));
 
         assertThat(migration).contains("idx_draft_node_draft_id_id_unique");
         assertThat(migration).contains("on draft_node(draft_id, id)");
