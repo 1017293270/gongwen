@@ -48,12 +48,12 @@ export function ParagraphCandidateCanvas({
   const hasCandidates = candidates.length > 0;
 
   return (
-    <section className="paragraph-candidate-canvas" aria-label="Paragraph candidate canvas">
+    <section className="paragraph-candidate-canvas" aria-label="正文候选画布">
       <div className="paragraph-candidate-canvas-header">
         <div>
-          <div className="outline-title">Paragraph candidates</div>
+          <div className="outline-title">正文候选</div>
           <div className="panel-kicker">
-            {hasCandidates ? `${candidates.length} candidates - ${acceptableCandidates.length} ready` : 'No candidates yet'}
+            {hasCandidates ? `${candidates.length} 条候选，${acceptableCandidates.length} 条可采纳` : '暂无候选'}
           </div>
         </div>
         <div className="paragraph-candidate-toolbar">
@@ -63,7 +63,7 @@ export function ParagraphCandidateCanvas({
             onClick={onGenerateAll}
             variant="secondary"
           >
-            Generate all
+            生成候选
           </Button>
           <Button
             disabled={disabled || !isGenerating}
@@ -71,7 +71,7 @@ export function ParagraphCandidateCanvas({
             onClick={onStop}
             variant="ghost"
           >
-            Stop
+            停止
           </Button>
           <Button
             disabled={disabled || isGenerating || acceptableCandidates.length === 0}
@@ -79,20 +79,20 @@ export function ParagraphCandidateCanvas({
             onClick={() => onAcceptBatch(acceptableCandidates)}
             variant="secondary"
           >
-            Batch confirm
+            批量确认
           </Button>
         </div>
       </div>
 
       {isGenerating ? (
-        <StatusMessage title="Generating candidates" tone="info">
-          Output is being prepared section by section. You can stop the current job.
+        <StatusMessage title="正在生成正文候选" tone="info">
+          系统正在按提纲逐段生成，确认前不会替换正文。
         </StatusMessage>
       ) : null}
 
       {!hasCandidates ? (
-        <StatusMessage title="No paragraph candidates" tone="info">
-          Generate candidates from the current outline before confirming replacements.
+        <StatusMessage title="暂无正文候选" tone="info">
+          先根据当前提纲生成候选，再逐段或批量采纳。
         </StatusMessage>
       ) : (
         <div className="paragraph-candidate-list">
@@ -131,7 +131,7 @@ function ParagraphCandidateCard({
   onRetry,
 }: ParagraphCandidateCardProps) {
   const status = displayStatus(candidate.status);
-  const title = candidate.heading || candidate.targetNodeTitle || `Candidate ${candidate.sectionIndex + 1}`;
+  const title = candidate.heading || candidate.targetNodeTitle || `候选 ${candidate.sectionIndex + 1}`;
   const isEditable = EDITABLE_STATUSES.has(candidate.status);
   const canAccept = ACCEPTABLE_STATUSES.has(candidate.status);
   const canRetry = RETRYABLE_STATUSES.has(candidate.status);
@@ -139,13 +139,13 @@ function ParagraphCandidateCard({
   const isPending = status.key === 'pending' || status.key === 'streaming';
 
   return (
-    <article className={`paragraph-candidate-card paragraph-candidate-card-${status.key}`} aria-label={`Candidate ${title}`}>
+    <article className={`paragraph-candidate-card paragraph-candidate-card-${status.key}`} aria-label={`候选 ${title}`}>
       <div className="paragraph-candidate-card-header">
         <div className="paragraph-candidate-title-group">
           <div className="paragraph-candidate-heading">{title}</div>
           <div className="paragraph-candidate-meta">
-            Section {candidate.sectionIndex + 1}
-            {candidate.targetNodeRole ? ` - ${candidate.targetNodeRole}` : ''}
+            第 {candidate.sectionIndex + 1} 段
+            {candidate.targetNodeRole ? ` - ${displayRole(candidate.targetNodeRole)}` : ''}
           </div>
         </div>
         <span className={`paragraph-candidate-status paragraph-candidate-status-${status.key}`}>
@@ -175,7 +175,7 @@ function ParagraphCandidateCard({
         <TextareaField
           className="paragraph-candidate-textarea"
           disabled={disabled || !isEditable}
-          label={`Candidate text for ${title}`}
+          label={`${title} 候选正文`}
           onChange={(event) => onEdit(candidate, event.target.value)}
           rows={4}
           value={candidate.candidateText}
@@ -189,7 +189,7 @@ function ParagraphCandidateCard({
           onClick={() => onAccept(candidate)}
           variant="secondary"
         >
-          Confirm replace
+          确认替换
         </Button>
         <Button
           disabled={disabled || !canRetry}
@@ -197,7 +197,7 @@ function ParagraphCandidateCard({
           onClick={() => onRetry(candidate)}
           variant="ghost"
         >
-          Retry
+          重试
         </Button>
         <Button
           disabled={disabled || !canDiscard}
@@ -205,7 +205,7 @@ function ParagraphCandidateCard({
           onClick={() => onDiscard(candidate)}
           variant="ghost"
         >
-          Discard
+          放弃
         </Button>
       </div>
     </article>
@@ -215,22 +215,39 @@ function ParagraphCandidateCard({
 function displayStatus(status: AiParagraphCandidateStatus) {
   switch (status) {
     case 'READY':
-      return { key: 'ready', label: 'Ready' };
+      return { key: 'ready', label: '可采纳' };
     case 'EDITED':
-      return { key: 'edited', label: 'Edited' };
+      return { key: 'edited', label: '已编辑' };
     case 'STREAMING':
     case 'RETRYING':
-      return { key: 'streaming', label: 'Streaming' };
+      return { key: 'streaming', label: '生成中' };
     case 'ERROR':
-      return { key: 'error', label: 'Error' };
+      return { key: 'error', label: '失败' };
     case 'ACCEPTED':
-      return { key: 'accepted', label: 'Accepted' };
+      return { key: 'accepted', label: '已采纳' };
     case 'DISCARDED':
-      return { key: 'discarded', label: 'Discarded' };
+      return { key: 'discarded', label: '已放弃' };
     case 'CANCELLED':
-      return { key: 'cancelled', label: 'Cancelled' };
+      return { key: 'cancelled', label: '已停止' };
     case 'PENDING':
     default:
-      return { key: 'pending', label: 'Pending' };
+      return { key: 'pending', label: '等待中' };
   }
+}
+
+function displayRole(role: string) {
+  const roleLabels: Record<string, string> = {
+    TITLE: '标题',
+    RECIPIENT: '主送',
+    BODY: '正文',
+    BODY_HEADING_LEVEL_1: '一级标题',
+    BODY_HEADING_LEVEL_2: '二级标题',
+    BODY_HEADING_LEVEL_3: '三级标题',
+    ATTACHMENT_NOTE: '附件',
+    SIGNATURE: '落款',
+    DATE: '日期',
+    STATIC_TEXT: '固定文本',
+    IGNORE: '忽略',
+  };
+  return roleLabels[role] ?? role;
 }

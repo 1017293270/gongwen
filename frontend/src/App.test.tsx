@@ -822,7 +822,7 @@ describe('App', () => {
     await screen.findByDisplayValue('候选段落草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
     expect(await screen.findAllByText('AI 提纲标题')).not.toHaveLength(0);
-    await userEvent.click(within(screen.getByLabelText('Paragraph candidate canvas')).getByRole('button', { name: 'Generate all' }));
+    await userEvent.click(within(screen.getByLabelText('正文候选画布')).getByRole('button', { name: '生成候选' }));
 
     expect(eventSources).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'))).toBe(false);
@@ -865,8 +865,8 @@ describe('App', () => {
 
     await openWorkbench();
     await screen.findByDisplayValue('候选采纳草稿');
-    await within(screen.getByLabelText('Paragraph candidate canvas')).findByText('候选段落文本');
-    await userEvent.click(await within(screen.getByLabelText('Paragraph candidate canvas')).findByRole('button', { name: 'Confirm replace' }));
+    await within(screen.getByLabelText('正文候选画布')).findByText('候选段落文本');
+    await userEvent.click(await within(screen.getByLabelText('正文候选画布')).findByRole('button', { name: '确认替换' }));
 
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/paragraph-candidates/11/accept', expect.objectContaining({
       method: 'POST',
@@ -933,8 +933,8 @@ describe('App', () => {
 
     await openWorkbench();
     await screen.findByDisplayValue('批量候选草稿');
-    await within(screen.getByLabelText('Paragraph candidate canvas')).findByText('第一候选段落');
-    await userEvent.click(await within(screen.getByLabelText('Paragraph candidate canvas')).findByRole('button', { name: 'Batch confirm' }));
+    await within(screen.getByLabelText('正文候选画布')).findByText('第一候选段落');
+    await userEvent.click(await within(screen.getByLabelText('正文候选画布')).findByRole('button', { name: '批量确认' }));
 
     expect(window.confirm).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/paragraph-candidates/accept-batch', expect.objectContaining({

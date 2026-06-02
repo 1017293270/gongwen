@@ -58,9 +58,9 @@ describe('ParagraphCandidateCanvas', () => {
       />,
     );
 
-    expect(screen.getByText('Ready')).toBeInTheDocument();
-    expect(screen.getByText('Streaming')).toBeInTheDocument();
-    expect(screen.getByText('Error')).toBeInTheDocument();
+    expect(screen.getByText('可采纳')).toBeInTheDocument();
+    expect(screen.getByText('生成中')).toBeInTheDocument();
+    expect(screen.getByText('失败')).toBeInTheDocument();
     expect(screen.getByText('Ready paragraph')).toBeInTheDocument();
     expect(screen.getByText('Streaming paragraph')).toBeInTheDocument();
     expect(screen.getByText('Model timeout')).toBeInTheDocument();
@@ -93,8 +93,8 @@ describe('ParagraphCandidateCanvas', () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole('button', { name: 'Generate all' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Batch confirm' }));
+    await userEvent.click(screen.getByRole('button', { name: '生成候选' }));
+    await userEvent.click(screen.getByRole('button', { name: '批量确认' }));
 
     rerender(
       <ParagraphCandidateCanvas
@@ -110,17 +110,17 @@ describe('ParagraphCandidateCanvas', () => {
         onStop={onStop}
       />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await userEvent.click(screen.getByRole('button', { name: '停止' }));
 
-    const readyCard = screen.getByLabelText('Candidate Heading 1');
-    await userEvent.click(within(readyCard).getByRole('button', { name: 'Confirm replace' }));
-    fireEvent.change(within(readyCard).getByLabelText('Candidate text for Heading 1'), {
+    const readyCard = screen.getByLabelText('候选 Heading 1');
+    await userEvent.click(within(readyCard).getByRole('button', { name: '确认替换' }));
+    fireEvent.change(within(readyCard).getByLabelText('Heading 1 候选正文'), {
       target: { value: 'Adjusted paragraph' },
     });
 
-    const errorCard = screen.getByLabelText('Candidate Heading 3');
-    await userEvent.click(within(errorCard).getByRole('button', { name: 'Retry' }));
-    await userEvent.click(within(errorCard).getByRole('button', { name: 'Discard' }));
+    const errorCard = screen.getByLabelText('候选 Heading 3');
+    await userEvent.click(within(errorCard).getByRole('button', { name: '重试' }));
+    await userEvent.click(within(errorCard).getByRole('button', { name: '放弃' }));
 
     expect(onGenerateAll).toHaveBeenCalledTimes(1);
     expect(onStop).toHaveBeenCalledTimes(1);
