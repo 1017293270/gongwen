@@ -11,6 +11,10 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftNotFoundException;
 import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.security.CurrentUser;
+import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
+import com.gongwen.assistant.template.profile.TemplateLineSpacingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -59,6 +63,67 @@ class DraftNodeServiceTest {
 
         assertThat(second).hasSize(4);
         assertThat(nodes.replaceCount).isEqualTo(1);
+    }
+
+    @Test
+    void listNodesReturnsBaseAndEffectiveFormattingFromSourceAndTemplateOverride() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        DraftNodeService service = service(
+                draftService,
+                new InMemoryDraftNodeRepository(),
+                publishedMapping(),
+                structureProfile(),
+                Map.of("body-node", templateBodyFormattingOverride())
+        );
+
+        DraftNodeDto initializedBody = bodyNode(service.initializeNodes(5L));
+        DraftNodeDto listedBody = bodyNode(service.listNodes(5L));
+
+        assertThat(initializedBody.baseFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(initializedBody.effectiveFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(listedBody.baseFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(listedBody.effectiveFormatting()).isEqualTo(expectedBaseBodyFormatting());
+    }
+
+    @Test
+    void listNodesMergesDraftFormatOverrideIntoEffectiveFormattingOnly() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        DraftNodeService service = service(
+                draftService,
+                new InMemoryDraftNodeRepository(),
+                publishedMapping(),
+                structureProfile(),
+                Map.of("body-node", templateBodyFormattingOverride())
+        );
+        DraftNodeDto body = bodyNode(service.initializeNodes(5L));
+
+        DraftNodeDto saved = service.saveFormatOverride(5L, body.id(), new DraftNodeFormatOverride(
+                "DraftKai",
+                null,
+                18.0,
+                true,
+                "CENTER",
+                null,
+                null,
+                null,
+                null,
+                null
+        ));
+        DraftNodeDto listed = service.listNodes(5L).stream()
+                .filter(node -> node.id() == body.id())
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(saved.baseFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(saved.effectiveFormatting().eastAsiaFontFamily()).isEqualTo("DraftKai");
+        assertThat(saved.effectiveFormatting().fontFamily()).isEqualTo("DraftKai");
+        assertThat(saved.effectiveFormatting().fontSizeHalfPoints()).isEqualTo(36);
+        assertThat(saved.effectiveFormatting().bold()).isTrue();
+        assertThat(saved.effectiveFormatting().alignment()).isEqualTo("CENTER");
+        assertThat(listed.baseFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(listed.effectiveFormatting()).isEqualTo(saved.effectiveFormatting());
     }
 
     @Test
@@ -395,18 +460,69 @@ class DraftNodeServiceTest {
         assertThat(updated.get(3).templateNodeKey()).startsWith("synthetic-");
     }
 
+    @Test
+    void syntheticBodyNodeUsesStyleSourceNodeKeyForFormatting() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(
+                draftService,
+                repository,
+                publishedMapping(),
+                structureProfile(),
+                Map.of("body-node", templateBodyFormattingOverride())
+        );
+        service.initializeNodes(5L);
+
+        DraftNodeDto syntheticBody = service.insertNode(5L, new InsertDraftNodeRequest(
+                        "BODY",
+                        null,
+                        "END_OF_BODY"
+                )).stream()
+                .filter(node -> node.metadata().synthetic())
+                .filter(node -> "BODY".equals(node.role()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(syntheticBody.metadata().styleSourceNodeKey()).isEqualTo("body-node");
+        assertThat(syntheticBody.baseFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(syntheticBody.effectiveFormatting()).isEqualTo(expectedBaseBodyFormatting());
+    }
+
     private DraftNodeService service(
             DraftService draftService,
             InMemoryDraftNodeRepository nodes,
             StructureMappingProfile mapping,
             DocumentStructureProfile structureProfile
     ) {
+        return service(draftService, nodes, mapping, structureProfile, Map.of());
+    }
+
+    private DraftNodeService service(
+            DraftService draftService,
+            InMemoryDraftNodeRepository nodes,
+            StructureMappingProfile mapping,
+            DocumentStructureProfile structureProfile,
+            Map<String, TemplateStructureFormattingProfile> formattingOverrides
+    ) {
         return new DraftNodeService(
                 draftService,
                 nodes,
                 new FixedMappingRepository(mapping),
-                new FixedStructureProfileRepository(structureProfile)
+                new FixedStructureProfileRepository(structureProfile),
+                new DraftNodeFormattingResolver(
+                        new FixedStructureProfileRepository(structureProfile),
+                        new FixedFormattingRepository(formattingOverrides),
+                        new TemplateEffectiveFormattingService()
+                )
         );
+    }
+
+    private DraftNodeDto bodyNode(List<DraftNodeDto> nodes) {
+        return nodes.stream()
+                .filter(node -> "BODY".equals(node.role()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private DraftDetailDto draftWithTemplate() {
@@ -659,8 +775,62 @@ class DraftNodeServiceTest {
                 text,
                 orderIndex,
                 "PARAGRAPH/" + orderIndex,
-                null,
+                sourceFormattingFor(key),
                 List.of()
+        );
+    }
+
+    private TemplateStructureFormattingProfile sourceFormattingFor(String key) {
+        if ("body-node".equals(key)) {
+            return new TemplateStructureFormattingProfile(
+                    "SourceFangSong",
+                    30,
+                    false,
+                    "LEFT",
+                    560,
+                    150,
+                    20,
+                    40,
+                    null,
+                    "SourceFangSong",
+                    "SourceRoman",
+                    new TemplateLineSpacingProfile("AUTO", null, 150)
+            );
+        }
+        return null;
+    }
+
+    private TemplateStructureFormattingProfile templateBodyFormattingOverride() {
+        return new TemplateStructureFormattingProfile(
+                "TemplateFangSong",
+                32,
+                null,
+                "BOTH",
+                720,
+                180,
+                null,
+                80,
+                null,
+                "TemplateFangSong",
+                null,
+                new TemplateLineSpacingProfile("AUTO", null, 180)
+        );
+    }
+
+    private TemplateStructureFormattingProfile expectedBaseBodyFormatting() {
+        return new TemplateStructureFormattingProfile(
+                "TemplateFangSong",
+                32,
+                false,
+                "BOTH",
+                720,
+                180,
+                20,
+                80,
+                null,
+                "TemplateFangSong",
+                "SourceRoman",
+                new TemplateLineSpacingProfile("AUTO", null, 180)
         );
     }
 
@@ -695,6 +865,19 @@ class DraftNodeServiceTest {
         @Override
         public int nextVersionNo(long templateVersionId) {
             return 1;
+        }
+    }
+
+    private record FixedFormattingRepository(Map<String, TemplateStructureFormattingProfile> overrides)
+            implements TemplateStructureFormattingRepository {
+        @Override
+        public Map<String, TemplateStructureFormattingProfile> findOverrides(long templateVersionId) {
+            return overrides;
+        }
+
+        @Override
+        public void saveOverride(long templateVersionId, String structureKey, TemplateStructureFormattingProfile formatting) {
+            throw new UnsupportedOperationException("saveOverride is not used in this test");
         }
     }
 
@@ -824,6 +1007,38 @@ class DraftNodeServiceTest {
                             node.sortOrder(),
                             status,
                             node.formatOverride(),
+                            node.metadata(),
+                            node.createdAt(),
+                            Instant.now()
+                    );
+                    nodes.set(i, updated);
+                    byDraft.put(draftId, nodes);
+                    return Optional.of(updated);
+                }
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<DraftNode> updateFormatOverride(long draftId, long nodeId, DraftNodeFormatOverride override, String status) {
+            List<DraftNode> nodes = new ArrayList<>(findByDraftId(draftId));
+            for (int i = 0; i < nodes.size(); i++) {
+                DraftNode node = nodes.get(i);
+                if (node.id() == nodeId) {
+                    DraftNode updated = new DraftNode(
+                            node.id(),
+                            node.draftId(),
+                            node.structureMappingProfileId(),
+                            node.templateNodeKey(),
+                            node.parentTemplateNodeKey(),
+                            node.nodeType(),
+                            node.role(),
+                            node.slotKey(),
+                            node.title(),
+                            node.content(),
+                            node.sortOrder(),
+                            status,
+                            override,
                             node.metadata(),
                             node.createdAt(),
                             Instant.now()

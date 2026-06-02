@@ -9,6 +9,7 @@ import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepositor
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -57,6 +58,22 @@ public class DraftNodeService {
     private final DraftNodeRepository draftNodeRepository;
     private final StructureMappingRepository mappingRepository;
     private final DocumentStructureProfileRepository structureProfileRepository;
+    private final DraftNodeFormattingResolver formattingResolver;
+
+    @Autowired
+    public DraftNodeService(
+            DraftService draftService,
+            DraftNodeRepository draftNodeRepository,
+            StructureMappingRepository mappingRepository,
+            DocumentStructureProfileRepository structureProfileRepository,
+            DraftNodeFormattingResolver formattingResolver
+    ) {
+        this.draftService = draftService;
+        this.draftNodeRepository = draftNodeRepository;
+        this.mappingRepository = mappingRepository;
+        this.structureProfileRepository = structureProfileRepository;
+        this.formattingResolver = formattingResolver;
+    }
 
     public DraftNodeService(
             DraftService draftService,
@@ -68,6 +85,7 @@ public class DraftNodeService {
         this.draftNodeRepository = draftNodeRepository;
         this.mappingRepository = mappingRepository;
         this.structureProfileRepository = structureProfileRepository;
+        this.formattingResolver = null;
     }
 
     public List<DraftNodeDto> initializeNodes(long draftId) {
@@ -80,12 +98,12 @@ public class DraftNodeService {
                 .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before nodes can be initialized"));
         List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
         if (!existingNodes.isEmpty()) {
-            return toDtos(existingNodes);
+            return toDtos(draft, existingNodes);
         }
         DocumentStructureProfile structureProfile = structureProfileRepository.findByTemplateVersionId(templateVersionId)
                 .orElseThrow(() -> new DraftNodeException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found"));
         List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, List.of(), false);
-        return toDtos(draftNodeRepository.replaceForDraft(draftId, nodes));
+        return toDtos(draft, draftNodeRepository.replaceForDraft(draftId, nodes));
     }
 
     public List<DraftNodeDto> reinitializeNodes(long draftId, ReinitializeDraftNodesRequest request) {
@@ -101,7 +119,7 @@ public class DraftNodeService {
         List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
         boolean preserveUserEditedNodes = request == null || request.shouldPreserveUserEditedNodes();
         List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, existingNodes, preserveUserEditedNodes);
-        return toDtos(draftNodeRepository.replaceForDraft(draftId, nodes));
+        return toDtos(draft, draftNodeRepository.replaceForDraft(draftId, nodes));
     }
 
     private List<DraftNode> buildDraftNodes(
@@ -143,8 +161,8 @@ public class DraftNodeService {
     }
 
     public List<DraftNodeDto> listNodes(long draftId) {
-        draftService.getDraft(draftId);
-        return toDtos(draftNodeRepository.findByDraftId(draftId));
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        return toDtos(draft, draftNodeRepository.findByDraftId(draftId));
     }
 
     public List<DraftNodeRoleOptionDto> listInsertableRoles(long draftId) {
@@ -209,28 +227,28 @@ public class DraftNodeService {
             ));
         }
         List<DraftNode> savedNodes = draftNodeRepository.insertNodes(draftId, created);
-        return toDtos(reorderAfterInsert(draftId, orderedNodes, savedNodes, groupId, anchor, position));
+        return toDtos(draft, reorderAfterInsert(draftId, orderedNodes, savedNodes, groupId, anchor, position));
     }
 
     public DraftNodeDto updateNode(long draftId, long nodeId, UpdateDraftNodeRequest request) {
-        draftService.getDraft(draftId);
+        DraftDetailDto draft = draftService.getDraft(draftId);
         String status = normalizeStatus(request == null ? null : request.status());
         String content = request == null || request.content() == null ? "" : request.content();
         DraftNode updated = draftNodeRepository.updateContent(draftId, nodeId, content, status)
                 .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
-        return DraftNodeDto.from(updated);
+        return toDto(draft, updated);
     }
 
     public DraftNodeDto saveFormatOverride(long draftId, long nodeId, DraftNodeFormatOverride request) {
-        draftService.getDraft(draftId);
+        DraftDetailDto draft = draftService.getDraft(draftId);
         DraftNodeFormatOverride override = normalizeFormatOverride(request);
         DraftNode updated = draftNodeRepository.updateFormatOverride(draftId, nodeId, override, "FORMAT_OVERRIDDEN")
                 .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
-        return DraftNodeDto.from(updated);
+        return toDto(draft, updated);
     }
 
     public DraftNodeDto restoreTemplateDefaultFormatting(long draftId, long nodeId) {
-        draftService.getDraft(draftId);
+        DraftDetailDto draft = draftService.getDraft(draftId);
         DraftNode existing = draftNodeRepository.findByDraftId(draftId).stream()
                 .filter(node -> node.id() == nodeId)
                 .findFirst()
@@ -241,7 +259,7 @@ public class DraftNodeService {
                         DraftNodeFormatOverride.empty(),
                         statusAfterFormatRestore(existing))
                 .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
-        return DraftNodeDto.from(updated);
+        return toDto(draft, updated);
     }
 
     private DraftNode toDraftNode(
@@ -653,10 +671,25 @@ public class DraftNodeService {
         return (nodeKey == null ? "" : nodeKey) + "::" + (role == null ? "" : role);
     }
 
-    private List<DraftNodeDto> toDtos(List<DraftNode> nodes) {
+    private DraftNodeDto toDto(DraftDetailDto draft, DraftNode node) {
+        return toDtos(draft, List.of(node)).stream()
+                .findFirst()
+                .orElseThrow();
+    }
+
+    private List<DraftNodeDto> toDtos(DraftDetailDto draft, List<DraftNode> nodes) {
+        Map<Long, DraftNodeFormattingResolver.ResolvedDraftNodeFormatting> formattingByNodeId =
+                formattingResolver == null ? Map.of() : formattingResolver.resolve(draft.templateVersionId(), nodes);
         return nodes.stream()
                 .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
-                .map(DraftNodeDto::from)
+                .map(node -> {
+                    DraftNodeFormattingResolver.ResolvedDraftNodeFormatting formatting = formattingByNodeId.get(node.id());
+                    return DraftNodeDto.from(
+                            node,
+                            formatting == null ? null : formatting.baseFormatting(),
+                            formatting == null ? null : formatting.effectiveFormatting()
+                    );
+                })
                 .toList();
     }
 
