@@ -11,6 +11,10 @@ public interface ModelAdapter {
         throw new ModelAdapterException("MODEL_UNSUPPORTED_TASK", "模型暂不支持正文生成");
     }
 
+    default AiParagraphModelResponse generateParagraphCandidate(ParagraphPrompt prompt) {
+        return generateParagraph(prompt);
+    }
+
     default AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
         throw new ModelAdapterException("MODEL_UNSUPPORTED_TASK", "模型暂不支持局部改写");
     }

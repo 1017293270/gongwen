@@ -56,6 +56,14 @@ public class AiParagraphCandidateController {
         return ApiResponse.ok(service.discard(draftId, candidateId));
     }
 
+    @PostMapping("/{candidateId}/retry")
+    public ApiResponse<AiParagraphCandidateDto> retry(
+            @PathVariable long draftId,
+            @PathVariable long candidateId
+    ) {
+        return ApiResponse.ok(service.retry(draftId, candidateId));
+    }
+
     @PostMapping("/{candidateId}/accept")
     public ApiResponse<AiParagraphCandidateAcceptResponse> accept(
             @PathVariable long draftId,

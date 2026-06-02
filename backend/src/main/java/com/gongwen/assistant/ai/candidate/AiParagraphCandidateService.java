@@ -1,5 +1,13 @@
 package com.gongwen.assistant.ai.candidate;
 
+import com.gongwen.assistant.ai.AiNodeContext;
+import com.gongwen.assistant.ai.AiParagraphModelResponse;
+import com.gongwen.assistant.ai.AiParagraphRequest;
+import com.gongwen.assistant.ai.MaterialPromptSummary;
+import com.gongwen.assistant.ai.ModelAdapter;
+import com.gongwen.assistant.ai.ModelAdapterException;
+import com.gongwen.assistant.ai.ParagraphPrompt;
+import com.gongwen.assistant.ai.PromptBuilder;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftBlockUpdateRequest;
 import com.gongwen.assistant.draft.DraftDetailDto;
@@ -9,6 +17,7 @@ import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeDto;
 import com.gongwen.assistant.draft.node.DraftNodeFormattingResolver;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
+import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
 import org.springframework.stereotype.Service;
@@ -38,19 +47,28 @@ public class AiParagraphCandidateService {
     private final DraftNodeRepository draftNodeRepository;
     private final DraftNodeFormattingResolver formattingResolver;
     private final CurrentUserProvider currentUserProvider;
+    private final MaterialRepository materialRepository;
+    private final PromptBuilder promptBuilder;
+    private final ModelAdapter modelAdapter;
 
     public AiParagraphCandidateService(
             DraftService draftService,
             AiParagraphCandidateRepository candidateRepository,
             DraftNodeRepository draftNodeRepository,
             DraftNodeFormattingResolver formattingResolver,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            MaterialRepository materialRepository,
+            PromptBuilder promptBuilder,
+            ModelAdapter modelAdapter
     ) {
         this.draftService = draftService;
         this.candidateRepository = candidateRepository;
         this.draftNodeRepository = draftNodeRepository;
         this.formattingResolver = formattingResolver;
         this.currentUserProvider = currentUserProvider;
+        this.materialRepository = materialRepository;
+        this.promptBuilder = promptBuilder;
+        this.modelAdapter = modelAdapter;
     }
 
     public List<AiParagraphCandidateDto> listCandidates(long draftId) {
@@ -105,6 +123,46 @@ public class AiParagraphCandidateService {
         return candidateRepository.updateStatusAndError(candidate.id(), "DISCARDED", "", "")
                 .map(AiParagraphCandidateDto::from)
                 .orElseThrow(() -> candidateMissing(candidate.id()));
+    }
+
+    @Transactional
+    public AiParagraphCandidateDto retry(long draftId, long candidateId) {
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        AiParagraphCandidate candidate = ownedCandidate(draft.id(), candidateId);
+        candidateRepository.updateStatusAndError(candidate.id(), "RETRYING", "", "")
+                .orElseThrow(() -> candidateMissing(candidate.id()));
+
+        ParagraphPrompt prompt = buildCandidatePrompt(draft, candidate);
+        try {
+            AiParagraphModelResponse modelResponse = modelAdapter.generateParagraphCandidate(prompt);
+            String paragraphContent = normalizeParagraphContent(modelResponse.content(), prompt.heading());
+            return candidateRepository.updateTextAndStatus(
+                            candidate.id(),
+                            paragraphContent,
+                            "READY",
+                            digest(paragraphContent)
+                    )
+                    .map(AiParagraphCandidateDto::from)
+                    .orElseThrow(() -> candidateMissing(candidate.id()));
+        } catch (ModelAdapterException exception) {
+            return candidateRepository.updateStatusAndError(
+                            candidate.id(),
+                            "ERROR",
+                            exception.errorCode(),
+                            exception.getMessage()
+                    )
+                    .map(AiParagraphCandidateDto::from)
+                    .orElseThrow(() -> candidateMissing(candidate.id()));
+        } catch (IllegalArgumentException exception) {
+            return candidateRepository.updateStatusAndError(
+                            candidate.id(),
+                            "ERROR",
+                            "AI_RESPONSE_INVALID",
+                            exception.getMessage()
+                    )
+                    .map(AiParagraphCandidateDto::from)
+                    .orElseThrow(() -> candidateMissing(candidate.id()));
+        }
     }
 
     @Transactional
@@ -245,6 +303,33 @@ public class AiParagraphCandidateService {
         );
     }
 
+    private ParagraphPrompt buildCandidatePrompt(DraftDetailDto draft, AiParagraphCandidate candidate) {
+        DraftNode targetNode = candidate.targetNodeId() == null
+                ? null
+                : draftNodeRepository.findByDraftId(draft.id()).stream()
+                .filter(node -> node.id() == candidate.targetNodeId())
+                .findFirst()
+                .orElseThrow(() -> targetMissing(candidate.targetNodeId()));
+        AiNodeContext nodeContext = new AiNodeContext(
+                candidate.targetNodeId(),
+                firstNonBlank(targetNode == null ? null : targetNode.role(), candidate.targetNodeRole()),
+                firstNonBlank(targetNode == null ? null : targetNode.title(), candidate.targetNodeTitle()),
+                targetNode == null ? "" : targetNode.content()
+        );
+        AiParagraphRequest request = new AiParagraphRequest(
+                candidate.heading(),
+                candidate.points(),
+                candidate.instructionSummary(),
+                targetNode == null ? null : targetNode.sortOrder(),
+                candidate.targetNodeId(),
+                nodeContext.nodeRole(),
+                nodeContext.nodeTitle(),
+                nodeContext.nodeContext()
+        );
+        List<MaterialPromptSummary> materials = materialRepository.findReadyTextSummariesByDraftId(draft.id());
+        return promptBuilder.buildParagraphPrompt(draft, materials, request, nodeContext);
+    }
+
     private AiParagraphCandidate ownedCandidate(long draftId, long candidateId) {
         AiParagraphCandidate candidate = candidateRepository.findById(candidateId)
                 .orElseThrow(() -> candidateMissing(candidateId));
@@ -318,6 +403,37 @@ public class AiParagraphCandidateService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private String normalizeParagraphContent(String content, String heading) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("content is required");
+        }
+        String normalized = content.strip();
+        String normalizedHeading = heading == null ? "" : heading.strip();
+        if (normalizedHeading.isBlank() || normalized.startsWith(normalizedHeading)) {
+            return normalized;
+        }
+        String separator = startsWithPunctuation(normalized) ? "" : ": ";
+        return normalizedHeading + separator + normalized;
+    }
+
+    private boolean startsWithPunctuation(String value) {
+        return value.startsWith(":")
+                || value.startsWith(",")
+                || value.startsWith(";")
+                || value.startsWith("!")
+                || value.startsWith("?")
+                || value.startsWith(".")
+                || value.startsWith(")")
+                || value.startsWith("]");
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first.strip();
+        }
+        return second == null ? "" : second.strip();
     }
 
     private String digest(String text) {

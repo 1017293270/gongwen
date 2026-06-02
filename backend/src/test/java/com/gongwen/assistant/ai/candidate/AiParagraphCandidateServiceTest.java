@@ -15,6 +15,19 @@ import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
 import com.gongwen.assistant.draft.node.DraftNodeFormattingResolver;
 import com.gongwen.assistant.draft.node.DraftNodeMetadata;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
+import com.gongwen.assistant.ai.AiLocalOperationModelResponse;
+import com.gongwen.assistant.ai.AiOutlineResponse;
+import com.gongwen.assistant.ai.AiParagraphModelResponse;
+import com.gongwen.assistant.ai.LocalOperationPrompt;
+import com.gongwen.assistant.ai.MaterialPromptSummary;
+import com.gongwen.assistant.ai.ModelAdapter;
+import com.gongwen.assistant.ai.ModelAdapterException;
+import com.gongwen.assistant.ai.OutlinePrompt;
+import com.gongwen.assistant.ai.ParagraphPrompt;
+import com.gongwen.assistant.ai.PromptBuilder;
+import com.gongwen.assistant.material.MaterialDto;
+import com.gongwen.assistant.material.MaterialRepository;
+import com.gongwen.assistant.material.MaterialSaveCommand;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
 import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
@@ -36,14 +49,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiParagraphCandidateServiceTest {
     private final InMemoryDraftRepository draftRepository = new InMemoryDraftRepository();
+    private final InMemoryMaterialRepository materialRepository = new InMemoryMaterialRepository();
     private final InMemoryDraftNodeRepository draftNodeRepository = new InMemoryDraftNodeRepository();
     private final InMemoryCandidateRepository candidateRepository = new InMemoryCandidateRepository();
+    private final FixedCandidateModelAdapter modelAdapter = new FixedCandidateModelAdapter("generated body");
     private final AiParagraphCandidateService service = new AiParagraphCandidateService(
             new DraftService(draftRepository),
             candidateRepository,
             draftNodeRepository,
             formattingResolver(),
-            new FixedCurrentUserProvider()
+            new FixedCurrentUserProvider(),
+            materialRepository,
+            new PromptBuilder(),
+            modelAdapter
     );
 
     @Test
@@ -70,6 +88,54 @@ class AiParagraphCandidateServiceTest {
         assertThat(candidates).hasSize(1);
         assertThat(candidates.getFirst().status()).isEqualTo("PENDING");
         assertThat(candidates.getFirst().candidateText()).isEqualTo("candidate text");
+        assertThat(draftRepository.draft.blocks()).extracting(DraftBlockDto::content).containsExactly("existing body");
+        assertThat(draftNodeRepository.findByDraftId(draft.id())).extracting(DraftNode::content).containsExactly("existing node");
+        assertThat(draftRepository.replaceCalls).isZero();
+        assertThat(draftNodeRepository.updateCalls).isZero();
+    }
+
+    @Test
+    void retryGeneratesReadyCandidateWithoutChangingDraftNodesOrBlocks() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "Draft", List.of(
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "existing body", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(10L, draft.id(), "BODY", "Body", "existing node", 30, "USER_FILLED"));
+        materialRepository.materials = List.of(new MaterialPromptSummary(1L, "brief.docx", "material text"));
+        AiParagraphCandidate pending = candidateRepository.insert(candidate(draft.id(), 10L, 1, "PENDING", ""));
+
+        AiParagraphCandidateDto generated = service.retry(draft.id(), pending.id());
+
+        assertThat(generated.status()).isEqualTo("READY");
+        assertThat(generated.candidateText()).isEqualTo("Section 1: generated body");
+        assertThat(generated.candidateTextDigest()).isNotBlank();
+        assertThat(generated.errorCode()).isBlank();
+        assertThat(modelAdapter.lastPrompt.heading()).isEqualTo("Section 1");
+        assertThat(modelAdapter.lastPrompt.points()).containsExactly("point");
+        assertThat(modelAdapter.lastPrompt.instruction()).isEqualTo("instruction");
+        assertThat(modelAdapter.lastPrompt.materialSummaries()).contains("brief.docx: material text");
+        assertThat(modelAdapter.lastPrompt.nodeContext().nodeId()).isEqualTo(10L);
+        assertThat(modelAdapter.lastPrompt.nodeContext().nodeContext()).isEqualTo("existing node");
+        assertThat(draftRepository.draft.blocks()).extracting(DraftBlockDto::content).containsExactly("existing body");
+        assertThat(draftNodeRepository.findByDraftId(draft.id())).extracting(DraftNode::content).containsExactly("existing node");
+        assertThat(draftRepository.replaceCalls).isZero();
+        assertThat(draftNodeRepository.updateCalls).isZero();
+    }
+
+    @Test
+    void modelFailureMarksCandidateErrorWithoutChangingDraft() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "Draft", List.of(
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "existing body", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(10L, draft.id(), "BODY", "Body", "existing node", 30, "USER_FILLED"));
+        AiParagraphCandidate pending = candidateRepository.insert(candidate(draft.id(), 10L, 1, "PENDING", ""));
+        modelAdapter.exception = new ModelAdapterException("MODEL_TIMEOUT", "model timeout");
+
+        AiParagraphCandidateDto generated = service.retry(draft.id(), pending.id());
+
+        assertThat(generated.status()).isEqualTo("ERROR");
+        assertThat(generated.errorCode()).isEqualTo("MODEL_TIMEOUT");
+        assertThat(generated.errorMessage()).isEqualTo("model timeout");
+        assertThat(generated.candidateText()).isBlank();
         assertThat(draftRepository.draft.blocks()).extracting(DraftBlockDto::content).containsExactly("existing body");
         assertThat(draftNodeRepository.findByDraftId(draft.id())).extracting(DraftNode::content).containsExactly("existing node");
         assertThat(draftRepository.replaceCalls).isZero();
@@ -312,6 +378,64 @@ class AiParagraphCandidateServiceTest {
         }
     }
 
+    private static final class FixedCandidateModelAdapter implements ModelAdapter {
+        private final String content;
+        private ParagraphPrompt lastPrompt;
+        private ModelAdapterException exception;
+
+        private FixedCandidateModelAdapter(String content) {
+            this.content = content;
+        }
+
+        @Override
+        public String provider() {
+            return "mock";
+        }
+
+        @Override
+        public String modelName() {
+            return "candidate-model";
+        }
+
+        @Override
+        public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AiParagraphModelResponse generateParagraphCandidate(ParagraphPrompt prompt) {
+            lastPrompt = prompt;
+            if (exception != null) {
+                throw exception;
+            }
+            return new AiParagraphModelResponse(content);
+        }
+
+        @Override
+        public AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class InMemoryMaterialRepository implements MaterialRepository {
+        private List<MaterialPromptSummary> materials = List.of();
+
+        @Override
+        public MaterialDto save(MaterialSaveCommand command) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<MaterialDto> findByDraftId(long draftId) {
+            return List.of();
+        }
+
+        @Override
+        public List<MaterialPromptSummary> findReadyTextSummariesByDraftId(long draftId) {
+            return materials;
+        }
+    }
+
     private static final class InMemoryDraftRepository implements DraftRepository {
         private final List<DraftDetailDto> drafts = new ArrayList<>();
         private DraftDetailDto draft;
@@ -456,7 +580,7 @@ class AiParagraphCandidateServiceTest {
 
         @Override
         public Optional<AiParagraphCandidate> updateTextAndStatus(long candidateId, String text, String status, String digest) {
-            return replace(candidateId, candidate -> copy(candidate, candidate.id(), status, text, candidate.acceptedBy()));
+            return replace(candidateId, candidate -> copy(candidate, candidate.id(), status, text, digest, candidate.acceptedBy()));
         }
 
         @Override
@@ -534,6 +658,17 @@ class AiParagraphCandidateServiceTest {
                 String text,
                 Long acceptedBy
         ) {
+            return copy(candidate, id, status, text, candidate.candidateTextDigest(), acceptedBy);
+        }
+
+        private AiParagraphCandidate copy(
+                AiParagraphCandidate candidate,
+                long id,
+                String status,
+                String text,
+                String digest,
+                Long acceptedBy
+        ) {
             return new AiParagraphCandidate(
                     id,
                     candidate.draftId(),
@@ -547,7 +682,7 @@ class AiParagraphCandidateServiceTest {
                     candidate.points(),
                     candidate.instructionSummary(),
                     text,
-                    candidate.candidateTextDigest(),
+                    digest,
                     status,
                     candidate.errorCode(),
                     candidate.errorMessage(),
