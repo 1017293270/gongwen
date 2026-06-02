@@ -2,6 +2,7 @@ package com.gongwen.assistant.ai.candidate;
 
 import com.gongwen.assistant.draft.DraftService;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -29,6 +30,7 @@ public class ParagraphCandidateJobService {
     private final ExecutorService ownedExecutor;
     private final Map<UUID, JobState> jobs = new ConcurrentHashMap<>();
 
+    @Autowired
     public ParagraphCandidateJobService(
             DraftService draftService,
             AiParagraphCandidateService candidateService,
