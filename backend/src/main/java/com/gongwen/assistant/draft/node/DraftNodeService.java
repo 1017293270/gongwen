@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -72,7 +73,7 @@ public class DraftNodeService {
         this.draftNodeRepository = draftNodeRepository;
         this.mappingRepository = mappingRepository;
         this.structureProfileRepository = structureProfileRepository;
-        this.formattingResolver = formattingResolver;
+        this.formattingResolver = Objects.requireNonNull(formattingResolver, "formattingResolver is required");
     }
 
     public List<DraftNodeDto> initializeNodes(long draftId) {
@@ -666,7 +667,7 @@ public class DraftNodeService {
 
     private List<DraftNodeDto> toDtos(DraftDetailDto draft, List<DraftNode> nodes) {
         Map<Long, DraftNodeFormattingResolver.ResolvedDraftNodeFormatting> formattingByNodeId =
-                formattingResolver == null ? Map.of() : formattingResolver.resolve(draft.templateVersionId(), nodes);
+                formattingResolver.resolve(draft.templateVersionId(), nodes);
         return nodes.stream()
                 .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
                 .map(node -> {
