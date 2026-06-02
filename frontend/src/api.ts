@@ -4,12 +4,16 @@ import type {
   AiNodeRequestContext,
   AiOutline,
   AiParagraph,
+  AiParagraphCandidate,
+  AiParagraphCandidateAcceptResponse,
+  AiParagraphCandidateBatchAcceptResponse,
   AiOutlineSection,
   AiProviderSettings,
   AiProviderSettingsUpdate,
   AiProviderStatus,
   ApiResponse,
   AuthUser,
+  CreateParagraphCandidateJobRequest,
   CreateDocumentTypeRequest,
   Department,
   DocumentRenderPreview,
@@ -24,6 +28,7 @@ import type {
   ExportRecordDetail,
   ExportRecordSummary,
   Material,
+  ParagraphCandidateJobResponse,
   QualityCheckResult,
   StructureMappingItem,
   StructureMappingProfile,
@@ -564,6 +569,81 @@ export function generateLocalOperation(
       instruction,
     }),
   });
+}
+
+export function listParagraphCandidates(draftId: number) {
+  return requestJson<AiParagraphCandidate[]>(`/api/drafts/${draftId}/ai/paragraph-candidates`);
+}
+
+export function createParagraphCandidateJob(
+  draftId: number,
+  request: CreateParagraphCandidateJobRequest = { sections: [] },
+) {
+  return requestJson<ParagraphCandidateJobResponse>(`/api/drafts/${draftId}/ai/paragraph-candidates/jobs`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function openParagraphCandidateJobEvents(draftId: number, jobId: string) {
+  return new EventSource(
+    `${apiBaseUrl()}/api/drafts/${draftId}/ai/paragraph-candidates/jobs/${encodeURIComponent(jobId)}/events`,
+    { withCredentials: true },
+  );
+}
+
+export function cancelParagraphCandidateJob(draftId: number, jobId: string) {
+  return requestJson<ParagraphCandidateJobResponse>(
+    `/api/drafts/${draftId}/ai/paragraph-candidates/jobs/${encodeURIComponent(jobId)}/cancel`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function retryParagraphCandidate(draftId: number, candidateId: number) {
+  return requestJson<AiParagraphCandidate>(`/api/drafts/${draftId}/ai/paragraph-candidates/${candidateId}/retry`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function updateParagraphCandidateText(
+  draftId: number,
+  candidateId: number,
+  candidateText: string,
+) {
+  return requestJson<AiParagraphCandidate>(`/api/drafts/${draftId}/ai/paragraph-candidates/${candidateId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ candidateText }),
+  });
+}
+
+export function discardParagraphCandidate(draftId: number, candidateId: number) {
+  return requestJson<AiParagraphCandidate>(`/api/drafts/${draftId}/ai/paragraph-candidates/${candidateId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function acceptParagraphCandidate(draftId: number, candidateId: number) {
+  return requestJson<AiParagraphCandidateAcceptResponse>(
+    `/api/drafts/${draftId}/ai/paragraph-candidates/${candidateId}/accept`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export function acceptParagraphCandidateBatch(draftId: number, candidateIds: number[] = []) {
+  return requestJson<AiParagraphCandidateBatchAcceptResponse>(
+    `/api/drafts/${draftId}/ai/paragraph-candidates/accept-batch`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ candidateIds }),
+    },
+  );
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {

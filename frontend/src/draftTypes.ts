@@ -489,6 +489,93 @@ export type AiLocalOperation = {
   suggestionText: string;
 };
 
+export type AiParagraphCandidateStatus =
+  | 'PENDING'
+  | 'RETRYING'
+  | 'STREAMING'
+  | 'READY'
+  | 'EDITED'
+  | 'ERROR'
+  | 'ACCEPTED'
+  | 'DISCARDED'
+  | 'CANCELLED'
+  | (string & {});
+
+export type AiParagraphCandidate = {
+  id: number;
+  draftId: number;
+  targetNodeId: number | null;
+  targetNodeRole: string;
+  targetNodeTitle: string;
+  outlineTraceId: string | null;
+  paragraphTraceId: string | null;
+  sectionIndex: number;
+  heading: string;
+  points: string[];
+  instructionSummary: string;
+  candidateText: string;
+  candidateTextDigest: string;
+  status: AiParagraphCandidateStatus;
+  errorCode: string;
+  errorMessage: string;
+  acceptedAt: string | null;
+  acceptedBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ParagraphCandidateSectionRequest = {
+  targetNodeId?: number | null;
+  targetNodeRole?: string;
+  targetNodeTitle?: string;
+  sectionIndex?: number;
+  heading: string;
+  points: string[];
+  candidateText?: string;
+};
+
+export type CreateParagraphCandidateJobRequest = {
+  outlineTraceId?: string | null;
+  instructionSummary?: string;
+  sections: ParagraphCandidateSectionRequest[];
+};
+
+export type ParagraphCandidateJobResponse = {
+  jobId: string;
+  candidateIds: number[];
+  cancelled: boolean;
+};
+
+export type ParagraphCandidateJobEventName =
+  | 'batch_started'
+  | 'candidate_started'
+  | 'candidate_ready'
+  | 'candidate_error'
+  | 'batch_done'
+  | 'batch_cancelled'
+  | (string & {});
+
+export type ParagraphCandidateJobEvent = {
+  event: ParagraphCandidateJobEventName;
+  jobId: string;
+  candidateId: number | null;
+  status: AiParagraphCandidateStatus | '';
+  errorCode: string;
+  message: string;
+};
+
+export type AiParagraphCandidateAcceptResponse = {
+  candidate: AiParagraphCandidate;
+  draft: DraftDetail;
+  node: DraftNode | null;
+};
+
+export type AiParagraphCandidateBatchAcceptResponse = {
+  acceptedIds: number[];
+  skippedIds: number[];
+  updatedDraft: DraftDetail;
+};
+
 export type QualityCheckItem = {
   severity: 'ERROR' | 'WARNING' | 'INFO';
   category: string;
