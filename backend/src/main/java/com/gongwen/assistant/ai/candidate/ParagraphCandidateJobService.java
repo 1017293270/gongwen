@@ -3,6 +3,8 @@ package com.gongwen.assistant.ai.candidate;
 import com.gongwen.assistant.draft.DraftService;
 import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -80,12 +82,17 @@ public class ParagraphCandidateJobService {
         }
 
         SseEmitter emitter = new SseEmitter(0L);
+        SecurityContext securityContext = copySecurityContext();
         executor.execute(() -> {
+            SecurityContext previousContext = SecurityContextHolder.getContext();
             try {
+                SecurityContextHolder.setContext(securityContext);
                 streamJobEvents(draftId, jobId, event -> sendEvent(emitter, event));
                 emitter.complete();
             } catch (Exception exception) {
                 emitter.completeWithError(exception);
+            } finally {
+                SecurityContextHolder.setContext(previousContext);
             }
         });
         return emitter;
@@ -201,6 +208,13 @@ public class ParagraphCandidateJobService {
             );
         }
         return job;
+    }
+
+    private SecurityContext copySecurityContext() {
+        SecurityContext source = SecurityContextHolder.getContext();
+        SecurityContext copy = SecurityContextHolder.createEmptyContext();
+        copy.setAuthentication(source.getAuthentication());
+        return copy;
     }
 
     private void markCancellableCandidates(JobState job) {
