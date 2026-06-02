@@ -59,4 +59,27 @@ class DocxNodeReplacementRendererTest {
             assertThat(paragraphs.get(headingIndex).getRuns().getFirst().isBold()).isEqualTo(paragraphs.get(3).getRuns().getFirst().isBold());
         }
     }
+
+    @Test
+    void clearsIgnoredBodyParagraphsButRemovesDeletedBodyParagraphs() throws Exception {
+        byte[] template = DocxTestFactory.speechReferenceDocument();
+
+        byte[] rendered = renderer.render(
+                template,
+                Map.of(),
+                Set.of("paragraph-16"),
+                Set.of("paragraph-17"),
+                List.of()
+        );
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(rendered));
+             XWPFDocument source = new XWPFDocument(new ByteArrayInputStream(template))) {
+            List<String> texts = document.getParagraphs().stream()
+                    .map(paragraph -> paragraph.getText())
+                    .toList();
+            assertThat(document.getParagraphs()).hasSize(source.getParagraphs().size() - 1);
+            assertThat(texts).doesNotContain("缁撴潫璇?");
+            assertThat(texts).contains("");
+        }
+    }
 }

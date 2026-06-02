@@ -254,6 +254,7 @@ public class DraftWordExportService {
                     templateBytes,
                     originalNodeReplacements(draftNodes),
                     ignoredNodeKeys(mapping, draftNodes),
+                    deletedNodeKeys(draftNodes),
                     originalNodeInsertions(draftNodes)
             );
             return wordExportService.exportRendered(request, rendered);
@@ -277,6 +278,7 @@ public class DraftWordExportService {
                     templateBytes,
                     originalNodeReplacements(draftNodes),
                     ignoredNodeKeys(mapping, draftNodes),
+                    deletedNodeKeys(draftNodes),
                     originalNodeInsertions(draftNodes)
             );
             return wordExportService.renderRendered(request, rendered);
@@ -574,30 +576,25 @@ public class DraftWordExportService {
     }
 
     private Set<String> ignoredNodeKeys(StructureMappingProfile mapping, List<DraftNode> draftNodes) {
-        Set<String> mappedIgnoredKeys = mapping == null
+        return mapping == null
                 ? Set.of()
                 : mapping.items().stream()
                         .filter(item -> "IGNORE".equals(normalizeRole(item.role())))
                         .map(item -> item.nodeKey())
                         .filter(nodeKey -> !isBlank(nodeKey))
                         .collect(Collectors.toSet());
-        Set<String> draftDeletedKeys = draftNodes == null
-                ? Set.of()
-                : draftNodes.stream()
-                        .filter(this::isDeletedDraftNode)
-                        .filter(node -> !isSyntheticDraftNode(node))
-                        .map(DraftNode::templateNodeKey)
-                        .filter(nodeKey -> !isBlank(nodeKey))
-                        .collect(Collectors.toSet());
-        if (mappedIgnoredKeys.isEmpty()) {
-            return draftDeletedKeys;
+    }
+
+    private Set<String> deletedNodeKeys(List<DraftNode> draftNodes) {
+        if (draftNodes == null) {
+            return Set.of();
         }
-        if (draftDeletedKeys.isEmpty()) {
-            return mappedIgnoredKeys;
-        }
-        Set<String> ignoredKeys = new java.util.HashSet<>(mappedIgnoredKeys);
-        ignoredKeys.addAll(draftDeletedKeys);
-        return ignoredKeys;
+        return draftNodes.stream()
+                .filter(this::isDeletedDraftNode)
+                .filter(node -> !isSyntheticDraftNode(node))
+                .map(DraftNode::templateNodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .collect(Collectors.toSet());
     }
 
     private boolean isDeletedDraftNode(DraftNode node) {

@@ -29,7 +29,7 @@ public class DocxNodeReplacementRenderer {
     }
 
     public byte[] render(byte[] templateBytes, Map<String, String> replacementsByNodeKey, Set<String> ignoredNodeKeys) {
-        return render(templateBytes, replacementsByNodeKey, ignoredNodeKeys, List.of());
+        return render(templateBytes, replacementsByNodeKey, Set.of(), ignoredNodeKeys, List.of());
     }
 
     public byte[] render(
@@ -38,17 +38,30 @@ public class DocxNodeReplacementRenderer {
             Set<String> ignoredNodeKeys,
             List<NodeInsertion> insertions
     ) {
+        return render(templateBytes, replacementsByNodeKey, Set.of(), ignoredNodeKeys, insertions);
+    }
+
+    public byte[] render(
+            byte[] templateBytes,
+            Map<String, String> replacementsByNodeKey,
+            Set<String> clearNodeKeys,
+            Set<String> removeNodeKeys,
+            List<NodeInsertion> insertions
+    ) {
         Map<String, String> replacements = replacementsByNodeKey == null ? Map.of() : replacementsByNodeKey;
-        Set<String> ignored = ignoredNodeKeys == null ? Set.of() : ignoredNodeKeys;
+        Set<String> clearKeys = clearNodeKeys == null ? Set.of() : clearNodeKeys;
+        Set<String> removeKeys = removeNodeKeys == null ? Set.of() : removeNodeKeys;
         List<NodeInsertion> requestedInsertions = insertions == null ? List.of() : insertions;
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(templateBytes));
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             replacements.entrySet().stream()
-                    .filter(entry -> !ignored.contains(entry.getKey()))
+                    .filter(entry -> !clearKeys.contains(entry.getKey()))
+                    .filter(entry -> !removeKeys.contains(entry.getKey()))
                     .sorted(Comparator.comparing(Map.Entry::getKey))
                     .forEach(entry -> replaceNode(document, entry.getKey(), entry.getValue()));
-            insertNodes(document, requestedInsertions, ignored);
-            removeIgnoredNodes(document, ignored);
+            insertNodes(document, requestedInsertions, removeKeys);
+            clearNodes(document, clearKeys);
+            removeNodes(document, removeKeys);
             document.write(output);
             return output.toByteArray();
         } catch (IOException exception) {
@@ -147,8 +160,17 @@ public class DocxNodeReplacementRenderer {
         }
     }
 
-    private void removeIgnoredNodes(XWPFDocument document, Set<String> ignoredNodeKeys) {
-        List<XWPFParagraph> ignoredParagraphs = ignoredNodeKeys.stream()
+    private void clearNodes(XWPFDocument document, Set<String> clearNodeKeys) {
+        clearNodeKeys.stream()
+                .sorted()
+                .map(nodeKey -> locator.findParagraph(document, nodeKey)
+                        .orElseThrow(() -> new MissingNodeLocatorException(nodeKey)))
+                .distinct()
+                .forEach(paragraph -> replaceParagraphText(paragraph, ""));
+    }
+
+    private void removeNodes(XWPFDocument document, Set<String> removeNodeKeys) {
+        List<XWPFParagraph> ignoredParagraphs = removeNodeKeys.stream()
                 .sorted()
                 .map(nodeKey -> locator.findParagraph(document, nodeKey)
                         .orElseThrow(() -> new MissingNodeLocatorException(nodeKey)))
