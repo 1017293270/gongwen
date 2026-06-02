@@ -428,6 +428,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const qualityRequestRef = useRef<AbortController | null>(null);
   const localOperationRequestRef = useRef<AbortController | null>(null);
   const candidateEventSourceRef = useRef<EventSource | null>(null);
+  const candidateJobIdsRef = useRef<number[]>([]);
+  const candidateRecoveryTimerRef = useRef<number | null>(null);
   const [aiSettings, setAiSettings] = useState<AiProviderSettings>(DEFAULT_AI_SETTINGS);
   const [aiSettingsApiKey, setAiSettingsApiKey] = useState('');
   const [aiSettingsStatus, setAiSettingsStatus] = useState<AiSettingsStatus>('loading');
@@ -1431,9 +1433,22 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     candidateEventSourceRef.current = null;
   }
 
+  function clearCandidateRecoveryTimer() {
+    if (candidateRecoveryTimerRef.current !== null) {
+      window.clearTimeout(candidateRecoveryTimerRef.current);
+      candidateRecoveryTimerRef.current = null;
+    }
+  }
+
   function openCandidateEventSource(draftId: number, jobId: string) {
     const source = openParagraphCandidateJobEvents(draftId, jobId);
     candidateEventSourceRef.current = source;
+    clearCandidateRecoveryTimer();
+    candidateRecoveryTimerRef.current = window.setTimeout(() => {
+      if (candidateEventSourceRef.current === source) {
+        void recoverPendingParagraphCandidates(draftId);
+      }
+    }, 8000);
     const handleMessage = (event: MessageEvent) => {
       handleParagraphCandidateJobEvent(draftId, event);
     };
@@ -1442,10 +1457,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       if (candidateEventSourceRef.current !== source) {
         return;
       }
-      setCandidateStatus('error');
-      setCandidateJobId(null);
       closeCandidateEventSource();
-      showToast({ title: '段落候选生成连接已中断', tone: 'error' });
+      void recoverPendingParagraphCandidates(draftId);
     };
     [
       'batch_started',
@@ -1479,6 +1492,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
     if (payload.event === 'batch_done' || payload.event === 'batch_cancelled') {
       closeCandidateEventSource();
+      clearCandidateRecoveryTimer();
       setCandidateJobId(null);
       setCandidateStatus('idle');
       void refreshParagraphCandidates(draftId);
@@ -1546,6 +1560,64 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     if (candidates) {
       setParagraphCandidates(candidates);
     }
+  }
+
+  async function recoverPendingParagraphCandidates(draftId: number) {
+    const candidateIds = candidateJobIdsRef.current;
+    clearCandidateRecoveryTimer();
+    closeCandidateEventSource();
+    if (candidateIds.length === 0) {
+      setCandidateStatus('idle');
+      setCandidateJobId(null);
+      candidateJobIdsRef.current = [];
+      return;
+    }
+
+    const latestCandidates = await listParagraphCandidates(draftId).catch(() => null);
+    if (!latestCandidates) {
+      setCandidateStatus('error');
+      setCandidateJobId(null);
+      candidateJobIdsRef.current = [];
+      showToast({ title: '正文候选生成连接中断，请重试', tone: 'error' });
+      return;
+    }
+    setParagraphCandidates(latestCandidates);
+
+    const pendingCandidates = latestCandidates.filter((candidate) => (
+      candidateIds.includes(candidate.id) && candidate.status === 'PENDING'
+    ));
+    if (pendingCandidates.length === 0) {
+      setCandidateStatus('idle');
+      setCandidateJobId(null);
+      candidateJobIdsRef.current = [];
+      return;
+    }
+
+    showToast({
+      title: '正文候选连接不稳定，已切换为普通生成',
+      description: `${pendingCandidates.length} 个段落继续生成`,
+      tone: 'info',
+    });
+    setCandidateStatus('generating');
+    for (const candidate of pendingCandidates) {
+      setParagraphCandidates((current) => current.map((item) => (
+        item.id === candidate.id ? { ...item, status: 'RETRYING', errorCode: '', errorMessage: '' } : item
+      )));
+      try {
+        const updatedCandidate = await retryParagraphCandidate(draftId, candidate.id);
+        upsertParagraphCandidate(updatedCandidate);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '正文候选生成失败';
+        setParagraphCandidates((current) => current.map((item) => (
+          item.id === candidate.id
+            ? { ...item, status: 'ERROR', errorCode: 'AI_CANDIDATE_RECOVERY_FAILED', errorMessage: message }
+            : item
+        )));
+      }
+    }
+    setCandidateStatus('idle');
+    setCandidateJobId(null);
+    candidateJobIdsRef.current = [];
   }
 
   function applyAcceptedCandidateDraft(updatedDraft: DraftDetail, updatedNode: DraftNode | null) {
@@ -1727,6 +1799,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
     try {
       closeCandidateEventSource();
+      clearCandidateRecoveryTimer();
+      candidateJobIdsRef.current = [];
       setCandidateStatus('generating');
       setAllParagraphStatus('idle');
       setAllParagraphError('');
@@ -1737,6 +1811,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         sections,
       });
       setCandidateJobId(job.jobId);
+      candidateJobIdsRef.current = job.candidateIds;
       setParagraphCandidates(sections.map((section, index) => candidatePlaceholderFromSection(
         draft.id,
         job.candidateIds[index] ?? -(index + 1),
@@ -1751,6 +1826,8 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       const message = error instanceof Error ? error.message : '段落候选生成失败';
       setCandidateStatus('error');
       setCandidateJobId(null);
+      candidateJobIdsRef.current = [];
+      clearCandidateRecoveryTimer();
       showToast({ title: message, tone: 'error' });
     }
   }
@@ -1764,11 +1841,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
     const stoppingJobId = candidateJobId;
     closeCandidateEventSource();
+    clearCandidateRecoveryTimer();
     setCandidateJobId(null);
     try {
       await cancelParagraphCandidateJob(draft.id, stoppingJobId);
       await refreshParagraphCandidates(draft.id);
       setCandidateStatus('idle');
+      candidateJobIdsRef.current = [];
       showToast({ title: '段落候选生成已停止', tone: 'info' });
     } catch (error) {
       if (handleAuthenticationRequiredError(error)) {
