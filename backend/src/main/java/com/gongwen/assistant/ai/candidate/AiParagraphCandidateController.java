@@ -16,14 +16,20 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/drafts/{draftId}/ai/paragraph-candidates")
 public class AiParagraphCandidateController {
     private final AiParagraphCandidateService service;
+    private final ParagraphCandidateJobService jobService;
 
-    public AiParagraphCandidateController(AiParagraphCandidateService service) {
+    public AiParagraphCandidateController(
+            AiParagraphCandidateService service,
+            ParagraphCandidateJobService jobService
+    ) {
         this.service = service;
+        this.jobService = jobService;
     }
 
     @GetMapping
@@ -37,6 +43,30 @@ public class AiParagraphCandidateController {
             @RequestBody(required = false) CreateParagraphCandidateBatchRequest request
     ) {
         return ApiResponse.ok(service.createBatch(draftId, request));
+    }
+
+    @PostMapping("/jobs")
+    public ApiResponse<ParagraphCandidateJobResponse> createJob(
+            @PathVariable long draftId,
+            @RequestBody(required = false) CreateParagraphCandidateBatchRequest request
+    ) {
+        return ApiResponse.ok(jobService.createJob(draftId, request));
+    }
+
+    @GetMapping(value = "/jobs/{jobId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter streamJob(
+            @PathVariable long draftId,
+            @PathVariable UUID jobId
+    ) {
+        return jobService.streamJob(draftId, jobId);
+    }
+
+    @PostMapping("/jobs/{jobId}/cancel")
+    public ApiResponse<ParagraphCandidateJobResponse> cancelJob(
+            @PathVariable long draftId,
+            @PathVariable UUID jobId
+    ) {
+        return ApiResponse.ok(jobService.cancel(draftId, jobId));
     }
 
     @PutMapping("/{candidateId}")
@@ -85,7 +115,9 @@ public class AiParagraphCandidateController {
         HttpStatus status = switch (exception.errorCode()) {
             case "AI_CANDIDATE_NOT_FOUND",
                  "AI_CANDIDATE_DRAFT_MISMATCH",
-                 "AI_CANDIDATE_TARGET_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+                 "AI_CANDIDATE_TARGET_NOT_FOUND",
+                 "AI_CANDIDATE_JOB_NOT_FOUND",
+                 "AI_CANDIDATE_JOB_DRAFT_MISMATCH" -> HttpStatus.NOT_FOUND;
             case "AI_CANDIDATE_TARGET_BLOCKED",
                  "AI_CANDIDATE_STATUS_PROTECTED" -> HttpStatus.CONFLICT;
             default -> HttpStatus.BAD_REQUEST;

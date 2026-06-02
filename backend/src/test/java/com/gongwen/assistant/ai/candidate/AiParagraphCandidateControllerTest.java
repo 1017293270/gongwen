@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -32,6 +33,9 @@ class AiParagraphCandidateControllerTest {
 
     @MockBean
     private AiParagraphCandidateService service;
+
+    @MockBean
+    private ParagraphCandidateJobService jobService;
 
     @Test
     void listsDraftParagraphCandidates() throws Exception {
@@ -80,6 +84,48 @@ class AiParagraphCandidateControllerTest {
                 .andExpect(jsonPath("$.data.status").value("READY"));
 
         verify(service).retry(7L, 42L);
+    }
+
+    @Test
+    void createsCandidateJobThroughJobService() throws Exception {
+        UUID jobId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(jobService.createJob(eq(7L), any(CreateParagraphCandidateBatchRequest.class)))
+                .thenReturn(new ParagraphCandidateJobResponse(jobId, List.of(42L), false));
+
+        mockMvc.perform(post("/api/drafts/7/ai/paragraph-candidates/jobs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CreateParagraphCandidateBatchRequest(
+                                null,
+                                "outline",
+                                List.of(new ParagraphCandidateSectionRequest(
+                                        10L,
+                                        "BODY",
+                                        "Body",
+                                        1,
+                                        "Section one",
+                                        List.of("point"),
+                                        ""
+                                ))
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.jobId").value(jobId.toString()))
+                .andExpect(jsonPath("$.data.candidateIds[0]").value(42))
+                .andExpect(jsonPath("$.data.cancelled").value(false));
+    }
+
+    @Test
+    void cancelsCandidateJobThroughJobService() throws Exception {
+        UUID jobId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        when(jobService.cancel(7L, jobId))
+                .thenReturn(new ParagraphCandidateJobResponse(jobId, List.of(42L), true));
+
+        mockMvc.perform(post("/api/drafts/7/ai/paragraph-candidates/jobs/{jobId}/cancel", jobId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.cancelled").value(true));
+
+        verify(jobService).cancel(7L, jobId);
     }
 
     @Test
