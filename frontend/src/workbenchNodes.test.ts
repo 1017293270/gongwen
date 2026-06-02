@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bodyNodeLabel, composeBodySectionContent, deriveWorkbenchNodes } from './workbenchNodes';
-import type { DraftDetail, TemplateProfile } from './draftTypes';
+import type { DraftDetail, DraftNode, TemplateProfile } from './draftTypes';
 
 function draft(blocks: DraftDetail['blocks']): DraftDetail {
   return {
@@ -125,6 +125,61 @@ describe('deriveWorkbenchNodes', () => {
     });
   });
 
+  it('keeps an inserted empty heading editable and selects the paired body node identity', () => {
+    const nodes = deriveWorkbenchNodes({
+      ...draft([]),
+      nodes: [
+        draftNode(301, 'BODY_HEADING_LEVEL_1', '', 40, { status: 'EMPTY', title: '一级标题' }),
+        draftNode(302, 'BODY', '', 50, { status: 'EMPTY', title: '正文' }),
+      ],
+    }, profile(), {});
+
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({
+      nodeId: 'draft-node:302',
+      draftNodeId: 302,
+      headingDraftNodeId: 301,
+      nodeType: 'BODY_SECTION',
+      heading: '',
+      content: '',
+      label: '正文',
+    });
+  });
+
+  it('pairs synthetic heading and body by group id instead of consuming following body text', () => {
+    const nodes = deriveWorkbenchNodes({
+      ...draft([]),
+      nodes: [
+        draftNode(401, 'BODY_HEADING_LEVEL_1', '', 20, {
+          status: 'EMPTY',
+          title: '一级标题',
+          metadata: syntheticMetadata('group-a'),
+        }),
+        draftNode(402, 'BODY', '已有正文不应被新标题吃掉', 21, {
+          title: '正文',
+        }),
+        draftNode(403, 'BODY', '', 22, {
+          status: 'EMPTY',
+          title: '正文',
+          metadata: syntheticMetadata('group-a'),
+        }),
+      ],
+    }, profile(), {});
+
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]).toMatchObject({
+      nodeId: 'draft-node:403',
+      headingDraftNodeId: 401,
+      heading: '',
+      content: '',
+    });
+    expect(nodes[1]).toMatchObject({
+      nodeId: 'draft-node:402',
+      headingDraftNodeId: undefined,
+      content: '已有正文不应被新标题吃掉',
+    });
+  });
+
   it('derives persisted source nodes without injecting template or legacy title text', () => {
     const nodes = deriveWorkbenchNodes({
       ...draft([
@@ -225,7 +280,7 @@ function draftNode(
   role: string,
   content: string,
   sortOrder: number,
-  options: { nodeType?: string } = {},
+  options: { nodeType?: string; status?: string; title?: string; metadata?: DraftNode['metadata'] } = {},
 ) {
   return {
     id,
@@ -236,10 +291,11 @@ function draftNode(
     nodeType: options.nodeType ?? 'PARAGRAPH',
     role,
     slotKey: role === 'TITLE' ? 'title' : 'body',
-    title: role,
+    title: options.title ?? role,
     content,
     sortOrder,
-    status: 'USER_FILLED',
+    status: options.status ?? 'USER_FILLED',
+    metadata: options.metadata,
     formatOverride: {
       eastAsiaFont: null,
       latinFont: null,
@@ -254,5 +310,16 @@ function draftNode(
     },
     createdAt: '2026-05-30T00:00:00Z',
     updatedAt: '2026-05-30T00:00:00Z',
+  };
+}
+
+function syntheticMetadata(groupId: string) {
+  return {
+    synthetic: true,
+    anchorNodeId: 1,
+    anchorTemplateNodeKey: 'node-1',
+    insertPosition: 'AFTER',
+    groupId,
+    styleSourceNodeKey: 'node-1',
   };
 }

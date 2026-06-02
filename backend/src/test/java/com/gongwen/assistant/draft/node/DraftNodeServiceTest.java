@@ -301,6 +301,100 @@ class DraftNodeServiceTest {
                         assertThat(((DraftNodeException) exception).errorCode()).isEqualTo("STRUCTURE_MAPPING_REQUIRED"));
     }
 
+    @Test
+    void listsInsertableBodyRolesFromPublishedMappingOnly() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        DraftNodeService service = service(draftService, new InMemoryDraftNodeRepository(), publishedMapping(), structureProfile());
+
+        List<DraftNodeRoleOptionDto> roles = service.listInsertableRoles(5L);
+
+        assertThat(roles).extracting(DraftNodeRoleOptionDto::role)
+                .containsExactly("BODY_HEADING_LEVEL_1", "BODY");
+        assertThat(roles).extracting(DraftNodeRoleOptionDto::createsBodyPair)
+                .containsExactly(true, false);
+    }
+
+    @Test
+    void insertsHeadingWithEmptyBodyAfterAnchorAndKeepsSyntheticKeysUnique() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(draftService, repository, publishedMapping(), structureProfile());
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+        long anchorNodeId = initialized.stream()
+                .filter(node -> "BODY".equals(node.role()))
+                .findFirst()
+                .orElseThrow()
+                .id();
+
+        List<DraftNodeDto> updated = service.insertNode(5L, new InsertDraftNodeRequest(
+                "BODY_HEADING_LEVEL_1",
+                anchorNodeId,
+                "AFTER"
+        ));
+
+        assertThat(updated).extracting(DraftNodeDto::role)
+                .containsExactly("TITLE", "BODY_HEADING_LEVEL_1", "BODY", "BODY_HEADING_LEVEL_1", "BODY", "DATE");
+        List<DraftNodeDto> synthetic = updated.stream()
+                .filter(node -> node.templateNodeKey().startsWith("synthetic-"))
+                .toList();
+        assertThat(synthetic).hasSize(2);
+        assertThat(synthetic).extracting(DraftNodeDto::role)
+                .containsExactly("BODY_HEADING_LEVEL_1", "BODY");
+        assertThat(synthetic).extracting(DraftNodeDto::content)
+                .containsExactly("", "");
+        assertThat(synthetic).extracting(DraftNodeDto::status)
+                .containsExactly("EMPTY", "EMPTY");
+        assertThat(synthetic).extracting(node -> node.metadata().styleSourceNodeKey())
+                .containsExactly("heading-node", "body-node");
+        assertThat(synthetic).extracting(node -> node.metadata().groupId())
+                .doesNotContain("");
+        assertThat(synthetic).extracting(node -> node.metadata().groupId())
+                .containsOnly(synthetic.get(0).metadata().groupId());
+    }
+
+    @Test
+    void renumbersBodyNodesWhenInsertingRepeatedlyAfterSameAnchor() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(draftService, repository, publishedMapping(), structureProfile());
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+        long anchorNodeId = initialized.stream()
+                .filter(node -> "BODY".equals(node.role()))
+                .findFirst()
+                .orElseThrow()
+                .id();
+
+        service.insertNode(5L, new InsertDraftNodeRequest("BODY_HEADING_LEVEL_1", anchorNodeId, "AFTER"));
+        List<DraftNodeDto> updated = service.insertNode(5L, new InsertDraftNodeRequest("BODY_HEADING_LEVEL_1", anchorNodeId, "AFTER"));
+
+        assertThat(updated).extracting(DraftNodeDto::role)
+                .containsExactly("TITLE", "BODY_HEADING_LEVEL_1", "BODY", "BODY_HEADING_LEVEL_1", "BODY", "BODY_HEADING_LEVEL_1", "BODY", "DATE");
+        assertThat(updated).extracting(DraftNodeDto::sortOrder)
+                .containsExactly(10, 20, 30, 40, 50, 60, 70, 80);
+    }
+
+    @Test
+    void insertsSingleBodyAtEndOfBody() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(draftService, repository, publishedMapping(), structureProfile());
+        service.initializeNodes(5L);
+
+        List<DraftNodeDto> updated = service.insertNode(5L, new InsertDraftNodeRequest(
+                "BODY",
+                null,
+                "END_OF_BODY"
+        ));
+
+        assertThat(updated).extracting(DraftNodeDto::role)
+                .containsExactly("TITLE", "BODY_HEADING_LEVEL_1", "BODY", "BODY", "DATE");
+        assertThat(updated.get(3).templateNodeKey()).startsWith("synthetic-");
+    }
+
     private DraftNodeService service(
             DraftService draftService,
             InMemoryDraftNodeRepository nodes,
@@ -642,11 +736,71 @@ class DraftNodeServiceTest {
                         node.sortOrder(),
                         node.status(),
                         node.formatOverride(),
+                        node.metadata(),
                         Instant.now(),
                         Instant.now()
                 ));
             }
             byDraft.put(draftId, saved);
+            return findByDraftId(draftId);
+        }
+
+        @Override
+        public List<DraftNode> insertNodes(long draftId, List<DraftNode> nodes) {
+            List<DraftNode> saved = new ArrayList<>(findByDraftId(draftId));
+            for (DraftNode node : nodes) {
+                saved.add(new DraftNode(
+                        nextId++,
+                        draftId,
+                        node.structureMappingProfileId(),
+                        node.templateNodeKey(),
+                        node.parentTemplateNodeKey(),
+                        node.nodeType(),
+                        node.role(),
+                        node.slotKey(),
+                        node.title(),
+                        node.content(),
+                        node.sortOrder(),
+                        node.status(),
+                        node.formatOverride(),
+                        node.metadata(),
+                        Instant.now(),
+                        Instant.now()
+                ));
+            }
+            byDraft.put(draftId, saved);
+            return findByDraftId(draftId);
+        }
+
+        @Override
+        public List<DraftNode> updateSortOrders(long draftId, Map<Long, Integer> sortOrdersByNodeId) {
+            List<DraftNode> nodes = new ArrayList<>(findByDraftId(draftId));
+            for (int i = 0; i < nodes.size(); i++) {
+                DraftNode node = nodes.get(i);
+                Integer sortOrder = sortOrdersByNodeId.get(node.id());
+                if (sortOrder == null) {
+                    continue;
+                }
+                nodes.set(i, new DraftNode(
+                        node.id(),
+                        node.draftId(),
+                        node.structureMappingProfileId(),
+                        node.templateNodeKey(),
+                        node.parentTemplateNodeKey(),
+                        node.nodeType(),
+                        node.role(),
+                        node.slotKey(),
+                        node.title(),
+                        node.content(),
+                        sortOrder,
+                        node.status(),
+                        node.formatOverride(),
+                        node.metadata(),
+                        node.createdAt(),
+                        Instant.now()
+                ));
+            }
+            byDraft.put(draftId, nodes);
             return findByDraftId(draftId);
         }
 
@@ -670,6 +824,7 @@ class DraftNodeServiceTest {
                             node.sortOrder(),
                             status,
                             node.formatOverride(),
+                            node.metadata(),
                             node.createdAt(),
                             Instant.now()
                     );

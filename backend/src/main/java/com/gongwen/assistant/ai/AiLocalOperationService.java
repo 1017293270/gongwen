@@ -99,9 +99,6 @@ public class AiLocalOperationService {
         if ("LOCKED".equals(node.status())) {
             throw new AiOutlineException("AI_LOCAL_TARGET_LOCKED", "锁定节点不能执行局部 AI 操作");
         }
-        if (node.content() == null || node.content().isBlank()) {
-            throw new AiOutlineException("AI_LOCAL_TARGET_EMPTY", "目标结构节点内容为空");
-        }
         return node;
     }
 

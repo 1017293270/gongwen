@@ -44,6 +44,19 @@ public class DraftNodeController {
         return ApiResponse.ok(service.listNodes(draftId));
     }
 
+    @GetMapping("/insertable-roles")
+    public ApiResponse<List<DraftNodeRoleOptionDto>> listInsertableRoles(@PathVariable long draftId) {
+        return ApiResponse.ok(service.listInsertableRoles(draftId));
+    }
+
+    @PostMapping
+    public ApiResponse<List<DraftNodeDto>> insert(
+            @PathVariable long draftId,
+            @RequestBody(required = false) InsertDraftNodeRequest request
+    ) {
+        return ApiResponse.ok(service.insertNode(draftId, request));
+    }
+
     @PutMapping("/{nodeId}")
     public ApiResponse<DraftNodeDto> update(
             @PathVariable long draftId,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, RotateCcw, Trash2 } from 'lucide-react';
+import { ChevronDown, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { bodyNodeLabel, bodyNodePreview } from '../../workbenchNodes';
-import type { WorkbenchNode } from '../../draftTypes';
+import type { DraftNodeRoleOption, InsertDraftNodePosition, WorkbenchNode } from '../../draftTypes';
 import { Button, StatusMessage } from '../ui';
 
 export type ReinitializeNodeStatus = 'idle' | 'running' | 'success' | 'error';
@@ -13,7 +13,10 @@ type WorkbenchStructureTreeProps = {
   canReinitialize: boolean;
   reinitializeStatus: ReinitializeNodeStatus;
   reinitializeMessage: string;
+  canInsertBodyStructure?: boolean;
+  insertableRoles?: DraftNodeRoleOption[];
   onSelectNode: (nodeId: string) => void;
+  onInsertBodyStructure?: (request: { role: string; anchorNodeId: number | null; position: InsertDraftNodePosition }) => void;
   onRemoveBodyNode: (node: WorkbenchNode) => void;
   onReinitialize: (preserveUserEditedNodes: boolean) => void;
 };
@@ -25,19 +28,44 @@ export function WorkbenchStructureTree({
   canReinitialize,
   reinitializeStatus,
   reinitializeMessage,
+  canInsertBodyStructure = false,
+  insertableRoles = [],
   onSelectNode,
+  onInsertBodyStructure,
   onRemoveBodyNode,
   onReinitialize,
 }: WorkbenchStructureTreeProps) {
   const [bodyGroupOpen, setBodyGroupOpen] = useState(true);
+  const [insertPosition, setInsertPosition] = useState<InsertDraftNodePosition>('AFTER');
+  const [insertRole, setInsertRole] = useState('');
   const structureNodes = nodes.filter((node) => node.nodeType !== 'BODY_SECTION');
   const bodyGroupSelected = bodySectionNodes.some((node) => node.nodeId === selectedNodeId);
+  const selectedBodyNode = bodySectionNodes.find((node) => node.nodeId === selectedNodeId) ?? null;
+  const availableInsertRoles = insertableRoles.length > 0 ? insertableRoles : defaultInsertableRoles();
+  const activeInsertRole = insertRole || availableInsertRoles[0]?.role || 'BODY_HEADING_LEVEL_1';
 
   useEffect(() => {
     if (bodyGroupSelected) {
       setBodyGroupOpen(true);
     }
   }, [bodyGroupSelected]);
+
+  useEffect(() => {
+    if (!insertRole && availableInsertRoles.length > 0) {
+      setInsertRole(availableInsertRoles[0].role);
+    }
+  }, [availableInsertRoles, insertRole]);
+
+  function handleInsertBodyStructure() {
+    if (!onInsertBodyStructure) {
+      return;
+    }
+    onInsertBodyStructure({
+      role: activeInsertRole,
+      anchorNodeId: anchorNodeIdForInsert(selectedBodyNode, insertPosition),
+      position: insertPosition,
+    });
+  }
 
   return (
     <>
@@ -75,6 +103,42 @@ export function WorkbenchStructureTree({
             tone={reinitializeStatus === 'error' ? 'warning' : 'success'}
           />
         )}
+        <div className="workbench-insert-structure" aria-label="新增正文结构">
+          <label>
+            <span>插入位置</span>
+            <select
+              aria-label="插入位置"
+              disabled={!canInsertBodyStructure}
+              onChange={(event) => setInsertPosition(event.target.value as InsertDraftNodePosition)}
+              value={insertPosition}
+            >
+              <option value="AFTER">当前结构之后</option>
+              <option value="BEFORE">当前结构之前</option>
+              <option value="END_OF_BODY">正文末尾</option>
+            </select>
+          </label>
+          <label>
+            <span>新增结构</span>
+            <select
+              aria-label="新增结构"
+              disabled={!canInsertBodyStructure}
+              onChange={(event) => setInsertRole(event.target.value)}
+              value={activeInsertRole}
+            >
+              {availableInsertRoles.map((role) => (
+                <option key={role.role} value={role.role}>{role.label}</option>
+              ))}
+            </select>
+          </label>
+          <Button
+            disabled={!canInsertBodyStructure || !onInsertBodyStructure || (insertPosition !== 'END_OF_BODY' && !selectedBodyNode)}
+            icon={<Plus aria-hidden="true" />}
+            onClick={handleInsertBodyStructure}
+            variant="secondary"
+          >
+            新增结构
+          </Button>
+        </div>
         {nodes.length > 0 ? (
           <div className="structure-tree-list">
             {structureNodes.map((node, index) => {
@@ -153,6 +217,22 @@ export function WorkbenchStructureTree({
       </section>
     </>
   );
+}
+
+function defaultInsertableRoles(): DraftNodeRoleOption[] {
+  return [
+    { role: 'BODY', label: '正文段落', createsBodyPair: false },
+  ];
+}
+
+function anchorNodeIdForInsert(node: WorkbenchNode | null, position: InsertDraftNodePosition) {
+  if (position === 'END_OF_BODY' || !node) {
+    return null;
+  }
+  if (position === 'BEFORE') {
+    return node.headingDraftNodeId ?? node.draftNodeId ?? null;
+  }
+  return node.draftNodeId ?? node.headingDraftNodeId ?? null;
 }
 
 function workbenchNodeMeta(node: WorkbenchNode) {

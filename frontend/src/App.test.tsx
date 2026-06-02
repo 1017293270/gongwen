@@ -904,7 +904,7 @@ describe('App', () => {
       body: JSON.stringify({
         nodeId: 103,
         nodeRole: 'BODY',
-        nodeTitle: '正文',
+        nodeTitle: '节点事项',
         nodeContext: '节点正文',
         operationType: 'FORMALIZE',
         instruction: '',

@@ -219,6 +219,52 @@ describe('WorkbenchPreview', () => {
     expect(onUpdateNodeContent).toHaveBeenCalledWith(organ, '修改后的办公室');
   });
 
+  it('emits heading changes for selected body sections', () => {
+    const onUpdateBodyHeading = vi.fn();
+    const body = node('body', 'BODY_SECTION', '', 20, {
+      draftNodeId: 102,
+      heading: '',
+      headingDraftNodeId: 101,
+      label: '正文',
+    });
+
+    render(
+      <WorkbenchPreview
+        attachment=""
+        attachmentNode={null}
+        bodySectionNodes={[body]}
+        bodyStyleForNode={() => ({})}
+        date=""
+        dateNode={null}
+        nodes={[body]}
+        onRemoveBodyNode={vi.fn()}
+        onSelectNode={vi.fn()}
+        onUpdateAttachment={vi.fn()}
+        onUpdateBodyContent={vi.fn()}
+        onUpdateBodyHeading={onUpdateBodyHeading}
+        onUpdateDate={vi.fn()}
+        onUpdateRecipient={vi.fn()}
+        onUpdateSignature={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        recipient=""
+        recipientNode={null}
+        registerNodeRef={vi.fn()}
+        selectedNodeId="body"
+        signature=""
+        signatureNode={null}
+        syncParagraphEditorHeight={vi.fn()}
+        title=""
+        titleNode={null}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: /编辑标题/ }), {
+      target: { value: '一、新增标题' },
+    });
+
+    expect(onUpdateBodyHeading).toHaveBeenCalledWith(body, '一、新增标题');
+  });
+
   it('does not switch away from structured editing when a refreshed rendered preview becomes ready', () => {
     const title = node('title', 'TITLE', 'Rendered notice title', 10);
     const body = node('body', 'BODY_SECTION', 'Editable body text', 20);

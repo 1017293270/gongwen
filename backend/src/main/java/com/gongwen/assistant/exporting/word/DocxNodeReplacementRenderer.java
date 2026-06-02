@@ -3,14 +3,19 @@ package com.gongwen.assistant.exporting.word;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
+import org.apache.xmlbeans.XmlCursor;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTPPr;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTRPr;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class DocxNodeReplacementRenderer {
     private final DocxNodeLocator locator;
@@ -24,14 +29,25 @@ public class DocxNodeReplacementRenderer {
     }
 
     public byte[] render(byte[] templateBytes, Map<String, String> replacementsByNodeKey, Set<String> ignoredNodeKeys) {
+        return render(templateBytes, replacementsByNodeKey, ignoredNodeKeys, List.of());
+    }
+
+    public byte[] render(
+            byte[] templateBytes,
+            Map<String, String> replacementsByNodeKey,
+            Set<String> ignoredNodeKeys,
+            List<NodeInsertion> insertions
+    ) {
         Map<String, String> replacements = replacementsByNodeKey == null ? Map.of() : replacementsByNodeKey;
         Set<String> ignored = ignoredNodeKeys == null ? Set.of() : ignoredNodeKeys;
+        List<NodeInsertion> requestedInsertions = insertions == null ? List.of() : insertions;
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(templateBytes));
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             replacements.entrySet().stream()
                     .filter(entry -> !ignored.contains(entry.getKey()))
                     .sorted(Comparator.comparing(Map.Entry::getKey))
                     .forEach(entry -> replaceNode(document, entry.getKey(), entry.getValue()));
+            insertNodes(document, requestedInsertions, ignored);
             removeIgnoredNodes(document, ignored);
             document.write(output);
             return output.toByteArray();
@@ -44,6 +60,91 @@ public class DocxNodeReplacementRenderer {
         XWPFParagraph paragraph = locator.findParagraph(document, nodeKey)
                 .orElseThrow(() -> new MissingNodeLocatorException(nodeKey));
         replaceParagraphText(paragraph, replacement == null ? "" : replacement);
+    }
+
+    private void insertNodes(XWPFDocument document, List<NodeInsertion> insertions, Set<String> ignored) {
+        Map<String, List<NodeInsertion>> byAnchor = insertions.stream()
+                .filter(insertion -> insertion != null && !insertion.anchorNodeKey().isBlank())
+                .filter(insertion -> !ignored.contains(insertion.anchorNodeKey()))
+                .collect(Collectors.groupingBy(NodeInsertion::anchorNodeKey));
+        byAnchor.forEach((anchorNodeKey, anchoredInsertions) -> {
+            List<NodeInsertion> before = anchoredInsertions.stream()
+                    .filter(insertion -> "BEFORE".equalsIgnoreCase(insertion.position()))
+                    .toList();
+            List<NodeInsertion> after = anchoredInsertions.stream()
+                    .filter(insertion -> !"BEFORE".equalsIgnoreCase(insertion.position()))
+                    .toList();
+            if (!before.isEmpty()) {
+                XWPFParagraph anchor = bodyAnchorParagraph(document, anchorNodeKey);
+                List<NodeInsertion> reversed = new ArrayList<>(before);
+                java.util.Collections.reverse(reversed);
+                for (NodeInsertion insertion : reversed) {
+                    insertParagraph(document, anchor, styleSourceParagraph(document, insertion, anchor), insertion.content(), false);
+                }
+            }
+            if (!after.isEmpty()) {
+                XWPFParagraph currentAnchor = bodyAnchorParagraph(document, anchorNodeKey);
+                for (NodeInsertion insertion : after) {
+                    currentAnchor = insertParagraph(
+                            document,
+                            currentAnchor,
+                            styleSourceParagraph(document, insertion, currentAnchor),
+                            insertion.content(),
+                            true
+                    );
+                }
+            }
+        });
+    }
+
+    private XWPFParagraph styleSourceParagraph(XWPFDocument document, NodeInsertion insertion, XWPFParagraph fallback) {
+        if (insertion.styleSourceNodeKey().isBlank()) {
+            return fallback;
+        }
+        return locator.findParagraph(document, insertion.styleSourceNodeKey())
+                .filter(paragraph -> document.getPosOfParagraph(paragraph) >= 0)
+                .orElse(fallback);
+    }
+
+    private XWPFParagraph bodyAnchorParagraph(XWPFDocument document, String nodeKey) {
+        XWPFParagraph paragraph = locator.findParagraph(document, nodeKey)
+                .orElseThrow(() -> new MissingNodeLocatorException(nodeKey));
+        if (document.getPosOfParagraph(paragraph) < 0) {
+            throw new MissingNodeLocatorException(nodeKey);
+        }
+        return paragraph;
+    }
+
+    private XWPFParagraph insertParagraph(
+            XWPFDocument document,
+            XWPFParagraph anchor,
+            XWPFParagraph styleSource,
+            String content,
+            boolean after
+    ) {
+        XmlCursor cursor = anchor.getCTP().newCursor();
+        if (after) {
+            cursor.toNextSibling();
+        }
+        XWPFParagraph paragraph = document.insertNewParagraph(cursor);
+        cursor.dispose();
+        copyParagraphStyle(styleSource == null ? anchor : styleSource, paragraph);
+        replaceParagraphText(paragraph, content == null ? "" : content);
+        return paragraph;
+    }
+
+    private void copyParagraphStyle(XWPFParagraph source, XWPFParagraph target) {
+        if (source.getCTP().getPPr() != null) {
+            target.getCTP().setPPr((CTPPr) source.getCTP().getPPr().copy());
+        }
+        target.setAlignment(source.getAlignment());
+        if (!source.getRuns().isEmpty()) {
+            XWPFRun sourceRun = source.getRuns().getFirst();
+            XWPFRun targetRun = target.getRuns().isEmpty() ? target.createRun() : target.getRuns().getFirst();
+            if (sourceRun.getCTR().getRPr() != null) {
+                targetRun.getCTR().setRPr((CTRPr) sourceRun.getCTR().getRPr().copy());
+            }
+        }
     }
 
     private void removeIgnoredNodes(XWPFDocument document, Set<String> ignoredNodeKeys) {
@@ -88,6 +189,19 @@ public class DocxNodeReplacementRenderer {
 
         public String nodeKey() {
             return nodeKey;
+        }
+    }
+
+    public record NodeInsertion(String anchorNodeKey, String position, String content, String styleSourceNodeKey) {
+        public NodeInsertion(String anchorNodeKey, String position, String content) {
+            this(anchorNodeKey, position, content, "");
+        }
+
+        public NodeInsertion {
+            anchorNodeKey = anchorNodeKey == null ? "" : anchorNodeKey.strip();
+            position = position == null || position.isBlank() ? "AFTER" : position.strip();
+            content = content == null ? "" : content;
+            styleSourceNodeKey = styleSourceNodeKey == null ? "" : styleSourceNodeKey.strip();
         }
     }
 }

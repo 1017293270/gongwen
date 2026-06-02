@@ -72,6 +72,15 @@ export type DraftNodeFormatOverride = {
   spacingAfterTwip: number | null;
 };
 
+export type DraftNodeMetadata = {
+  synthetic: boolean;
+  anchorNodeId: number | null;
+  anchorTemplateNodeKey: string;
+  insertPosition: string;
+  groupId: string;
+  styleSourceNodeKey: string;
+};
+
 export type DraftNode = {
   id: number;
   draftId: number;
@@ -86,8 +95,23 @@ export type DraftNode = {
   sortOrder: number;
   status: string;
   formatOverride: DraftNodeFormatOverride;
+  metadata?: DraftNodeMetadata | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DraftNodeRoleOption = {
+  role: string;
+  label: string;
+  createsBodyPair: boolean;
+};
+
+export type InsertDraftNodePosition = 'BEFORE' | 'AFTER' | 'END_OF_BODY';
+
+export type InsertDraftNodeRequest = {
+  role: string;
+  anchorNodeId: number | null;
+  position: InsertDraftNodePosition;
 };
 
 export type DraftDetail = {

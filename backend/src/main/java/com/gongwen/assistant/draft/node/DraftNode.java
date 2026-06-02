@@ -16,6 +16,7 @@ public record DraftNode(
         int sortOrder,
         String status,
         DraftNodeFormatOverride formatOverride,
+        DraftNodeMetadata metadata,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -31,5 +32,43 @@ public record DraftNode(
         content = content == null ? "" : content;
         status = status == null || status.isBlank() ? "EMPTY" : status.strip();
         formatOverride = formatOverride == null ? DraftNodeFormatOverride.empty() : formatOverride;
+        metadata = metadata == null ? DraftNodeMetadata.empty() : metadata;
+    }
+
+    public DraftNode(
+            long id,
+            long draftId,
+            Long structureMappingProfileId,
+            String templateNodeKey,
+            String parentTemplateNodeKey,
+            String nodeType,
+            String role,
+            String slotKey,
+            String title,
+            String content,
+            int sortOrder,
+            String status,
+            DraftNodeFormatOverride formatOverride,
+            Instant createdAt,
+            Instant updatedAt
+    ) {
+        this(
+                id,
+                draftId,
+                structureMappingProfileId,
+                templateNodeKey,
+                parentTemplateNodeKey,
+                nodeType,
+                role,
+                slotKey,
+                title,
+                content,
+                sortOrder,
+                status,
+                formatOverride,
+                DraftNodeMetadata.empty(),
+                createdAt,
+                updatedAt
+        );
     }
 }

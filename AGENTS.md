@@ -404,6 +404,8 @@ P10D T15 后续修正：工作台中间预览区打开草稿时优先读取草�
 
 P10D/P10E 后续修正：模板解析工作台中由用户手动映射为 `ISSUING_ORGAN`、`DOC_NUMBER`、`TABLE_ATTACHMENT` 等业务字段角色的节点，应按可编辑草稿节点初始化，不再因原始事实类型像固定文本或表格段落而锁定；工作台结构编辑选中这些节点后可直接改写内容。`STATIC_TEXT` 和 `IGNORE` 仍分别表示固定文本和忽略，不自动放开编辑。
 
+P10E 后续新增：工作台支持按正文层级新增结构节点。`GET /api/drafts/{draftId}/nodes/insertable-roles` 返回可插入正文角色，只开放当前模板已发布映射中存在的正文标题层级（例如没有二级/三级标题样本时不显示对应新增项）和可用正文段落；`POST /api/drafts/{draftId}/nodes` 根据 `role`、`anchorNodeId`、`position` 插入节点，标题角色默认创建“标题节点 + 空正文节点”，正文只创建单节点。新增节点写入 `draft_node.metadata.synthetic=true`、锚点、分组和 `styleSourceNodeKey`；工作台插入成功后自动刷新草稿级真实预览；无占位符原 DOCX 替换导出会按锚点插入 synthetic 段落，并按 `styleSourceNodeKey` 复制模板样本段落样式，而不是把 synthetic key 当作原 DOCX locator。
+
 P10D T16 轻量 QA 与文档同步已落地：`backend/src/test/resources/docx-fixtures/README.md` 固化 fixture 类别清单，动态 DOCX 样本覆盖占位符模板、样式模板、参考范文、手册/指南、复杂表格、页眉页脚和缺字体。focused 回归已覆盖手册阻断、中文 eastAsia/latin 字体、节点感知 AI、草稿节点格式覆盖、导出追溯、工作台节点和预览刷新；按用户“减轻测试重量”要求未跑全量后端/前端测试，Browser 自动化仍因工具不可用未执行。
 
 P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新增 V12-V16；前端 API 调用已和后端 route 声明做 grep 核对；focused 后端回归、`npm test -- src/workbenchNodes.test.ts src/App.test.tsx` 和 `npm run build` 均通过。保留风险是未跑全量后端/前端测试和浏览器自动化验证；下一步建议先拆分 `frontend/src/App.tsx` 的 workbench/template/export 大块，再继续 P11/P9。

@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Repository
@@ -61,9 +62,10 @@ public class JdbcDraftNodeRepository implements DraftNodeRepository {
                                 content,
                                 sort_order,
                                 status,
-                                format_override_json
+                                format_override_json,
+                                metadata
                             )
-                            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb))
+                            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb))
                             """,
                     draftId,
                     node.structureMappingProfileId(),
@@ -76,8 +78,61 @@ public class JdbcDraftNodeRepository implements DraftNodeRepository {
                     node.content(),
                     node.sortOrder(),
                     node.status(),
-                    toJson(node.formatOverride()));
+                    toJson(node.formatOverride()),
+                    toJson(node.metadata()));
         }
+        return findByDraftId(draftId);
+    }
+
+    @Override
+    @Transactional
+    public List<DraftNode> insertNodes(long draftId, List<DraftNode> nodes) {
+        for (DraftNode node : nodes) {
+            jdbcTemplate.update("""
+                            insert into draft_node (
+                                draft_id,
+                                structure_mapping_profile_id,
+                                template_node_key,
+                                parent_template_node_key,
+                                node_type,
+                                role,
+                                slot_key,
+                                title,
+                                content,
+                                sort_order,
+                                status,
+                                format_override_json,
+                                metadata
+                            )
+                            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb))
+                            """,
+                    draftId,
+                    node.structureMappingProfileId(),
+                    node.templateNodeKey(),
+                    node.parentTemplateNodeKey(),
+                    node.nodeType(),
+                    node.role(),
+                    node.slotKey(),
+                    node.title(),
+                    node.content(),
+                    node.sortOrder(),
+                    node.status(),
+                    toJson(node.formatOverride()),
+                    toJson(node.metadata()));
+        }
+        return findByDraftId(draftId);
+    }
+
+    @Override
+    @Transactional
+    public List<DraftNode> updateSortOrders(long draftId, Map<Long, Integer> sortOrdersByNodeId) {
+        sortOrdersByNodeId.forEach((nodeId, sortOrder) -> jdbcTemplate.update("""
+                update draft_node
+                set sort_order = ?,
+                    updated_at = now()
+                where draft_id = ?
+                  and id = ?
+                """, sortOrder, draftId, nodeId));
         return findByDraftId(draftId);
     }
 
@@ -148,6 +203,7 @@ public class JdbcDraftNodeRepository implements DraftNodeRepository {
                 rs.getInt("sort_order"),
                 rs.getString("status"),
                 readFormatOverride(rs.getString("format_override_json")),
+                readMetadata(rs.getString("metadata")),
                 rs.getObject("created_at", OffsetDateTime.class).toInstant(),
                 rs.getObject("updated_at", OffsetDateTime.class).toInstant()
         );
@@ -164,11 +220,22 @@ public class JdbcDraftNodeRepository implements DraftNodeRepository {
         }
     }
 
-    private String toJson(DraftNodeFormatOverride override) {
+    private DraftNodeMetadata readMetadata(String json) {
+        if (json == null || json.isBlank()) {
+            return DraftNodeMetadata.empty();
+        }
         try {
-            return objectMapper.writeValueAsString(override == null ? DraftNodeFormatOverride.empty() : override);
+            return objectMapper.readValue(json, DraftNodeMetadata.class);
         } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("Unable to serialize draft node format override", exception);
+            throw new IllegalStateException("Unable to read draft node metadata", exception);
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value == null ? Map.of() : value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("Unable to serialize draft node JSON value", exception);
         }
     }
 }

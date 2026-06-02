@@ -16,6 +16,7 @@ public record DraftNodeDto(
         int sortOrder,
         String status,
         DraftNodeFormatOverride formatOverride,
+        DraftNodeMetadata metadata,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -34,6 +35,7 @@ public record DraftNodeDto(
                 node.sortOrder(),
                 node.status(),
                 node.formatOverride(),
+                node.metadata(),
                 node.createdAt(),
                 node.updatedAt()
         );

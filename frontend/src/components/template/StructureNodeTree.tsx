@@ -10,6 +10,7 @@ export const MAPPING_ROLE_OPTIONS = [
   { value: 'BODY', label: '正文' },
   { value: 'BODY_HEADING_LEVEL_1', label: '一级标题' },
   { value: 'BODY_HEADING_LEVEL_2', label: '二级标题' },
+  { value: 'BODY_HEADING_LEVEL_3', label: '三级标题' },
   { value: 'ATTACHMENT_NOTE', label: '附件说明' },
   { value: 'SIGNATURE', label: '落款' },
   { value: 'DATE', label: '日期' },

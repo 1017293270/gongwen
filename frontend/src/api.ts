@@ -17,6 +17,7 @@ import type {
   DocumentType,
   DraftNode,
   DraftNodeFormatOverride,
+  DraftNodeRoleOption,
   DraftBlockUpdate,
   DraftDetail,
   DraftSummary,
@@ -351,6 +352,20 @@ export function reinitializeDraftNodes(draftId: number, preserveUserEditedNodes 
 
 export function listDraftNodes(draftId: number) {
   return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes`);
+}
+
+export function listInsertableDraftNodeRoles(draftId: number) {
+  return requestJson<DraftNodeRoleOption[]>(`/api/drafts/${draftId}/nodes/insertable-roles`);
+}
+
+export function insertDraftNode(
+  draftId: number,
+  request: { role: string; anchorNodeId: number | null; position: string },
+) {
+  return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }
 
 export function saveDraftNode(draftId: number, nodeId: number, content: string, status: string) {

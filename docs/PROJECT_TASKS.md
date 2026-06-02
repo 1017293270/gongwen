@@ -77,6 +77,7 @@
 - P10E T25 fixture 回归：新增 `DocxCompleteStructurePipelineTest`，用 `speechReferenceDocument` 覆盖上传、fact extraction、semantic suggestions、发布映射、DraftNode 初始化去重和原 DOCX 节点替换导出；前端模板解析工作台测试明确覆盖无占位符参考文档仍可映射、UNKNOWN 节点可见；本机 LibreOffice CLI 已对示例 DOCX 做 PDF 烟测。
 - P10E T26 集成收口：已核对工作区、空白、迁移号 V1-V17、P10E API 路由、focused 后端/前端回归、前端构建和 Browser 登录页烟测；P10E DOCX 完整结构事实与无占位符范文套版阶段关闭。
 - P10E T27 严格对应修正：针对“原稿、工作台结构化预览、未修改导出三者不一致”的真实样本反馈，后端 DraftNode 初始化/重建改为保留所有非忽略原始映射节点，前端 `WorkbenchPreview` 改为按节点源顺序渲染固定文本和静态事实；普通“从原稿重建结构”改为覆盖旧节点，“保留编辑重建”作为显式保留入口。验证覆盖 `DraftNodeServiceTest`、`DraftWordExportServiceTest`、`DocxCompleteStructurePipelineTest`、`WorkbenchPreview.test.tsx`、`workbenchNodes.test.ts`、`App.test.tsx` 和 `npm run build`，并新增 `docs/DOCX_ROUNDTRIP_TEST_CASES.md` 固化自动化与人工闭环测试用例。
+- P10E 后续工作台正文结构插入：新增草稿可插入角色目录和节点插入 API，工作台可在正文结构前、后或末尾新增模板已发布映射中存在的正文标题层级或“正文段落”；没有二级/三级标题样本时不显示对应新增项。新增节点以 synthetic metadata 记录锚点、分组和样式来源，插入后自动刷新草稿级真实预览。无占位符原 DOCX 节点替换导出已支持按锚点插入 synthetic 段落，并按样式来源复制模板样本段落样式，避免 synthetic key 被当作原 DOCX locator。
 
 当前推荐下一阶段：
 

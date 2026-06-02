@@ -104,6 +104,32 @@ class AiLocalOperationServiceTest {
         assertThat(traceRepository.saved.inputSummary()).doesNotContain("节点正文");
     }
 
+    @Test
+    void generatesSuggestionForEmptyDraftNodeUsingNodeTitleAsGenerationTarget() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10),
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "前文正文", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(12L, draft.id(), "BODY", "风险点", "", 40));
+        AiLocalOperationService service = newService();
+
+        AiLocalOperationResponse response = service.generateSuggestion(draft.id(), new AiLocalOperationRequest(
+                null,
+                12L,
+                "BODY",
+                "风险点",
+                "",
+                AiLocalOperationType.SUPPLEMENT,
+                "结合协会加入后的风险"
+        ));
+
+        assertThat(response.targetNodeId()).isEqualTo(12L);
+        assertThat(response.targetNodeRole()).isEqualTo("BODY");
+        assertThat(response.suggestionText()).contains("风险点", "结合协会加入后的风险");
+        assertThat(traceRepository.saved.status()).isEqualTo("SUCCESS");
+        assertThat(traceRepository.saved.inputSummary()).contains("targetNodeId=12", "originalChars=");
+    }
+
     private AiLocalOperationService newService() {
         return new AiLocalOperationService(
                 new DraftService(draftRepository),
@@ -133,7 +159,7 @@ class AiLocalOperationServiceTest {
 
         @Override
         public AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {
-            return new AiLocalOperationModelResponse(prompt.operationType() + "：" + prompt.originalText() + prompt.instruction());
+            return new AiLocalOperationModelResponse(prompt.operationType() + "：" + prompt.originalText() + prompt.targetNodeTitle() + prompt.instruction());
         }
     }
 

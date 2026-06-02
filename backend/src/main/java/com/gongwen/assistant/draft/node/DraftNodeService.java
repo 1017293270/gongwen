@@ -11,10 +11,14 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -34,6 +38,12 @@ public class DraftNodeService {
             "DELETED"
     );
     private static final Set<String> SKIPPED_ROLES = Set.of("IGNORE");
+    private static final List<String> INSERTABLE_BODY_ROLES = List.of(
+            "BODY_HEADING_LEVEL_1",
+            "BODY_HEADING_LEVEL_2",
+            "BODY_HEADING_LEVEL_3",
+            "BODY"
+    );
     private static final Set<String> PRESERVABLE_REINITIALIZE_STATUSES = Set.of(
             "USER_FILLED",
             "AI_GENERATED",
@@ -137,6 +147,71 @@ public class DraftNodeService {
         return toDtos(draftNodeRepository.findByDraftId(draftId));
     }
 
+    public List<DraftNodeRoleOptionDto> listInsertableRoles(long draftId) {
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        Long templateVersionId = draft.templateVersionId();
+        if (templateVersionId == null) {
+            throw new DraftNodeException("DRAFT_TEMPLATE_REQUIRED", "Draft must bind a template version before body structures can be inserted");
+        }
+        StructureMappingProfile mapping = mappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED")
+                .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before body structures can be inserted"));
+        Set<String> roles = new LinkedHashSet<>();
+        mapping.items().stream()
+                .map(StructureMappingItem::role)
+                .filter(INSERTABLE_BODY_ROLES::contains)
+                .forEach(roles::add);
+        return INSERTABLE_BODY_ROLES.stream()
+                .filter(roles::contains)
+                .map(role -> new DraftNodeRoleOptionDto(role, labelForInsertableRole(role), role.startsWith("BODY_HEADING_LEVEL_")))
+                .toList();
+    }
+
+    public List<DraftNodeDto> insertNode(long draftId, InsertDraftNodeRequest request) {
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        Long templateVersionId = draft.templateVersionId();
+        if (templateVersionId == null) {
+            throw new DraftNodeException("DRAFT_TEMPLATE_REQUIRED", "Draft must bind a template version before body structures can be inserted");
+        }
+        StructureMappingProfile mapping = mappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED")
+                .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before body structures can be inserted"));
+        String role = normalizeInsertRole(request == null ? null : request.role());
+        String position = normalizeInsertPosition(request == null ? null : request.position());
+        List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
+        if (existingNodes.isEmpty()) {
+            initializeNodes(draftId);
+            existingNodes = draftNodeRepository.findByDraftId(draftId);
+        }
+        List<DraftNode> orderedNodes = existingNodes.stream()
+                .filter(node -> !"DELETED".equalsIgnoreCase(node.status()))
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        DraftNode anchor = anchorNode(orderedNodes, request == null ? null : request.anchorNodeId(), position);
+        List<String> rolesToCreate = role.startsWith("BODY_HEADING_LEVEL_")
+                ? List.of(role, "BODY")
+                : List.of(role);
+        String groupId = UUID.randomUUID().toString();
+        String anchorKey = anchor == null ? "" : anchor.templateNodeKey();
+        Long anchorId = anchor == null ? null : anchor.id();
+        int baseSortOrder = firstInsertedSortOrder(orderedNodes, anchor, position, rolesToCreate.size());
+        List<DraftNode> created = new ArrayList<>();
+        for (int index = 0; index < rolesToCreate.size(); index++) {
+            String createdRole = rolesToCreate.get(index);
+            created.add(newSyntheticNode(
+                    draftId,
+                    mapping.mappingProfileId(),
+                    createdRole,
+                    baseSortOrder + index,
+                    anchorId,
+                    anchorKey,
+                    position,
+                    groupId,
+                    styleSourceNodeKey(existingNodes, createdRole)
+            ));
+        }
+        List<DraftNode> savedNodes = draftNodeRepository.insertNodes(draftId, created);
+        return toDtos(reorderAfterInsert(draftId, orderedNodes, savedNodes, groupId, anchor, position));
+    }
+
     public DraftNodeDto updateNode(long draftId, long nodeId, UpdateDraftNodeRequest request) {
         draftService.getDraft(draftId);
         String status = normalizeStatus(request == null ? null : request.status());
@@ -195,6 +270,7 @@ public class DraftNodeService {
                 item.sortOrder(),
                 initialStatus(item, content),
                 DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.empty(),
                 null,
                 null
         );
@@ -249,9 +325,227 @@ public class DraftNodeService {
                 node.sortOrder(),
                 existing.status(),
                 existing.formatOverride(),
+                existing.metadata(),
                 node.createdAt(),
                 node.updatedAt()
         );
+    }
+
+    private DraftNode newSyntheticNode(
+            long draftId,
+            Long mappingProfileId,
+            String role,
+            int sortOrder,
+            Long anchorNodeId,
+            String anchorTemplateNodeKey,
+            String position,
+            String groupId,
+            String styleSourceNodeKey
+    ) {
+        return new DraftNode(
+                0,
+                draftId,
+                mappingProfileId,
+                "synthetic-" + UUID.randomUUID(),
+                null,
+                "PARAGRAPH",
+                role,
+                slotKeyFor(role),
+                titleForSyntheticRole(role),
+                "",
+                sortOrder,
+                "EMPTY",
+                DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.synthetic(anchorNodeId, anchorTemplateNodeKey, position, groupId, styleSourceNodeKey),
+                null,
+                null
+        );
+    }
+
+    private DraftNode anchorNode(List<DraftNode> orderedNodes, Long anchorNodeId, String position) {
+        if ("END_OF_BODY".equals(position)) {
+            return orderedNodes.stream()
+                    .filter(this::isBodyStructureNode)
+                    .reduce((left, right) -> right)
+                    .orElse(null);
+        }
+        if (anchorNodeId == null) {
+            throw new DraftNodeException("DRAFT_NODE_ANCHOR_REQUIRED", "Anchor node is required when inserting before or after a body structure");
+        }
+        return orderedNodes.stream()
+                .filter(node -> node.id() == anchorNodeId)
+                .findFirst()
+                .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + anchorNodeId));
+    }
+
+    private int firstInsertedSortOrder(List<DraftNode> orderedNodes, DraftNode anchor, String position, int createCount) {
+        if (orderedNodes.isEmpty()) {
+            return 10;
+        }
+        if ("END_OF_BODY".equals(position)) {
+            DraftNode nextNonBody = nextNonBodyAfterAnchor(orderedNodes, anchor);
+            if (anchor == null) {
+                return 10;
+            }
+            return sortOrderBetween(anchor.sortOrder(), nextNonBody == null ? null : nextNonBody.sortOrder(), createCount, false);
+        }
+        if ("BEFORE".equals(position)) {
+            DraftNode previous = previousNode(orderedNodes, anchor);
+            return sortOrderBetween(previous == null ? null : previous.sortOrder(), anchor.sortOrder(), createCount, true);
+        }
+        DraftNode next = nextNode(orderedNodes, anchor);
+        return sortOrderBetween(anchor.sortOrder(), next == null ? null : next.sortOrder(), createCount, false);
+    }
+
+    private int sortOrderBetween(Integer previous, Integer next, int createCount, boolean alignBeforeNext) {
+        if (previous == null && next == null) {
+            return 10;
+        }
+        if (previous == null) {
+            return next - createCount;
+        }
+        if (next == null) {
+            return previous + 10;
+        }
+        int gap = next - previous;
+        if (gap > createCount) {
+            return alignBeforeNext ? next - createCount : previous + 1;
+        }
+        return alignBeforeNext ? next - createCount : previous + 1;
+    }
+
+    private List<DraftNode> reorderAfterInsert(
+            long draftId,
+            List<DraftNode> orderedNodes,
+            List<DraftNode> savedNodes,
+            String groupId,
+            DraftNode anchor,
+            String position
+    ) {
+        List<DraftNode> savedCreatedNodes = savedNodes.stream()
+                .filter(node -> groupId.equals(node.metadata().groupId()))
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        if (savedCreatedNodes.isEmpty()) {
+            return savedNodes;
+        }
+        List<DraftNode> reorderedNodes = new ArrayList<>(orderedNodes);
+        int insertIndex = insertIndex(orderedNodes, anchor, position);
+        reorderedNodes.addAll(insertIndex, savedCreatedNodes);
+
+        Map<Long, Integer> sortOrdersByNodeId = new LinkedHashMap<>();
+        for (int index = 0; index < reorderedNodes.size(); index++) {
+            sortOrdersByNodeId.put(reorderedNodes.get(index).id(), (index + 1) * 10);
+        }
+        return draftNodeRepository.updateSortOrders(draftId, sortOrdersByNodeId);
+    }
+
+    private int insertIndex(List<DraftNode> orderedNodes, DraftNode anchor, String position) {
+        if (anchor == null) {
+            return orderedNodes.size();
+        }
+        for (int index = 0; index < orderedNodes.size(); index++) {
+            if (orderedNodes.get(index).id() == anchor.id()) {
+                return "BEFORE".equals(position) ? index : index + 1;
+            }
+        }
+        return orderedNodes.size();
+    }
+
+    private DraftNode previousNode(List<DraftNode> orderedNodes, DraftNode anchor) {
+        if (anchor == null) {
+            return null;
+        }
+        for (int index = 0; index < orderedNodes.size(); index++) {
+            if (orderedNodes.get(index).id() == anchor.id()) {
+                return index == 0 ? null : orderedNodes.get(index - 1);
+            }
+        }
+        return null;
+    }
+
+    private DraftNode nextNode(List<DraftNode> orderedNodes, DraftNode anchor) {
+        if (anchor == null) {
+            return null;
+        }
+        for (int index = 0; index < orderedNodes.size(); index++) {
+            if (orderedNodes.get(index).id() == anchor.id()) {
+                return index >= orderedNodes.size() - 1 ? null : orderedNodes.get(index + 1);
+            }
+        }
+        return null;
+    }
+
+    private DraftNode nextNonBodyAfterAnchor(List<DraftNode> orderedNodes, DraftNode anchor) {
+        if (anchor == null) {
+            return null;
+        }
+        boolean afterAnchor = false;
+        for (DraftNode node : orderedNodes) {
+            if (afterAnchor && !isBodyStructureNode(node)) {
+                return node;
+            }
+            if (node.id() == anchor.id()) {
+                afterAnchor = true;
+            }
+        }
+        return null;
+    }
+
+    private String normalizeInsertRole(String role) {
+        if (role == null || role.isBlank()) {
+            return "BODY";
+        }
+        String normalized = role.strip();
+        if (!INSERTABLE_BODY_ROLES.contains(normalized)) {
+            throw new DraftNodeException("DRAFT_NODE_ROLE_INVALID", "Only body structures can be inserted in the workbench");
+        }
+        return normalized;
+    }
+
+    private String normalizeInsertPosition(String position) {
+        if (position == null || position.isBlank()) {
+            return "END_OF_BODY";
+        }
+        String normalized = position.strip();
+        if (!Set.of("BEFORE", "AFTER", "END_OF_BODY").contains(normalized)) {
+            throw new DraftNodeException("DRAFT_NODE_INSERT_POSITION_INVALID", "Draft node insert position is invalid: " + position);
+        }
+        return normalized;
+    }
+
+    private boolean isBodyStructureNode(DraftNode node) {
+        String role = node.role();
+        return "BODY".equals(role) || role.startsWith("BODY_HEADING_LEVEL_");
+    }
+
+    private String styleSourceNodeKey(List<DraftNode> nodes, String role) {
+        return nodes.stream()
+                .filter(node -> role.equals(node.role()))
+                .map(DraftNode::templateNodeKey)
+                .filter(key -> key != null && !key.isBlank())
+                .findFirst()
+                .orElse("");
+    }
+
+    private String titleForSyntheticRole(String role) {
+        return switch (role) {
+            case "BODY_HEADING_LEVEL_1" -> "一级标题";
+            case "BODY_HEADING_LEVEL_2" -> "二级标题";
+            case "BODY_HEADING_LEVEL_3" -> "三级标题";
+            case "BODY" -> "正文";
+            default -> role;
+        };
+    }
+
+    private String labelForInsertableRole(String role) {
+        return switch (role) {
+            case "BODY_HEADING_LEVEL_1" -> "一级标题 + 正文";
+            case "BODY_HEADING_LEVEL_2" -> "二级标题 + 正文";
+            case "BODY_HEADING_LEVEL_3" -> "三级标题 + 正文";
+            case "BODY" -> "正文段落";
+            default -> role;
+        };
     }
 
     private boolean isEditableSourceRole(String role) {

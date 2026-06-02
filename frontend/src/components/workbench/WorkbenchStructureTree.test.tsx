@@ -1,8 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchNode } from '../../draftTypes';
 import { WorkbenchStructureTree } from './WorkbenchStructureTree';
+
+afterEach(() => cleanup());
 
 function node(
   nodeId: string,
@@ -64,5 +66,47 @@ describe('WorkbenchStructureTree', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '删除正文结构：背景' }));
     expect(onRemoveBodyNode).toHaveBeenCalledWith(bodyOne);
+  });
+
+  it('lets users insert a heading body pair around the selected body node', async () => {
+    const bodyOne = node('body-1', 'BODY_SECTION', 'Body section', 20, {
+      heading: 'One',
+      content: 'Existing body',
+      draftNodeId: 101,
+    });
+    const onInsertBodyStructure = vi.fn();
+
+    render(
+      <WorkbenchStructureTree
+        bodySectionNodes={[bodyOne]}
+        canInsertBodyStructure
+        canReinitialize={false}
+        insertableRoles={[
+          { role: 'BODY_HEADING_LEVEL_1', label: '一级标题 + 正文', createsBodyPair: true },
+          { role: 'BODY_HEADING_LEVEL_2', label: '二级标题 + 正文', createsBodyPair: true },
+          { role: 'BODY_HEADING_LEVEL_3', label: '三级标题 + 正文', createsBodyPair: true },
+          { role: 'BODY', label: '正文段落', createsBodyPair: false },
+        ]}
+        nodes={[bodyOne]}
+        onInsertBodyStructure={onInsertBodyStructure}
+        onReinitialize={vi.fn()}
+        onRemoveBodyNode={vi.fn()}
+        onSelectNode={vi.fn()}
+        reinitializeMessage=""
+        reinitializeStatus="idle"
+        selectedNodeId="body-1"
+      />,
+    );
+
+    const insertPanel = screen.getByLabelText('新增正文结构');
+    await userEvent.selectOptions(within(insertPanel).getByLabelText('插入位置'), 'BEFORE');
+    await userEvent.selectOptions(within(insertPanel).getByLabelText('新增结构'), 'BODY_HEADING_LEVEL_2');
+    await userEvent.click(within(insertPanel).getByRole('button', { name: '新增结构' }));
+
+    expect(onInsertBodyStructure).toHaveBeenCalledWith({
+      role: 'BODY_HEADING_LEVEL_2',
+      anchorNodeId: 101,
+      position: 'BEFORE',
+    });
   });
 });

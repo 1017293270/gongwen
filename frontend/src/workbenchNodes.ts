@@ -42,10 +42,24 @@ function nodesFromDraftNodes(draftNodes: DraftNode[]) {
   const sortedNodes = draftNodes
     .filter((draftNode) => draftNode.status !== 'DELETED')
     .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id);
+  const consumedNodeIds = new Set<number>();
   let pendingHeading: DraftNode | null = null;
 
   for (const draftNode of sortedNodes) {
+    if (consumedNodeIds.has(draftNode.id)) {
+      continue;
+    }
+
     if (draftNode.role.startsWith('BODY_HEADING_LEVEL_')) {
+      const groupedBody = matchingGroupedBody(draftNode, sortedNodes, consumedNodeIds);
+      if (groupedBody) {
+        nodes.push(bodyNodeFromDraftNode(draftNode, draftNode, groupedBody));
+        consumedNodeIds.add(draftNode.id);
+        consumedNodeIds.add(groupedBody.id);
+        pendingHeading = null;
+        continue;
+      }
+
       if (pendingHeading) {
         nodes.push(bodyNodeFromDraftNode(pendingHeading, pendingHeading, null));
       }
@@ -54,8 +68,16 @@ function nodesFromDraftNodes(draftNodes: DraftNode[]) {
     }
 
     if (draftNode.role === 'BODY') {
-      nodes.push(bodyNodeFromDraftNode(draftNode, pendingHeading, draftNode));
-      pendingHeading = null;
+      if (pendingHeading && canPairBodyHeading(pendingHeading, draftNode)) {
+        nodes.push(bodyNodeFromDraftNode(pendingHeading, pendingHeading, draftNode));
+        pendingHeading = null;
+      } else {
+        if (pendingHeading) {
+          nodes.push(bodyNodeFromDraftNode(pendingHeading, pendingHeading, null));
+          pendingHeading = null;
+        }
+        nodes.push(bodyNodeFromDraftNode(draftNode, null, draftNode));
+      }
       continue;
     }
 
@@ -88,14 +110,48 @@ function nodesFromDraftNodes(draftNodes: DraftNode[]) {
   return nodes;
 }
 
+function matchingGroupedBody(
+  headingNode: DraftNode,
+  sortedNodes: DraftNode[],
+  consumedNodeIds: Set<number>,
+) {
+  const groupId = syntheticGroupId(headingNode);
+  if (!groupId) {
+    return null;
+  }
+  return sortedNodes.find((node) => (
+    !consumedNodeIds.has(node.id)
+    && node.role === 'BODY'
+    && syntheticGroupId(node) === groupId
+  )) ?? null;
+}
+
+function canPairBodyHeading(headingNode: DraftNode, bodyNode: DraftNode) {
+  const headingGroupId = syntheticGroupId(headingNode);
+  const bodyGroupId = syntheticGroupId(bodyNode);
+  if (headingGroupId || bodyGroupId) {
+    return Boolean(headingGroupId && headingGroupId === bodyGroupId);
+  }
+  return true;
+}
+
+function syntheticGroupId(node: DraftNode) {
+  const metadata = node.metadata;
+  if (!metadata?.synthetic || !metadata.groupId) {
+    return '';
+  }
+  return metadata.groupId;
+}
+
 function bodyNodeFromDraftNode(
   displayNode: DraftNode,
   headingNode: DraftNode | null,
   bodyNode: DraftNode | null,
 ): WorkbenchNode {
   const node = bodyNode ?? displayNode;
-  const heading = headingNode?.content || undefined;
+  const heading = headingNode ? headingNode.content : undefined;
   const content = bodyNode ? bodyNode.content : '';
+  const labelSource = heading?.trim() ? heading : bodyNode?.title ?? displayNode.title ?? '正文';
   return {
     nodeId: `draft-node:${node.id}`,
     nodeType: 'BODY_SECTION',
@@ -105,7 +161,7 @@ function bodyNodeFromDraftNode(
     templateNodeKey: node.templateNodeKey,
     role: bodyNode?.role ?? headingNode?.role ?? 'BODY',
     sortOrder: displayNode.sortOrder,
-    label: stripBodyPrefix(heading ?? bodyNode?.title ?? displayNode.title ?? '正文'),
+    label: stripBodyPrefix(labelSource),
     heading,
     content,
     status: combinedDraftNodeStatus(headingNode, bodyNode),

@@ -56,9 +56,11 @@ import {
   generateLocalOperation,
   getDraft,
   initializeDraftNodes,
+  insertDraftNode,
   listDepartments,
   listDocumentTypes,
   listDraftNodes,
+  listInsertableDraftNodeRoles,
   listDrafts,
   listExportRecords,
   listDraftMaterials,
@@ -128,6 +130,8 @@ import type {
   DocumentType,
   DraftNode,
   DraftNodeFormatOverride,
+  DraftNodeRoleOption,
+  InsertDraftNodePosition,
   DraftBlock,
   DraftBlockUpdate,
   DraftDetail,
@@ -202,6 +206,7 @@ type DraftWorkspaceData = {
   loadedTemplateProfile: TemplateProfile | null;
   loadedStructureOverrides: TemplateStructureOverrideMap;
   loadedRenderPreview: DocumentRenderPreview | null;
+  loadedInsertableRoles: DraftNodeRoleOption[];
 };
 
 function pickLatestTemplateVersions(versions: TemplateVersionSummary[]) {
@@ -359,6 +364,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [nodeFormatError, setNodeFormatError] = useState('');
   const [reinitializeNodeStatus, setReinitializeNodeStatus] = useState<ReinitializeNodeStatus>('idle');
   const [reinitializeNodeMessage, setReinitializeNodeMessage] = useState('');
+  const [insertableBodyRoles, setInsertableBodyRoles] = useState<DraftNodeRoleOption[]>([]);
   const [renderPreviewOutdated, setRenderPreviewOutdated] = useState(false);
   const [renderPreviewRevision, setRenderPreviewRevision] = useState(0);
   const [workbenchRenderPreview, setWorkbenchRenderPreview] = useState<DocumentRenderPreview | null>(null);
@@ -570,13 +576,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     const loadedMaterials = await listDraftMaterials(loadedDraft.id);
     const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode).catch(() => []);
     const loadedDraftNodes = await loadDraftNodesForWorkbench(loadedDraft);
-    const [loadedTemplateProfile, loadedStructureOverrides, loadedRenderPreview] = loadedDraft.templateVersionId
+    const [loadedTemplateProfile, loadedStructureOverrides, loadedRenderPreview, loadedInsertableRoles] = loadedDraft.templateVersionId
       ? await Promise.all([
         getTemplateProfile(loadedDraft.templateVersionId).catch(() => null),
         getTemplateStructureFormatting(loadedDraft.templateVersionId).catch(() => ({})),
         getDraftRenderPreview(loadedDraft.id).catch(() => null),
+        listInsertableDraftNodeRoles(loadedDraft.id).catch(() => []),
       ])
-      : [null, {}, null];
+      : [null, {}, null, []];
     return {
       loadedDraft,
       loadedDraftNodes,
@@ -585,6 +592,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       loadedTemplateProfile,
       loadedStructureOverrides,
       loadedRenderPreview,
+      loadedInsertableRoles,
     };
   }
 
@@ -609,6 +617,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       loadedTemplateProfile,
       loadedStructureOverrides,
       loadedRenderPreview,
+      loadedInsertableRoles,
     } = workspaceData;
     setDraft(loadedDraft);
     setBlocks(loadedDraft.blocks);
@@ -618,6 +627,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setMaterials(loadedMaterials);
     setTemplateVersions(loadedTemplateVersions);
     setSelectedTemplateProfile(loadedTemplateProfile);
+    setInsertableBodyRoles(loadedInsertableRoles);
     setWorkbenchRenderPreview(loadedRenderPreview);
     setWorkbenchRenderPreviewStatus('idle');
     setWorkbenchRenderPreviewMessage(loadedRenderPreview ? renderPreviewResultMessage(loadedRenderPreview) : '');
@@ -1184,6 +1194,52 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
+  async function handleInsertBodyStructure(request: { role: string; anchorNodeId: number | null; position: InsertDraftNodePosition }) {
+    if (!draft) {
+      return;
+    }
+    try {
+      await saveCurrentDraft('正在保存当前草稿');
+      const existingNodeIds = new Set(draftNodes.map((node) => node.id));
+      const nextNodes = await insertDraftNode(draft.id, request);
+      const createdNodes = nextNodes.filter((node) => !existingNodeIds.has(node.id));
+      const selectedCreatedNode = request.role.startsWith('BODY_HEADING_LEVEL_')
+        ? createdNodes.find((node) => node.role === 'BODY') ?? createdNodes.find((node) => node.role === request.role) ?? null
+        : createdNodes.find((node) => node.role === request.role) ?? createdNodes[0] ?? null;
+      setDraftNodes(nextNodes);
+      setDraft((currentDraft) => currentDraft ? { ...currentDraft, nodes: nextNodes } : currentDraft);
+      setDirtyDraftNodeIds(new Set());
+      if (selectedCreatedNode) {
+        setSelectedNodeId(`draft-node:${selectedCreatedNode.id}`);
+      }
+      setQualityCheck(null);
+      setQualityCheckStatus('idle');
+      setQualityCheckError('');
+      setExportStatus('idle');
+      setExportError('');
+      setLocalOperationSuggestion(null);
+      setStatus('saved');
+      setStatusMessage('正文结构已新增，正在刷新真实预览');
+      setRenderPreviewOutdated(true);
+      setWorkbenchRenderPreviewStatus('requesting');
+      setWorkbenchRenderPreviewMessage('正在刷新真实预览');
+      const preview = await requestDraftRenderPreview(draft.id);
+      setWorkbenchRenderPreview(preview);
+      setRenderPreviewOutdated(false);
+      setWorkbenchRenderPreviewStatus('idle');
+      setWorkbenchRenderPreviewMessage(renderPreviewResultMessage(preview));
+      showToast({ title: '正文结构已新增', description: renderPreviewResultMessage(preview), tone: preview.status === 'READY' ? 'success' : 'info' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '新增正文结构失败';
+      setRenderPreviewOutdated(true);
+      setWorkbenchRenderPreviewStatus('error');
+      setWorkbenchRenderPreviewMessage(message);
+      setStatus('error');
+      setStatusMessage(message);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
   function reinitializeDraftNodesErrorMessage(error: unknown) {
     const message = error instanceof Error ? error.message : '';
     if (message.includes('Published structure mapping is required before nodes can be reinitialized')) {
@@ -1381,9 +1437,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       const updatedDraftNodes = templateVersionId
         ? await initializeDraftNodes(updatedDraft.id).catch(() => [])
         : [];
+      const updatedInsertableRoles = templateVersionId
+        ? await listInsertableDraftNodeRoles(updatedDraft.id).catch(() => [])
+        : [];
       setDraft({ ...updatedDraft, nodes: updatedDraftNodes });
       setBlocks(updatedDraft.blocks);
       setDraftNodes(updatedDraftNodes);
+      setInsertableBodyRoles(updatedInsertableRoles);
       setWorkbenchRenderPreview(null);
       setWorkbenchRenderPreviewStatus('idle');
       setWorkbenchRenderPreviewMessage('');
@@ -2096,8 +2156,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
             <WorkbenchStructureTree
               bodySectionNodes={bodySectionNodes}
+              canInsertBodyStructure={Boolean(draft?.templateVersionId) && workbenchRenderPreviewStatus !== 'requesting'}
               canReinitialize={Boolean(draft?.templateVersionId) && status !== 'loading'}
+              insertableRoles={insertableBodyRoles}
               nodes={workbenchNodes}
+              onInsertBodyStructure={(request) => void handleInsertBodyStructure(request)}
               onReinitialize={(preserveUserEditedNodes) => void handleReinitializeDraftNodes(preserveUserEditedNodes)}
               onRemoveBodyNode={removeBodyNode}
               onSelectNode={selectNode}
@@ -5918,9 +5981,16 @@ function aiNodeContextForWorkbenchNode(node: WorkbenchNode | null): AiNodeReques
   return {
     nodeId: node.draftNodeId,
     nodeRole: aiRoleForWorkbenchNode(node),
-    nodeTitle: workbenchNodeRoleLabel(node.nodeType),
+    nodeTitle: aiNodeTitleForWorkbenchNode(node),
     nodeContext: node.content,
   };
+}
+
+function aiNodeTitleForWorkbenchNode(node: WorkbenchNode) {
+  if (node.nodeType === 'BODY_SECTION') {
+    return bodyNodeLabel(node, 0);
+  }
+  return node.label || workbenchNodeRoleLabel(node.nodeType);
 }
 
 function aiRoleForWorkbenchNode(node: WorkbenchNode) {

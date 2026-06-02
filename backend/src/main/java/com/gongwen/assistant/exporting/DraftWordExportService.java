@@ -253,7 +253,8 @@ public class DraftWordExportService {
             byte[] rendered = nodeReplacementRenderer.render(
                     templateBytes,
                     originalNodeReplacements(draftNodes),
-                    ignoredNodeKeys(mapping, draftNodes)
+                    ignoredNodeKeys(mapping, draftNodes),
+                    originalNodeInsertions(draftNodes)
             );
             return wordExportService.exportRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
@@ -275,7 +276,8 @@ public class DraftWordExportService {
             byte[] rendered = nodeReplacementRenderer.render(
                     templateBytes,
                     originalNodeReplacements(draftNodes),
-                    ignoredNodeKeys(mapping, draftNodes)
+                    ignoredNodeKeys(mapping, draftNodes),
+                    originalNodeInsertions(draftNodes)
             );
             return wordExportService.renderRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
@@ -538,9 +540,29 @@ public class DraftWordExportService {
                 .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
                 .filter(node -> !isDeletedDraftNode(node))
                 .filter(node -> !isBlank(node.templateNodeKey()))
+                .filter(node -> !isSyntheticDraftNode(node))
                 .filter(node -> isReplaceableOriginalRole(node.role()))
                 .forEach(node -> replacements.put(node.templateNodeKey(), node.content() == null ? "" : node.content()));
         return replacements;
+    }
+
+    private List<DocxNodeReplacementRenderer.NodeInsertion> originalNodeInsertions(List<DraftNode> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return List.of();
+        }
+        return nodes.stream()
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .filter(node -> !isDeletedDraftNode(node))
+                .filter(this::isSyntheticDraftNode)
+                .filter(node -> !isBlank(node.metadata().anchorTemplateNodeKey()))
+                .filter(node -> isReplaceableOriginalRole(node.role()))
+                .map(node -> new DocxNodeReplacementRenderer.NodeInsertion(
+                        node.metadata().anchorTemplateNodeKey(),
+                        insertionPositionForExport(node.metadata().insertPosition()),
+                        node.content() == null ? "" : node.content(),
+                        node.metadata().styleSourceNodeKey()
+                ))
+                .toList();
     }
 
     private Set<String> ignoredNodeKeys(StructureMappingProfile mapping, List<DraftNode> draftNodes) {
@@ -555,6 +577,7 @@ public class DraftWordExportService {
                 ? Set.of()
                 : draftNodes.stream()
                         .filter(this::isDeletedDraftNode)
+                        .filter(node -> !isSyntheticDraftNode(node))
                         .map(DraftNode::templateNodeKey)
                         .filter(nodeKey -> !isBlank(nodeKey))
                         .collect(Collectors.toSet());
@@ -571,6 +594,14 @@ public class DraftWordExportService {
 
     private boolean isDeletedDraftNode(DraftNode node) {
         return node != null && "DELETED".equalsIgnoreCase(node.status());
+    }
+
+    private boolean isSyntheticDraftNode(DraftNode node) {
+        return node != null && node.metadata() != null && node.metadata().synthetic();
+    }
+
+    private String insertionPositionForExport(String position) {
+        return "BEFORE".equalsIgnoreCase(position) ? "BEFORE" : "AFTER";
     }
 
     private boolean isReplaceableOriginalRole(String role) {

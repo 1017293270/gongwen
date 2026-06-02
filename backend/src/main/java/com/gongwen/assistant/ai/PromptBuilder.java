@@ -160,6 +160,10 @@ public class PromptBuilder {
         String instruction = request == null || request.instruction() == null ? "" : request.instruction().strip();
         AiNodeContext safeNodeContext = nodeContext == null ? AiNodeContext.none() : nodeContext;
         String originalText = safeNodeContext.nodeContext() == null ? "" : safeNodeContext.nodeContext().strip();
+        if (originalText.isBlank() && safeNodeContext.nodeId() != null) {
+            String targetTitle = safeNodeContext.nodeTitle().isBlank() ? "当前结构节点" : safeNodeContext.nodeTitle();
+            originalText = "当前结构节点正文为空，请围绕“" + targetTitle + "”生成可直接填入该节点的正文建议。";
+        }
         return new LocalOperationPrompt(
                 LOCAL_OPERATION_PROMPT_VERSION,
                 draft.documentTypeCode(),

@@ -185,6 +185,7 @@ class DraftNodeControllerTest {
                 10,
                 status,
                 formatOverride,
+                DraftNodeMetadata.empty(),
                 Instant.parse("2026-05-30T00:00:00Z"),
                 Instant.parse("2026-05-30T00:00:00Z")
         );
