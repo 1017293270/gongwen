@@ -7,6 +7,7 @@ import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.draft.UpdateDraftBlocksRequest;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeDto;
+import com.gongwen.assistant.draft.node.DraftNodeFormattingResolver;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialRepository;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -29,6 +31,7 @@ public class AiParagraphService {
     private final ModelAdapter modelAdapter;
     private final AiGenerationTraceRepository traceRepository;
     private final DraftNodeRepository draftNodeRepository;
+    private final DraftNodeFormattingResolver formattingResolver;
 
     public AiParagraphService(
             DraftService draftService,
@@ -36,7 +39,8 @@ public class AiParagraphService {
             PromptBuilder promptBuilder,
             ModelAdapter modelAdapter,
             AiGenerationTraceRepository traceRepository,
-            DraftNodeRepository draftNodeRepository
+            DraftNodeRepository draftNodeRepository,
+            DraftNodeFormattingResolver formattingResolver
     ) {
         this.draftService = draftService;
         this.materialRepository = materialRepository;
@@ -44,6 +48,7 @@ public class AiParagraphService {
         this.modelAdapter = modelAdapter;
         this.traceRepository = traceRepository;
         this.draftNodeRepository = draftNodeRepository;
+        this.formattingResolver = formattingResolver;
     }
 
     public AiParagraphResponse generateParagraph(long draftId, AiParagraphRequest request) {
@@ -71,7 +76,7 @@ public class AiParagraphService {
                     .filter(block -> "BODY_PARAGRAPH".equals(block.blockType()) && block.sortOrder() == sortOrder)
                     .findFirst()
                     .orElseThrow();
-            DraftNodeDto updatedNode = updateTargetNode(draftId, targetNode, paragraphContent);
+            DraftNodeDto updatedNode = updateTargetNode(draft, targetNode, paragraphContent);
             traceRepository.save(successTrace(traceId, draftId, prompt, generatedBlock, updatedNode, startedAt));
             return new AiParagraphResponse(traceId, updatedDraft, generatedBlock, updatedNode);
         } catch (ModelAdapterException exception) {
@@ -154,13 +159,21 @@ public class AiParagraphService {
                 .orElse(20) + 10;
     }
 
-    private DraftNodeDto updateTargetNode(long draftId, DraftNode targetNode, String content) {
+    private DraftNodeDto updateTargetNode(DraftDetailDto draft, DraftNode targetNode, String content) {
         if (targetNode == null) {
             return null;
         }
+        long draftId = draft.id();
         DraftNode updated = draftNodeRepository.updateContent(draftId, targetNode.id(), content, "AI_GENERATED")
                 .orElseThrow(() -> new AiOutlineException("AI_NODE_TARGET_NOT_FOUND", "目标结构节点不存在"));
-        return DraftNodeDto.from(updated);
+        Map<Long, DraftNodeFormattingResolver.ResolvedDraftNodeFormatting> formattingByNodeId =
+                formattingResolver.resolve(draft.templateVersionId(), List.of(updated));
+        DraftNodeFormattingResolver.ResolvedDraftNodeFormatting formatting = formattingByNodeId.get(updated.id());
+        return DraftNodeDto.from(
+                updated,
+                formatting == null ? null : formatting.baseFormatting(),
+                formatting == null ? null : formatting.effectiveFormatting()
+        );
     }
 
     private String normalizeParagraphContent(String content, String heading) {

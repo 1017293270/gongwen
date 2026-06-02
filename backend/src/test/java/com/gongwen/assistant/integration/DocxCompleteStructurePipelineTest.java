@@ -19,6 +19,7 @@ import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeDto;
 import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
+import com.gongwen.assistant.draft.node.DraftNodeFormattingResolver;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.draft.node.DraftNodeService;
 import com.gongwen.assistant.draft.node.UpdateDraftNodeRequest;
@@ -134,7 +135,12 @@ class DocxCompleteStructurePipelineTest {
                 new DraftService(drafts),
                 draftNodes,
                 mappings,
-                structures
+                structures,
+                new DraftNodeFormattingResolver(
+                        structures,
+                        new EmptyTemplateStructureFormattingRepository(),
+                        new TemplateEffectiveFormattingService()
+                )
         );
         List<DraftNodeDto> initialized = nodeService.initializeNodes(draftId);
         List<String> bodyContents = initialized.stream()
@@ -300,7 +306,12 @@ class DocxCompleteStructurePipelineTest {
                 new DraftService(drafts),
                 draftNodes,
                 mappings,
-                structures
+                structures,
+                new DraftNodeFormattingResolver(
+                        structures,
+                        new EmptyTemplateStructureFormattingRepository(),
+                        new TemplateEffectiveFormattingService()
+                )
         );
         InMemoryExportRecordRepository exports = new InMemoryExportRecordRepository();
         DraftWordExportService exportService = new DraftWordExportService(

@@ -6,17 +6,27 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftNotFoundException;
 import com.gongwen.assistant.draft.DraftRepository;
 import com.gongwen.assistant.draft.DraftService;
+import com.gongwen.assistant.documentstructure.DocumentNode;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
+import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
+import com.gongwen.assistant.draft.node.DraftNodeFormattingResolver;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialDto;
 import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.material.MaterialSaveCommand;
+import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
+import com.gongwen.assistant.template.profile.TemplateLineSpacingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -124,6 +134,8 @@ class AiParagraphServiceTest {
         assertThat(response.node().id()).isEqualTo(10L);
         assertThat(response.node().role()).isEqualTo("BODY");
         assertThat(response.node().status()).isEqualTo("AI_GENERATED");
+        assertThat(response.node().baseFormatting()).isEqualTo(sourceBodyFormatting());
+        assertThat(response.node().effectiveFormatting()).isEqualTo(sourceBodyFormatting());
         assertThat(response.node().content()).contains("一、主要事项", "节点化生成");
         assertThat(draftNodeRepository.updatedRole).isEqualTo("BODY");
         assertThat(traceRepository.saved.inputSummary()).contains("nodeId=10", "nodeRole=BODY", "nodeContextChars=");
@@ -167,7 +179,8 @@ class AiParagraphServiceTest {
                 new PromptBuilder(),
                 modelAdapter,
                 traceRepository,
-                draftNodeRepository
+                draftNodeRepository,
+                formattingResolver()
         );
     }
 
@@ -257,7 +270,7 @@ class AiParagraphServiceTest {
 
         @Override
         public DraftDetailDto createDraft(String documentTypeCode, String title, List<DraftBlockUpdateRequest> blocks) {
-            draft = new DraftDetailDto(id++, documentTypeCode, title, "DRAFT", toDtos(blocks));
+            draft = new DraftDetailDto(id++, documentTypeCode, title, "DRAFT", 9L, toDtos(blocks));
             return draft;
         }
 
@@ -286,6 +299,75 @@ class AiParagraphServiceTest {
                 sorted.add(new DraftBlockDto(blockId++, block.blockType(), block.content(), block.sortOrder()));
             }
             return sorted;
+        }
+    }
+
+    private static DraftNodeFormattingResolver formattingResolver() {
+        return new DraftNodeFormattingResolver(
+                new FixedDocumentStructureProfileRepository(),
+                new FixedTemplateStructureFormattingRepository(),
+                new TemplateEffectiveFormattingService()
+        );
+    }
+
+    private static TemplateStructureFormattingProfile sourceBodyFormatting() {
+        return new TemplateStructureFormattingProfile(
+                "SourceFangSong",
+                32,
+                false,
+                "BOTH",
+                720,
+                180,
+                0,
+                0,
+                null,
+                "SourceFangSong",
+                "Times New Roman",
+                new TemplateLineSpacingProfile("AUTO", null, 180)
+        );
+    }
+
+    private record FixedDocumentStructureProfileRepository() implements DocumentStructureProfileRepository {
+        @Override
+        public void save(long templateVersionId, DocumentStructureProfile profile) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<DocumentStructureProfile> findByTemplateVersionId(long templateVersionId) {
+            return Optional.of(new DocumentStructureProfile(
+                    1,
+                    "hash",
+                    "document-structure-v1",
+                    List.of(new DocumentNode(
+                            "node-10",
+                            null,
+                            "PARAGRAPH",
+                            "BODY",
+                            "Source body",
+                            "Source body",
+                            10,
+                            "/node-10",
+                            sourceBodyFormatting(),
+                            List.of()
+                    )),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    Instant.now()
+            ));
+        }
+    }
+
+    private record FixedTemplateStructureFormattingRepository() implements TemplateStructureFormattingRepository {
+        @Override
+        public Map<String, TemplateStructureFormattingProfile> findOverrides(long templateVersionId) {
+            return Map.of();
+        }
+
+        @Override
+        public void saveOverride(long templateVersionId, String structureKey, TemplateStructureFormattingProfile formatting) {
+            throw new UnsupportedOperationException();
         }
     }
 

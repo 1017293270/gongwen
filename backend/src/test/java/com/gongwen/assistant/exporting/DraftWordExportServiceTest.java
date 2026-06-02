@@ -12,6 +12,7 @@ import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
 import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeFormatOverride;
+import com.gongwen.assistant.draft.node.DraftNodeMetadata;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.exporting.word.ExportFormattingContext;
 import com.gongwen.assistant.support.DocxTestFactory;
@@ -377,6 +378,80 @@ class DraftWordExportServiceTest {
         assertThat(wordExportService.lastRequest.traceSnapshot().mappingProfileSnapshot()).isSameAs(mapping);
         assertThat(wordExportService.lastRequest.traceSnapshot().formattingSnapshot()).isSameAs(formatting);
         assertThat(wordExportService.lastRequest.traceSnapshot().nodeSnapshot()).isInstanceOf(List.class);
+    }
+
+    @Test
+    void exportFormattingUsesSyntheticStyleSourceNodeKey() throws Exception {
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE, PLACEHOLDER_BODY);
+        Path templatePath = tempDir.resolve("synthetic-formatting-template.docx");
+        Files.write(templatePath, templateBytes);
+        long draftId = 37L;
+        long templateVersionId = 9L;
+        long mappingProfileId = 60L;
+        TemplateProfile profile = new TemplateProfile(
+                1,
+                List.of(
+                        structure("title-1", "TITLE", "CENTER", 0, 0),
+                        new TemplateStructureProfile(
+                                "body-default",
+                                "BODY",
+                                "Default body",
+                                "Default body",
+                                "PARAGRAPH",
+                                null,
+                                null,
+                                "PROFILE",
+                                new TemplateStructureFormattingProfile("DefaultSong", 28, false, "LEFT", 360, 120, 0, 0)
+                        ),
+                        new TemplateStructureProfile(
+                                "body-source",
+                                "BODY",
+                                "Source body",
+                                "Source body",
+                                "PARAGRAPH",
+                                null,
+                                null,
+                                "PROFILE",
+                                new TemplateStructureFormattingProfile("SourceKai", 34, true, "BOTH", 720, 180, 40, 80)
+                        )
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()
+        );
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("title-1", "TITLE", "TITLE", 10),
+                mappingItem("body-source", "BODY", "BODY_PARAGRAPH", 20)
+        );
+        CapturingWordExportService wordExportService = new CapturingWordExportService();
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Synthetic formatting")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                wordExportService,
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(401L, draftId, mappingProfileId, "title-1", "TITLE", "TITLE", "Synthetic title", 10, DraftNodeFormatOverride.empty()),
+                        syntheticDraftNode(402L, draftId, mappingProfileId, "BODY", "Synthetic body", 20, "body-source")
+                )),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(documentStructureProfile("title-1", "body-default", "body-source"))
+        );
+
+        service.exportDraft(draftId);
+
+        ExportFormattingContext formatting = wordExportService.lastRequest.formatting();
+        assertThat(formatting.body().fontFamily()).isEqualTo("SourceKai");
+        assertThat(formatting.body().fontSizeHalfPoints()).isEqualTo(34);
+        assertThat(formatting.body().bold()).isTrue();
+        assertThat(formatting.body().alignment()).isEqualTo("BOTH");
+        assertThat(formatting.body().indentationFirstLine()).isEqualTo(720);
     }
 
     @Test
@@ -794,6 +869,35 @@ class DraftWordExportServiceTest {
                 sortOrder,
                 status,
                 formatOverride,
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private static DraftNode syntheticDraftNode(
+            long id,
+            long draftId,
+            long mappingProfileId,
+            String role,
+            String content,
+            int sortOrder,
+            String styleSourceNodeKey
+    ) {
+        return new DraftNode(
+                id,
+                draftId,
+                mappingProfileId,
+                "synthetic-" + id,
+                null,
+                "PARAGRAPH",
+                role,
+                "BODY".equals(role) ? "BODY_PARAGRAPH" : role,
+                role,
+                content,
+                sortOrder,
+                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.synthetic(null, "body-source", "AFTER", "group-" + id, styleSourceNodeKey),
                 Instant.now(),
                 Instant.now()
         );

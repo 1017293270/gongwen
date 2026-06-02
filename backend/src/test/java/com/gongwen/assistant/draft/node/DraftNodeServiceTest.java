@@ -342,7 +342,8 @@ class DraftNodeServiceTest {
                 draftService,
                 nodes,
                 mappings,
-                new FixedStructureProfileRepository(structureProfile())
+                new FixedStructureProfileRepository(structureProfile()),
+                formattingResolver(structureProfile(), Map.of())
         );
 
         assertThatThrownBy(() -> service.initializeNodes(5L))
@@ -358,7 +359,8 @@ class DraftNodeServiceTest {
                 draftService,
                 new InMemoryDraftNodeRepository(),
                 new FixedMappingRepository(null),
-                new FixedStructureProfileRepository(structureProfile())
+                new FixedStructureProfileRepository(structureProfile()),
+                formattingResolver(structureProfile(), Map.of())
         );
 
         assertThatThrownBy(() -> service.initializeNodes(5L))
@@ -510,11 +512,18 @@ class DraftNodeServiceTest {
                 nodes,
                 new FixedMappingRepository(mapping),
                 new FixedStructureProfileRepository(structureProfile),
-                new DraftNodeFormattingResolver(
-                        new FixedStructureProfileRepository(structureProfile),
-                        new FixedFormattingRepository(formattingOverrides),
-                        new TemplateEffectiveFormattingService()
-                )
+                formattingResolver(structureProfile, formattingOverrides)
+        );
+    }
+
+    private DraftNodeFormattingResolver formattingResolver(
+            DocumentStructureProfile structureProfile,
+            Map<String, TemplateStructureFormattingProfile> formattingOverrides
+    ) {
+        return new DraftNodeFormattingResolver(
+                new FixedStructureProfileRepository(structureProfile),
+                new FixedFormattingRepository(formattingOverrides),
+                new TemplateEffectiveFormattingService()
         );
     }
 

@@ -8,6 +8,9 @@ import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.security.CurrentUser;
+import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -92,7 +95,12 @@ class DraftNodeFormatOverrideTest {
                 draftService,
                 nodes,
                 new FixedMappingRepository(),
-                new FixedStructureProfileRepository()
+                new FixedStructureProfileRepository(),
+                new DraftNodeFormattingResolver(
+                        new FixedStructureProfileRepository(),
+                        new FixedFormattingRepository(),
+                        new TemplateEffectiveFormattingService()
+                )
         );
     }
 
@@ -152,6 +160,18 @@ class DraftNodeFormatOverrideTest {
         @Override
         public int nextVersionNo(long templateVersionId) {
             return 1;
+        }
+    }
+
+    private record FixedFormattingRepository() implements TemplateStructureFormattingRepository {
+        @Override
+        public Map<String, TemplateStructureFormattingProfile> findOverrides(long templateVersionId) {
+            return Map.of();
+        }
+
+        @Override
+        public void saveOverride(long templateVersionId, String structureKey, TemplateStructureFormattingProfile formatting) {
+            throw new UnsupportedOperationException("saveOverride is not used in this test");
         }
     }
 

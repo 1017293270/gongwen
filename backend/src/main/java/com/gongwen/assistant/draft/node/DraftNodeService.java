@@ -75,19 +75,6 @@ public class DraftNodeService {
         this.formattingResolver = formattingResolver;
     }
 
-    public DraftNodeService(
-            DraftService draftService,
-            DraftNodeRepository draftNodeRepository,
-            StructureMappingRepository mappingRepository,
-            DocumentStructureProfileRepository structureProfileRepository
-    ) {
-        this.draftService = draftService;
-        this.draftNodeRepository = draftNodeRepository;
-        this.mappingRepository = mappingRepository;
-        this.structureProfileRepository = structureProfileRepository;
-        this.formattingResolver = null;
-    }
-
     public List<DraftNodeDto> initializeNodes(long draftId) {
         DraftDetailDto draft = draftService.getDraft(draftId);
         Long templateVersionId = draft.templateVersionId();

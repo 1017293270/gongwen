@@ -436,16 +436,24 @@ public class DraftWordExportService {
         if (node.isEmpty()) {
             return baseSlotFormatting;
         }
-        TemplateStructureFormattingProfile original = structureFormatting(profile, node.get().templateNodeKey())
+        String sourceKey = formattingSourceKey(node.get());
+        TemplateStructureFormattingProfile original = structureFormatting(profile, sourceKey)
                 .orElse(baseSlotFormatting);
         TemplateStructureFormattingProfile merged = templateEffectiveFormattingService.resolveDraftNodeFormatting(
                 null,
                 null,
                 original,
-                structureOverrides.get(node.get().templateNodeKey()),
+                structureOverrides.get(sourceKey),
                 node.get().formatOverride()
         );
         return merged == null ? baseSlotFormatting : merged;
+    }
+
+    private String formattingSourceKey(DraftNode node) {
+        if (isSyntheticDraftNode(node) && !isBlank(node.metadata().styleSourceNodeKey())) {
+            return node.metadata().styleSourceNodeKey();
+        }
+        return node.templateNodeKey();
     }
 
     private Optional<TemplateStructureFormattingProfile> structureFormatting(TemplateProfile profile, String nodeKey) {
