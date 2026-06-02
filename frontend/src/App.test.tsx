@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
@@ -1039,6 +1039,186 @@ describe('App', () => {
     expect(editor.style.textAlign).toBe('center');
   });
 
+  it('shows inherited effective formatting when the selected node has no override', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('节点格式继承草稿'), templateVersionId: 9 };
+    const nodeRows = sampleDraftNodes().map((node) => node.id === 103
+      ? { ...node, effectiveFormatting: sampleEffectiveFormatting() }
+      : node);
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+
+    expect(screen.getByLabelText('中文字体')).toHaveValue('FangSong');
+    expect(screen.getByLabelText('西文字体')).toHaveValue('Times New Roman');
+    expect(screen.getByLabelText('字号')).toHaveValue(16);
+    expect(screen.getByLabelText('对齐方式')).toHaveValue('RIGHT');
+    expect(screen.getByLabelText('行距规则')).toHaveValue('EXACT');
+    expect(screen.getByLabelText('行距')).toHaveValue(480);
+    expect(screen.getByLabelText('首行缩进')).toHaveValue(840);
+    expect(screen.getByLabelText('段前')).toHaveValue(120);
+    expect(screen.getByLabelText('段后')).toHaveValue(240);
+    expect(screen.getByLabelText('加粗')).toBeChecked();
+  });
+
+  it('saves only edited format fields merged with existing overrides', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('节点格式局部覆盖草稿'), templateVersionId: 9 };
+    const nodeRows = sampleDraftNodes().map((node) => node.id === 103
+      ? {
+          ...node,
+          effectiveFormatting: sampleEffectiveFormatting(),
+          formatOverride: {
+            ...node.formatOverride,
+            bold: true,
+            spacingAfterTwip: 300,
+          },
+        }
+      : node);
+    const expectedPayload = {
+      eastAsiaFont: null,
+      latinFont: null,
+      fontSizePt: null,
+      bold: true,
+      alignment: 'CENTER',
+      firstLineIndentTwip: null,
+      lineSpacingRule: null,
+      lineSpacingTwip: null,
+      spacingBeforeTwip: null,
+      spacingAfterTwip: 300,
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/103/format-override') && init?.method === 'PUT') {
+        expect(JSON.parse(String(init.body))).toEqual(expectedPayload);
+        return Promise.resolve(jsonResponse({
+          ...nodeRows[2],
+          status: 'FORMAT_OVERRIDDEN',
+          formatOverride: expectedPayload,
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    expect(screen.getByLabelText('中文字体')).toHaveValue('FangSong');
+    expect(screen.getByLabelText('字号')).toHaveValue(16);
+    expect(screen.getByLabelText('段后')).toHaveValue(300);
+
+    await userEvent.selectOptions(screen.getByLabelText('对齐方式'), 'CENTER');
+    await userEvent.click(screen.getByRole('button', { name: '保存格式' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/nodes/103/format-override', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify(expectedPayload),
+    }));
+  });
+
+  it('restores node format overrides and shows returned effective formatting', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const nodeDraft = { ...sampleDraft('节点格式恢复草稿'), templateVersionId: 9 };
+    const restoredNode = {
+      ...sampleDraftNodes()[2],
+      effectiveFormatting: sampleEffectiveFormatting(),
+    };
+    const nodeRows = sampleDraftNodes().map((node) => node.id === 103
+      ? {
+          ...node,
+          effectiveFormatting: { ...sampleEffectiveFormatting(), eastAsiaFontFamily: 'KaiTi' },
+          formatOverride: {
+            ...node.formatOverride,
+            eastAsiaFont: 'KaiTi',
+          },
+        }
+      : node);
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(nodeDraft));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/templates/versions/9/profile')) {
+        return Promise.resolve(jsonResponse(templateBodyProfile()));
+      }
+      if (url.endsWith('/api/templates/versions/9/structure-formatting')) {
+        return Promise.resolve(jsonResponse({}));
+      }
+      if (url.endsWith('/api/drafts/1/nodes')) {
+        return Promise.resolve(jsonResponse(nodeRows));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/103/format-override') && init?.method === 'DELETE') {
+        return Promise.resolve(jsonResponse(restoredNode));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    expect(screen.getByLabelText('中文字体')).toHaveValue('KaiTi');
+
+    await userEvent.click(screen.getByRole('button', { name: '恢复模板默认' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/nodes/103/format-override', expect.objectContaining({
+      method: 'DELETE',
+    }));
+    expect(await screen.findByDisplayValue('FangSong')).toBeInTheDocument();
+  });
+
   it('expands the selected paragraph editor to fit its content', async () => {
     Object.defineProperty(HTMLTextAreaElement.prototype, 'scrollHeight', {
       configurable: true,
@@ -1243,7 +1423,7 @@ describe('App', () => {
     expect(clickSpy).toHaveBeenCalled();
   });
 
-  it('marks true preview outdated after editing and refreshes it from the workbench', async () => {
+  it('refreshes true preview from the workbench after structured editing', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '1');
     const draft = { ...sampleDraft('预览刷新草稿'), templateVersionId: 9 };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -1288,15 +1468,18 @@ describe('App', () => {
     render(<App />);
 
     await openWorkbench();
-    const titleInput = await screen.findByLabelText('标题');
+    await screen.findByLabelText('标题');
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/render-preview', expect.objectContaining({
       headers: expect.any(Object),
     }));
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/templates/versions/9/render-preview'))).toBe(false);
-    await userEvent.clear(titleInput);
-    await userEvent.type(titleInput, '预览刷新后的标题');
+    expect(await screen.findByText('真实预览已是当前版本')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '结构编辑' }));
+    const preview = screen.getByLabelText('公文预览');
+    await userEvent.click((await within(preview).findByText('一、会议时间')).closest('button') as HTMLButtonElement);
+    const bodyEditor = await within(preview).findByLabelText(/编辑段落/);
+    fireEvent.change(bodyEditor, { target: { value: 'A' } });
 
-    expect(await screen.findByText('真实预览待刷新')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '刷新预览' }));
 
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
@@ -3040,6 +3223,26 @@ function sampleDraftNodes() {
       status: 'USER_FILLED',
     },
   ];
+}
+
+function sampleEffectiveFormatting() {
+  return {
+    fontFamily: 'FangSong',
+    eastAsiaFontFamily: 'FangSong',
+    latinFontFamily: 'Times New Roman',
+    fontSizeHalfPoints: 32,
+    bold: true,
+    alignment: 'RIGHT',
+    indentationFirstLine: 840,
+    spacingBetween: null,
+    lineSpacing: {
+      mode: 'EXACT',
+      valueTwips: 480,
+      multipleHundred: null,
+    },
+    spacingBefore: 120,
+    spacingAfter: 240,
+  };
 }
 
 function templateBodyProfile() {

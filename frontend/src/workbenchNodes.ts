@@ -190,6 +190,10 @@ function sourceFromDraftNodeStatus(status: string): WorkbenchNode['source'] {
 }
 
 function formattingFromDraftNode(node: DraftNode): Partial<TemplateStructureFormatting> {
+  if (node.effectiveFormatting) {
+    return node.effectiveFormatting;
+  }
+
   const override = node.formatOverride;
   return {
     fontFamily: override?.eastAsiaFont ?? null,

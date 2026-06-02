@@ -2324,12 +2324,13 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             />
             <NodeFormatPanel
               disabled={selectedNodeFormatDisabled}
+              effectiveFormatting={selectedDraftNode?.effectiveFormatting ?? selectedNode?.formatting ?? null}
               error={nodeFormatError}
               formatOverride={selectedDraftNode?.formatOverride ?? null}
               nodeLabel={selectedNodeFormatLabel}
               onRestore={() => void handleRestoreNodeFormatOverride()}
               onSave={(formatOverride) => void handleSaveNodeFormatOverride(formatOverride)}
-              previewOutdated={false}
+              previewOutdated={renderPreviewOutdated}
               status={nodeFormatStatus}
             />
             <div className="local-operation" aria-label="局部段落操作">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bodyNodeLabel, composeBodySectionContent, deriveWorkbenchNodes } from './workbenchNodes';
-import type { DraftDetail, DraftNode, TemplateProfile } from './draftTypes';
+import type { DraftDetail, DraftNode, TemplateProfile, TemplateStructureFormatting } from './draftTypes';
 
 function draft(blocks: DraftDetail['blocks']): DraftDetail {
   return {
@@ -122,6 +122,89 @@ describe('deriveWorkbenchNodes', () => {
       heading: '一、节点标题',
       content: '节点正文',
       source: 'USER',
+    });
+  });
+
+  it('uses effective formatting from persisted draft nodes before override fallback', () => {
+    const nodes = deriveWorkbenchNodes({
+      ...draft([]),
+      nodes: [
+        draftNode(501, 'BODY', '节点正文', 30, {
+          effectiveFormatting: {
+            fontFamily: 'FangSong',
+            eastAsiaFontFamily: 'FangSong',
+            latinFontFamily: 'Times New Roman',
+            fontSizeHalfPoints: 32,
+            bold: true,
+            alignment: 'RIGHT',
+            indentationFirstLine: 840,
+            spacingBetween: null,
+            lineSpacing: {
+              mode: 'EXACT',
+              valueTwips: 480,
+              multipleHundred: null,
+            },
+            spacingBefore: 120,
+            spacingAfter: 240,
+          },
+          formatOverride: {
+            eastAsiaFont: 'KaiTi',
+            latinFont: null,
+            fontSizePt: 18,
+            bold: null,
+            alignment: null,
+            firstLineIndentTwip: null,
+            lineSpacingRule: null,
+            lineSpacingTwip: null,
+            spacingBeforeTwip: null,
+            spacingAfterTwip: null,
+          },
+        }),
+      ],
+    }, profile(), {});
+
+    expect(nodes[0].formatting).toMatchObject({
+      eastAsiaFontFamily: 'FangSong',
+      latinFontFamily: 'Times New Roman',
+      fontSizeHalfPoints: 32,
+      bold: true,
+      alignment: 'RIGHT',
+      indentationFirstLine: 840,
+      spacingBefore: 120,
+      spacingAfter: 240,
+    });
+  });
+
+  it('falls back to deriving formatting from draft node overrides for old responses', () => {
+    const nodes = deriveWorkbenchNodes({
+      ...draft([]),
+      nodes: [
+        draftNode(502, 'BODY', '节点正文', 30, {
+          formatOverride: {
+            eastAsiaFont: 'KaiTi',
+            latinFont: 'Arial',
+            fontSizePt: 18,
+            bold: true,
+            alignment: 'CENTER',
+            firstLineIndentTwip: 560,
+            lineSpacingRule: 'AUTO',
+            lineSpacingTwip: 150,
+            spacingBeforeTwip: 80,
+            spacingAfterTwip: 120,
+          },
+        }),
+      ],
+    }, profile(), {});
+
+    expect(nodes[0].formatting).toMatchObject({
+      eastAsiaFontFamily: 'KaiTi',
+      latinFontFamily: 'Arial',
+      fontSizeHalfPoints: 36,
+      bold: true,
+      alignment: 'CENTER',
+      indentationFirstLine: 560,
+      spacingBefore: 80,
+      spacingAfter: 120,
     });
   });
 
@@ -280,7 +363,14 @@ function draftNode(
   role: string,
   content: string,
   sortOrder: number,
-  options: { nodeType?: string; status?: string; title?: string; metadata?: DraftNode['metadata'] } = {},
+  options: {
+    nodeType?: string;
+    status?: string;
+    title?: string;
+    metadata?: DraftNode['metadata'];
+    effectiveFormatting?: TemplateStructureFormatting;
+    formatOverride?: DraftNode['formatOverride'];
+  } = {},
 ) {
   return {
     id,
@@ -296,7 +386,7 @@ function draftNode(
     sortOrder,
     status: options.status ?? 'USER_FILLED',
     metadata: options.metadata,
-    formatOverride: {
+    formatOverride: options.formatOverride ?? {
       eastAsiaFont: null,
       latinFont: null,
       fontSizePt: null,
@@ -308,6 +398,7 @@ function draftNode(
       spacingBeforeTwip: null,
       spacingAfterTwip: null,
     },
+    effectiveFormatting: options.effectiveFormatting,
     createdAt: '2026-05-30T00:00:00Z',
     updatedAt: '2026-05-30T00:00:00Z',
   };

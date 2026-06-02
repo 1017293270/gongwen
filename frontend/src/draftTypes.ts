@@ -95,6 +95,8 @@ export type DraftNode = {
   sortOrder: number;
   status: string;
   formatOverride: DraftNodeFormatOverride;
+  baseFormatting?: TemplateStructureFormatting | null;
+  effectiveFormatting?: TemplateStructureFormatting | null;
   metadata?: DraftNodeMetadata | null;
   createdAt: string;
   updatedAt: string;
