@@ -1,6 +1,7 @@
 package com.gongwen.assistant.common.web;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -12,6 +13,7 @@ public class CorsConfiguration implements WebMvcConfigurer {
                 .allowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
+                .exposedHeaders(HttpHeaders.CONTENT_DISPOSITION)
                 .allowCredentials(true);
     }
 }

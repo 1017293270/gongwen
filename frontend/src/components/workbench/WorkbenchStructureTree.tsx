@@ -1,4 +1,5 @@
-import { RotateCcw, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronDown, RotateCcw, Trash2 } from 'lucide-react';
 import { bodyNodeLabel, bodyNodePreview } from '../../workbenchNodes';
 import type { WorkbenchNode } from '../../draftTypes';
 import { Button, StatusMessage } from '../ui';
@@ -28,12 +29,22 @@ export function WorkbenchStructureTree({
   onRemoveBodyNode,
   onReinitialize,
 }: WorkbenchStructureTreeProps) {
+  const [bodyGroupOpen, setBodyGroupOpen] = useState(true);
+  const structureNodes = nodes.filter((node) => node.nodeType !== 'BODY_SECTION');
+  const bodyGroupSelected = bodySectionNodes.some((node) => node.nodeId === selectedNodeId);
+
+  useEffect(() => {
+    if (bodyGroupSelected) {
+      setBodyGroupOpen(true);
+    }
+  }, [bodyGroupSelected]);
+
   return (
     <>
       <section className="structure-tree" aria-label="结构节点树">
         <div className="paragraph-index-header">
           <span className="field-label">结构树</span>
-          <span className="paragraph-count">{nodes.length} 节点</span>
+          <span className="paragraph-count">{structureNodes.length} 结构 · {bodySectionNodes.length} 正文</span>
         </div>
         <div className="workbench-structure-actions">
           <p>按当前已发布映射重新生成节点。默认使用原稿内容覆盖旧节点；需要保留已有编辑时可单独选择。</p>
@@ -66,7 +77,7 @@ export function WorkbenchStructureTree({
         )}
         {nodes.length > 0 ? (
           <div className="structure-tree-list">
-            {nodes.map((node, index) => {
+            {structureNodes.map((node, index) => {
               const editable = node.editable !== false && !node.locked;
               return (
                 <button
@@ -88,46 +99,56 @@ export function WorkbenchStructureTree({
                 </button>
               );
             })}
+            <details
+              aria-label="正文段落目录"
+              className={`structure-tree-body-group ${bodyGroupSelected ? 'selected' : ''}`}
+              onToggle={(event) => setBodyGroupOpen(event.currentTarget.open)}
+              open={bodyGroupOpen}
+            >
+              <summary className="structure-tree-body-summary">
+                <span className="structure-tree-body-summary-main">
+                  <ChevronDown aria-hidden="true" size={16} />
+                  <span>
+                    <span className="structure-tree-body-title">正文</span>
+                    <span className="structure-tree-body-meta">展开查看正文详细节点</span>
+                  </span>
+                </span>
+                <span className="paragraph-count">{bodySectionNodes.length} 段</span>
+              </summary>
+              {bodySectionNodes.length > 0 ? (
+                <div className="paragraph-index-list structure-tree-body-list">
+                  {bodySectionNodes.map((node, index) => (
+                    <div
+                      aria-current={selectedNodeId === node.nodeId ? 'true' : undefined}
+                      className={`paragraph-index-item ${selectedNodeId === node.nodeId ? 'selected' : ''}`}
+                      key={node.nodeId}
+                    >
+                      <button className="paragraph-index-select" onClick={() => onSelectNode(node.nodeId)} type="button">
+                        <span className="paragraph-index-number">{index + 1}</span>
+                        <span className="paragraph-index-copy">
+                          <span className="paragraph-index-title">{bodyNodeLabel(node, index)}</span>
+                          <span className="paragraph-index-preview">{bodyNodePreview(node)}</span>
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`删除正文结构：${bodyNodeLabel(node, index)}`}
+                        className="paragraph-index-delete"
+                        onClick={() => onRemoveBodyNode(node)}
+                        title="删除当前草稿结构，不删除模板"
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-note">暂无正文段落，先生成或填写正文。</p>
+              )}
+            </details>
           </div>
         ) : (
           <p className="empty-note">暂无结构节点，先绑定模板或填写正文。</p>
-        )}
-      </section>
-
-      <section className="paragraph-index" aria-label="正文段落目录">
-        <div className="paragraph-index-header">
-          <span className="field-label">正文</span>
-          <span className="paragraph-count">{bodySectionNodes.length} 段</span>
-        </div>
-        {bodySectionNodes.length > 0 ? (
-          <div className="paragraph-index-list">
-            {bodySectionNodes.map((node, index) => (
-              <div
-                aria-current={selectedNodeId === node.nodeId ? 'true' : undefined}
-                className={`paragraph-index-item ${selectedNodeId === node.nodeId ? 'selected' : ''}`}
-                key={node.nodeId}
-              >
-                <button className="paragraph-index-select" onClick={() => onSelectNode(node.nodeId)} type="button">
-                  <span className="paragraph-index-number">{index + 1}</span>
-                  <span className="paragraph-index-copy">
-                    <span className="paragraph-index-title">{bodyNodeLabel(node, index)}</span>
-                    <span className="paragraph-index-preview">{bodyNodePreview(node)}</span>
-                  </span>
-                </button>
-                <button
-                  aria-label={`删除正文结构：${bodyNodeLabel(node, index)}`}
-                  className="paragraph-index-delete"
-                  onClick={() => onRemoveBodyNode(node)}
-                  title="删除当前草稿结构，不删除模板"
-                  type="button"
-                >
-                  <Trash2 aria-hidden="true" size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="empty-note">暂无正文段落，先生成或填写正文。</p>
         )}
       </section>
     </>

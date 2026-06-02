@@ -1071,6 +1071,44 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     });
   }
 
+  function removeWorkbenchNode(node: WorkbenchNode) {
+    if (node.nodeType === 'BODY_SECTION') {
+      removeBodyNode(node);
+      return;
+    }
+    const nodeLabel = node.label || workbenchNodeRoleLabel(node.nodeType);
+    const confirmed = window.confirm(`删除当前草稿中的“${nodeLabel}”结构？模板内容不会被删除。`);
+    if (!confirmed) {
+      return;
+    }
+    const storageKey = draft ? deletedNodeStorageKey(draft.id, draft.templateVersionId) : null;
+    markDraftContentDirty();
+    setLocalOperationError('');
+    setLocalOperationStatus('idle');
+    setSelectedNodeId(null);
+    if (node.draftNodeId) {
+      setDraftNodes((currentNodes) => currentNodes.map((draftNode) => (
+        draftNode.id === node.draftNodeId ? { ...draftNode, status: 'DELETED' } : draftNode
+      )));
+      setDirtyDraftNodeIds((currentIds) => new Set(currentIds).add(node.draftNodeId as number));
+    }
+    setDeletedNodeIds((current) => {
+      const next = new Set(current);
+      next.add(node.nodeId);
+      if (storageKey) {
+        writeDeletedNodeIds(storageKey, next);
+      }
+      return next;
+    });
+    const blockType = blockTypeForWorkbenchNode(node);
+    setBlocks((currentBlocks) => currentBlocks.filter((block) => {
+      if (node.draftBlockId && block.id === node.draftBlockId) {
+        return false;
+      }
+      return !blockType || block.blockType !== blockType;
+    }));
+  }
+
   function removeBodyNode(node: WorkbenchNode) {
     const confirmed = window.confirm('删除当前草稿中的这个正文结构？模板内容不会被删除。');
     if (!confirmed) {
@@ -2142,6 +2180,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               onUpdateBodyContent={updateBodyNodeContent}
               onUpdateBodyHeading={updateBodyNodeHeading}
               onUpdateDate={(content) => updateWorkbenchNodeContent(dateNode, content)}
+              onUpdateNodeContent={updateWorkbenchNodeContent}
               onUpdateRecipient={(content) => updateWorkbenchNodeContent(recipientNode, content)}
               onUpdateSignature={(content) => updateWorkbenchNodeContent(signatureNode, content)}
               onUpdateTitle={(content) => updateWorkbenchNodeContent(titleNode, content)}

@@ -1423,11 +1423,6 @@ textarea.field {
   line-height: var(--leading-body);
 }
 
-.paragraph-index {
-  display: grid;
-  gap: var(--space-2);
-}
-
 .structure-tree {
   display: grid;
   gap: var(--space-2);
@@ -1501,6 +1496,81 @@ textarea.field {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-body);
+}
+
+.structure-tree-body-group {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-surface-warm);
+  padding: 9px 10px 10px;
+}
+
+.structure-tree-body-group.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.structure-tree-body-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--color-text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.structure-tree-body-summary::-webkit-details-marker {
+  display: none;
+}
+
+.structure-tree-body-summary:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid rgba(var(--rgb-accent), 0.45);
+  outline-offset: 3px;
+}
+
+.structure-tree-body-summary-main {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.structure-tree-body-summary-main svg {
+  color: var(--color-text-muted);
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+
+.structure-tree-body-group:not([open]) .structure-tree-body-summary-main svg {
+  transform: rotate(-90deg);
+}
+
+.structure-tree-body-title,
+.structure-tree-body-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.structure-tree-body-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--leading-title);
+}
+
+.structure-tree-body-meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.structure-tree-body-list {
+  padding-top: var(--space-2);
 }
 
 .workbench-structure-actions {

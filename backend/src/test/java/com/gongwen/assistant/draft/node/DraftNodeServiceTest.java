@@ -130,6 +130,25 @@ class DraftNodeServiceTest {
     }
 
     @Test
+    void initializesManuallyMappedMetadataRolesAsEditableNodes() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(emptyDraftWithTemplate());
+        DraftNodeService service = service(
+                draftService,
+                new InMemoryDraftNodeRepository(),
+                editableMetadataMapping(),
+                editableMetadataStructureProfile()
+        );
+
+        List<DraftNodeDto> initialized = service.initializeNodes(5L);
+
+        assertThat(initialized).extracting(DraftNodeDto::role)
+                .containsExactly("ISSUING_ORGAN", "DOC_NUMBER", "TABLE_ATTACHMENT");
+        assertThat(initialized).extracting(DraftNodeDto::status)
+                .containsExactly("USER_FILLED", "USER_FILLED", "USER_FILLED");
+    }
+
+    @Test
     void initializesEachBodyNodeFromItsOwnSourceTextInsteadOfDuplicatingLegacyBody() {
         DraftService draftService = mock(DraftService.class);
         when(draftService.getDraft(5L)).thenReturn(draftWithTemplateAndOneLegacyBody());
@@ -421,6 +440,26 @@ class DraftNodeServiceTest {
         );
     }
 
+    private StructureMappingProfile editableMetadataMapping() {
+        return new StructureMappingProfile(
+                25L,
+                9L,
+                2,
+                "PUBLISHED",
+                List.of(
+                        item("organ-node", "ISSUING_ORGAN", 10),
+                        item("number-node", "DOC_NUMBER", 20),
+                        item("table-node", "TABLE_ATTACHMENT", 30)
+                ),
+                List.of(),
+                3,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
     private StructureMappingItem item(String nodeKey, String role, int sortOrder) {
         return new StructureMappingItem(nodeKey, role, "", "CONFIRMED", "USER", 1, "", sortOrder);
     }
@@ -491,6 +530,23 @@ class DraftNodeServiceTest {
                         node("multi-body-1", "BODY", "第一段源正文", 30),
                         node("multi-body-2", "BODY", "第二段源正文", 40),
                         node("multi-body-3", "BODY", "第三段源正文", 50)
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
+    }
+
+    private DocumentStructureProfile editableMetadataStructureProfile() {
+        return new DocumentStructureProfile(
+                1,
+                "hash",
+                "document-structure-v2",
+                List.of(
+                        node("organ-node", "STATIC_TEXT", "示例办公室", 10),
+                        node("number-node", "STATIC_TEXT", "示例办〔2026〕5号", 20),
+                        node("table-node", "TABLE_PARAGRAPH", "附件表格内容", 30)
                 ),
                 List.of(),
                 List.of(),

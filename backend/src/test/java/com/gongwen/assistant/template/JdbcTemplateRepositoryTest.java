@@ -11,7 +11,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class JdbcTemplateRepositoryTest {
@@ -44,5 +46,20 @@ class JdbcTemplateRepositoryTest {
         assertThatThrownBy(() -> repository.create("测试2", "NOTICE"))
                 .isInstanceOf(TemplateException.class)
                 .hasMessage("Template name already exists in another document type");
+    }
+    @Test
+    @SuppressWarnings("unchecked")
+    void rejectsDeletingTemplateWhenDraftsStillUseIt() {
+        TemplateSummary existing = new TemplateSummary(7L, "模板", "NOTICE", "ACTIVE");
+        when(jdbcTemplate.query(startsWith("select id, template_name"), any(RowMapper.class), eq(7L)))
+                .thenReturn(List.of(existing));
+        when(jdbcTemplate.queryForObject(startsWith("select count(*)"), eq(Integer.class), eq(7L), eq(7L)))
+                .thenReturn(2);
+
+        assertThatThrownBy(() -> repository.deleteById(7L))
+                .isInstanceOf(TemplateException.class)
+                .hasMessage("模板已被草稿使用，不能直接删除；请先删除相关草稿或更换草稿模板后再删除模板");
+
+        verify(jdbcTemplate, never()).update(startsWith("delete from document_template"), eq(7L));
     }
 }

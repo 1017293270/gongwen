@@ -109,6 +109,12 @@ public class JdbcTemplateRepository implements TemplateRepository {
     public void deleteById(long id, CurrentUser currentUser) {
         findById(id, currentUser)
                 .orElseThrow(() -> new TemplateException("TEMPLATE_NOT_FOUND", "Template not found"));
+        if (countDraftReferences(id) > 0) {
+            throw new TemplateException(
+                    "TEMPLATE_IN_USE_BY_DRAFTS",
+                    "模板已被草稿使用，不能直接删除；请先删除相关草稿或更换草稿模板后再删除模板"
+            );
+        }
         jdbcTemplate.update("""
                 update draft
                 set template_version_id = null, updated_at = now()
@@ -117,6 +123,25 @@ public class JdbcTemplateRepository implements TemplateRepository {
                 )
                 """, id);
         jdbcTemplate.update("delete from document_template where id = ?", id);
+    }
+
+    private int countDraftReferences(long templateId) {
+        Integer count = jdbcTemplate.queryForObject("""
+                select count(*)
+                from (
+                    select d.id as draft_id
+                    from draft d
+                    join document_template_version v on v.id = d.template_version_id
+                    where v.template_id = ?
+                    union
+                    select dn.draft_id as draft_id
+                    from draft_node dn
+                    join structure_mapping_profile smp on smp.id = dn.structure_mapping_profile_id
+                    join document_template_version v on v.id = smp.template_version_id
+                    where v.template_id = ?
+                ) used_drafts
+                """, Integer.class, templateId, templateId);
+        return count == null ? 0 : count;
     }
 
     private TemplateSummary mapSummary(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

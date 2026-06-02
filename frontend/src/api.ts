@@ -62,36 +62,36 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     ...await csrfHeader(path, method),
     ...init?.headers,
   };
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
+  const response = await fetchApi(`${apiBaseUrl()}${path}`, {
     credentials: 'include',
     headers,
     ...init,
   });
-  const payload = (await response.json()) as ApiResponse<T>;
+  const payload = await readApiPayload<T>(response);
   if (!response.ok || !payload.success) {
-    throw new ApiRequestError(payload.message ?? '请求失败', payload.errorCode ?? null, response.status);
+    throw new ApiRequestError(payload.message ?? fallbackMessageForStatus(response.status), payload.errorCode ?? null, response.status);
   }
   return payload.data;
 }
 
 async function requestFormData<T>(path: string, formData: FormData): Promise<T> {
   const headers = await csrfHeader(path, 'POST');
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
+  const response = await fetchApi(`${apiBaseUrl()}${path}`, {
     credentials: 'include',
     headers,
     method: 'POST',
     body: formData,
   });
-  const payload = (await response.json()) as ApiResponse<T>;
+  const payload = await readApiPayload<T>(response);
   if (!response.ok || !payload.success) {
-    throw new ApiRequestError(payload.message ?? '请求失败', payload.errorCode ?? null, response.status);
+    throw new ApiRequestError(payload.message ?? fallbackMessageForStatus(response.status), payload.errorCode ?? null, response.status);
   }
   return payload.data;
 }
 
 async function requestBlob(path: string, init?: RequestInit): Promise<{ blob: Blob; fileName: string }> {
   const method = (init?.method ?? 'GET').toUpperCase();
-  const response = await fetch(`${apiBaseUrl()}${path}`, {
+  const response = await fetchApi(`${apiBaseUrl()}${path}`, {
     credentials: 'include',
     headers: {
       ...await csrfHeader(path, method),
@@ -100,8 +100,8 @@ async function requestBlob(path: string, init?: RequestInit): Promise<{ blob: Bl
     ...init,
   });
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as ApiResponse<null> | null;
-    throw new ApiRequestError(payload?.message ?? '请求失败', payload?.errorCode ?? null, response.status);
+    const payload = await readOptionalApiPayload<null>(response);
+    throw new ApiRequestError(payload?.message ?? fallbackMessageForStatus(response.status), payload?.errorCode ?? null, response.status);
   }
   return {
     blob: await response.blob(),
@@ -114,16 +114,63 @@ async function csrfHeader(path: string, method: string): Promise<Record<string, 
     return {};
   }
   if (!csrfToken) {
-    const response = await fetch(`${apiBaseUrl()}/api/auth/csrf`, {
+    const response = await fetchApi(`${apiBaseUrl()}/api/auth/csrf`, {
       credentials: 'include',
     });
-    const payload = (await response.json()) as ApiResponse<{ token: string }>;
+    const payload = await readApiPayload<{ token: string }>(response);
     if (!response.ok || !payload.success) {
-      throw new Error(payload.message ?? 'CSRF 初始化失败');
+      throw new ApiRequestError(payload.message ?? '安全令牌初始化失败，请刷新页面后重试', payload.errorCode ?? null, response.status);
     }
     csrfToken = payload.data.token;
   }
   return { 'X-XSRF-TOKEN': csrfToken };
+}
+
+async function fetchApi(input: RequestInfo | URL, init?: RequestInit) {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+    throw new ApiRequestError('无法连接后端服务，请确认服务已启动后重试', 'NETWORK_ERROR', 0);
+  }
+}
+
+async function readApiPayload<T>(response: Response): Promise<ApiResponse<T>> {
+  const payload = await readOptionalApiPayload<T>(response);
+  if (!payload) {
+    throw new ApiRequestError('服务返回异常，请稍后重试', 'INVALID_SERVER_RESPONSE', response.status);
+  }
+  return payload;
+}
+
+async function readOptionalApiPayload<T>(response: Response): Promise<ApiResponse<T> | null> {
+  try {
+    return await response.json() as ApiResponse<T>;
+  } catch {
+    return null;
+  }
+}
+
+function fallbackMessageForStatus(status: number) {
+  if (status === 401) {
+    return '登录状态已失效，请重新登录';
+  }
+  if (status === 403) {
+    return '当前账号没有权限执行此操作';
+  }
+  if (status === 404) {
+    return '请求的内容不存在或已被删除';
+  }
+  if (status >= 500) {
+    return '系统暂时无法完成操作，请稍后重试';
+  }
+  return '请求失败，请检查后重试';
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function parseFileName(contentDisposition: string | null) {

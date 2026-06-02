@@ -257,6 +257,8 @@ public class DraftNodeService {
     private boolean isEditableSourceRole(String role) {
         return "TITLE".equals(role)
                 || "RECIPIENT".equals(role)
+                || "ISSUING_ORGAN".equals(role)
+                || "DOC_NUMBER".equals(role)
                 || "SIGNATURE".equals(role)
                 || "DATE".equals(role);
     }
@@ -319,7 +321,8 @@ public class DraftNodeService {
                 || role.startsWith("BODY_HEADING_LEVEL_")
                 || isEditableSourceRole(role)
                 || "ATTACHMENT_NOTE".equals(role)
-                || "ATTACHMENT_CONTENT".equals(role);
+                || "ATTACHMENT_CONTENT".equals(role)
+                || "TABLE_ATTACHMENT".equals(role);
     }
 
     private Map<String, String> legacyBlockContent(DraftDetailDto draft, Map<String, Long> confirmedRoleCounts) {
@@ -401,6 +404,8 @@ public class DraftNodeService {
             case "RECIPIENT" -> "recipient";
             case "BODY", "BODY_HEADING_LEVEL_1", "BODY_HEADING_LEVEL_2", "BODY_HEADING_LEVEL_3" -> "body";
             case "ATTACHMENT_NOTE", "ATTACHMENT_CONTENT", "TABLE_ATTACHMENT" -> "attachment";
+            case "ISSUING_ORGAN" -> "issuingOrgan";
+            case "DOC_NUMBER" -> "docNumber";
             case "SIGNATURE" -> "signature";
             case "DATE" -> "date";
             default -> "";

@@ -16,6 +16,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -73,5 +74,19 @@ class TemplateControllerTest {
                 .andExpect(jsonPath("$.success").value(true));
 
         verify(templateRepository).deleteById(7L, null);
+    }
+
+    @Test
+    void returnsBusinessErrorWhenTemplateIsInUse() throws Exception {
+        doThrow(new TemplateException(
+                "TEMPLATE_IN_USE_BY_DRAFTS",
+                "模板已被草稿使用，不能直接删除；请先删除相关草稿或更换草稿模板后再删除模板"
+        )).when(templateRepository).deleteById(7L, null);
+
+        mockMvc.perform(delete("/api/templates/7"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("TEMPLATE_IN_USE_BY_DRAFTS"))
+                .andExpect(jsonPath("$.message").value("模板已被草稿使用，不能直接删除；请先删除相关草稿或更换草稿模板后再删除模板"));
     }
 }

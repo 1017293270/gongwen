@@ -40,8 +40,10 @@ type WorkbenchPreviewProps = {
   onUpdateAttachment: (content: string) => void;
   onUpdateSignature: (content: string) => void;
   onUpdateDate: (content: string) => void;
+  onUpdateNodeContent?: (node: WorkbenchNode, content: string) => void;
   onUpdateBodyHeading: (node: WorkbenchNode, heading: string) => void;
   onUpdateBodyContent: (node: WorkbenchNode, content: string) => void;
+  onRemoveNode?: (node: WorkbenchNode) => void;
   onRemoveBodyNode: (node: WorkbenchNode) => void;
 };
 
@@ -77,8 +79,10 @@ export function WorkbenchPreview({
   onUpdateAttachment,
   onUpdateSignature,
   onUpdateDate,
+  onUpdateNodeContent,
   onUpdateBodyHeading,
   onUpdateBodyContent,
+  onRemoveNode,
   onRemoveBodyNode,
 }: WorkbenchPreviewProps) {
   const canShowRenderedPreview = Boolean(
@@ -203,8 +207,10 @@ export function WorkbenchPreview({
             onUpdateAttachment,
             onUpdateSignature,
             onUpdateDate,
+            onUpdateNodeContent,
             onUpdateBodyHeading,
             onUpdateBodyContent,
+            onRemoveNode,
             onRemoveBodyNode,
           })) : <p>请在左侧填写正文内容。</p>}
         </article>
@@ -298,8 +304,10 @@ type RenderPreviewNodeOptions = {
   onUpdateAttachment: (content: string) => void;
   onUpdateSignature: (content: string) => void;
   onUpdateDate: (content: string) => void;
+  onUpdateNodeContent?: (node: WorkbenchNode, content: string) => void;
   onUpdateBodyHeading: (node: WorkbenchNode, heading: string) => void;
   onUpdateBodyContent: (node: WorkbenchNode, content: string) => void;
+  onRemoveNode?: (node: WorkbenchNode) => void;
   onRemoveBodyNode: (node: WorkbenchNode) => void;
 };
 
@@ -317,8 +325,10 @@ function renderPreviewNode({
   onUpdateAttachment,
   onUpdateSignature,
   onUpdateDate,
+  onUpdateNodeContent,
   onUpdateBodyHeading,
   onUpdateBodyContent,
+  onRemoveNode,
   onRemoveBodyNode,
 }: RenderPreviewNodeOptions) {
   const selected = selectedNodeId === node.nodeId;
@@ -416,6 +426,30 @@ function renderPreviewNode({
     case 'HEADER':
     case 'FOOTER':
     case 'STATIC_TEMPLATE_TEXT':
+      if (selected && node.editable !== false && !node.locked && onUpdateNodeContent) {
+        return (
+          <section
+            className="document-node selected"
+            data-preview-node
+            key={node.nodeId}
+            ref={register}
+            style={style}
+            tabIndex={-1}
+          >
+            <textarea
+              aria-label={`编辑节点：${node.label || '结构节点'}`}
+              className="document-paragraph-editor document-static-node-editor"
+              onChange={(event) => onUpdateNodeContent(node, event.target.value)}
+              value={node.content}
+            />
+            {onRemoveNode && (
+              <Button icon={<Trash2 aria-hidden="true" />} onClick={() => onRemoveNode(node)} variant="ghost">
+                删除当前结构
+              </Button>
+            )}
+          </section>
+        );
+      }
       return (
         <button
           className={`document-static-node document-static-node-${node.nodeType.toLowerCase()}`}

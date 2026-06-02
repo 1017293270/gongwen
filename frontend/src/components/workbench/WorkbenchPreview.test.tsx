@@ -172,6 +172,53 @@ describe('WorkbenchPreview', () => {
     expect(view.getByText('Editable body text')).toBeInTheDocument();
   });
 
+  it('edits manually mapped metadata nodes that render as static text', () => {
+    const onUpdateNodeContent = vi.fn();
+    const organ = node('organ', 'STATIC_TEMPLATE_TEXT', '示例办公室', 10, {
+      draftNodeId: 12,
+      label: '发文机关',
+      role: 'ISSUING_ORGAN',
+      locked: false,
+      editable: true,
+    });
+
+    render(
+      <WorkbenchPreview
+        attachment=""
+        attachmentNode={null}
+        bodySectionNodes={[]}
+        bodyStyleForNode={() => ({})}
+        date=""
+        dateNode={null}
+        nodes={[organ]}
+        onRemoveBodyNode={vi.fn()}
+        onSelectNode={vi.fn()}
+        onUpdateAttachment={vi.fn()}
+        onUpdateBodyContent={vi.fn()}
+        onUpdateBodyHeading={vi.fn()}
+        onUpdateDate={vi.fn()}
+        onUpdateNodeContent={onUpdateNodeContent}
+        onUpdateRecipient={vi.fn()}
+        onUpdateSignature={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        recipient=""
+        recipientNode={null}
+        registerNodeRef={vi.fn()}
+        selectedNodeId="organ"
+        signature=""
+        signatureNode={null}
+        syncParagraphEditorHeight={vi.fn()}
+        title=""
+        titleNode={null}
+      />,
+    );
+
+    const editor = screen.getByRole('textbox', { name: '编辑节点：发文机关' });
+    fireEvent.change(editor, { target: { value: '修改后的办公室' } });
+
+    expect(onUpdateNodeContent).toHaveBeenCalledWith(organ, '修改后的办公室');
+  });
+
   it('does not switch away from structured editing when a refreshed rendered preview becomes ready', () => {
     const title = node('title', 'TITLE', 'Rendered notice title', 10);
     const body = node('body', 'BODY_SECTION', 'Editable body text', 20);

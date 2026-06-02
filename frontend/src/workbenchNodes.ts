@@ -9,7 +9,7 @@ import type {
   WorkbenchNodeType,
 } from './draftTypes';
 
-const BODY_PREFIX = '(?:[一二三四五六七八九十]+[、.．]|（[一二三四五六七八九十]+）|\\d+[.．、])';
+const BODY_PREFIX = '(?:[一二三四五六七八九十]+[、.-]|（[一二三四五六七八九十]+）|\\d+[.．、])';
 const BODY_HEADING_PATTERN = new RegExp(`^${BODY_PREFIX}\\s*\\S+`);
 const BODY_HEADING_WITH_CONTENT_PATTERN = new RegExp(`^(${BODY_PREFIX}\\s*[^：:。；;，,\\n]{1,32})([：:。；;，,])?(.*)$`);
 
@@ -167,8 +167,13 @@ function switchRoleLabel(role: string, fallback: string) {
       return '正文';
     case 'BODY_HEADING_LEVEL_1':
       return fallback;
+    case 'ISSUING_ORGAN':
+      return '发文机关';
+    case 'DOC_NUMBER':
+      return '文号';
     case 'ATTACHMENT_NOTE':
     case 'ATTACHMENT_CONTENT':
+    case 'TABLE_ATTACHMENT':
       return '附件';
     case 'SIGNATURE':
       return '落款';
@@ -453,7 +458,7 @@ function isAttachmentLine(text: string) {
 }
 
 function isDateLine(text: string) {
-  return /^\d{4}年\d{1,2}月\d{1,2}日$/.test(text);
+  return /^\d{4}年\d{1,2}月\d{1,2}日/.test(text);
 }
 
 function isLikelySignatureLine(
@@ -500,6 +505,7 @@ function mapStructureType(type: string, factType?: string): WorkbenchNodeType {
     case 'ATTACHMENT':
     case 'ATTACHMENT_NOTE':
     case 'ATTACHMENT_CONTENT':
+    case 'TABLE_ATTACHMENT':
       return 'ATTACHMENT';
     case 'SIGNATURE':
       return 'SIGNATURE';
@@ -523,10 +529,13 @@ function mapStructureType(type: string, factType?: string): WorkbenchNodeType {
 function isEditableDraftRole(role: string) {
   return role === 'TITLE'
     || role === 'RECIPIENT'
+    || role === 'ISSUING_ORGAN'
+    || role === 'DOC_NUMBER'
     || role === 'BODY'
     || role.startsWith('BODY_HEADING_LEVEL_')
     || role === 'ATTACHMENT_NOTE'
     || role === 'ATTACHMENT_CONTENT'
+    || role === 'TABLE_ATTACHMENT'
     || role === 'SIGNATURE'
     || role === 'DATE';
 }

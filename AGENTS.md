@@ -214,6 +214,7 @@ UI 使用 Anthropic-inspired 风格：
 - AI trace 不记录完整敏感正文。
 - 下载模板、材料和导出文件时必须鉴权。
 - 删除、批量修改、权限变更、生产发布等高风险操作必须确认并审计。
+- 所有后端 API 异常必须返回统一 `ApiResponse.error(errorCode, message)` JSON；业务异常给出可操作中文提示，未知异常不得泄露堆栈、SQL、文件路径或内部实现细节，前端必须展示后端 `message` 或本地兜底提示。
 
 如果发现密钥泄露，停止开发并明确报告，先处理密钥轮换。
 
@@ -401,6 +402,8 @@ P10D T15 预览刷新与导出状态前端已落地：工作台右栏新增真�
 
 P10D T15 后续修正：工作台中间预览区打开草稿时优先读取草稿级 LibreOffice 渲染预览，不再用模板版本快照冒充当前草稿真实预览；存在 `READY` 草稿页面时默认展示真实渲染页图，并提供“结构编辑”切换以保留原有节点编辑、AI、格式覆盖和导出功能；没有可用真实预览时继续回退到结构化编辑预览，用户仍可切到真实预览状态并从中间区域触发刷新。后续修正补齐草稿级真实预览：`document_render_preview` 增加可选 `draft_id`（V19），当前草稿预览记录与模板原稿预览隔离，草稿预览不写入导出记录；工作台删除持久化结构节点会把相关 `DraftNode` 标记为 `DELETED`，结构化预览、真实预览和 Word 导出均跳过该节点，无占位符原 DOCX 原位替换路径会真正移除被删除的正文段落。
 
+P10D/P10E 后续修正：模板解析工作台中由用户手动映射为 `ISSUING_ORGAN`、`DOC_NUMBER`、`TABLE_ATTACHMENT` 等业务字段角色的节点，应按可编辑草稿节点初始化，不再因原始事实类型像固定文本或表格段落而锁定；工作台结构编辑选中这些节点后可直接改写内容。`STATIC_TEXT` 和 `IGNORE` 仍分别表示固定文本和忽略，不自动放开编辑。
+
 P10D T16 轻量 QA 与文档同步已落地：`backend/src/test/resources/docx-fixtures/README.md` 固化 fixture 类别清单，动态 DOCX 样本覆盖占位符模板、样式模板、参考范文、手册/指南、复杂表格、页眉页脚和缺字体。focused 回归已覆盖手册阻断、中文 eastAsia/latin 字体、节点感知 AI、草稿节点格式覆盖、导出追溯、工作台节点和预览刷新；按用户“减轻测试重量”要求未跑全量后端/前端测试，Browser 自动化仍因工具不可用未执行。
 
 P10D T17 集成关闭已完成：迁移号按 V1-V16 顺序排列，P10D 仅新增 V12-V16；前端 API 调用已和后端 route 声明做 grep 核对；focused 后端回归、`npm test -- src/workbenchNodes.test.ts src/App.test.tsx` 和 `npm run build` 均通过。保留风险是未跑全量后端/前端测试和浏览器自动化验证；下一步建议先拆分 `frontend/src/App.tsx` 的 workbench/template/export 大块，再继续 P11/P9。
@@ -586,7 +589,7 @@ P11 导出体验当前约定：
 - 当前 T1/P10 底座已提供 `GET /api/templates`、`POST /api/templates`、`DELETE /api/templates/{templateId}`、`POST /api/templates/{templateId}/versions` 和 `GET /api/templates/versions/{versionId}/profile`。
 - `POST /api/templates` 对同名同文种模板按幂等创建处理：已存在时返回已有模板，随后上传文件会进入该模板的新版本；不同文种同名因旧表唯一键限制会返回稳定业务错误。
 - 模板管理入口采用“文种文件夹 -> 模板卡片 -> 新增模板/上传版本”的层级 UI；首屏选择文种，进入后展示该文种模板卡片，新增模板进入独立表单，选择 Word 文件后需要点击“确认创建并解析”，不会选择文件即自动上传。
-- 模板卡片右上角提供小垃圾桶图标删除入口，删除前必须二次确认；删除模板会级联删除模板版本、profile、映射和规则，并先解除草稿上的模板版本绑定。
+- 模板卡片右上角提供小垃圾桶图标删除入口，删除前必须二次确认；已被草稿或草稿结构节点引用的模板不得直接删除，后端返回 `TEMPLATE_IN_USE_BY_DRAFTS` 业务错误并提示先删除相关草稿或更换草稿模板。未被草稿引用的模板删除会级联删除模板版本、profile、映射和规则。
 - 模板管理顶部标题规则：文种列表页显示“模板管理”，进入具体文种后显示“模板管理 - 文种名”，新增页显示“新增模板 - 文种名”，上传已有模板版本时显示“上传新版本 - 文种名”；右上角状态 chip 显示“模板数 + 版本数”。
 - 模板解析结果必须用全局 `Dialog` 弹窗承载，占位符、智能识别和解析风险等长内容不要直接铺在模板列表页下方。
 - 模板上传后先用规则解析 `{{字段名}}` 占位符；有占位符时判定为标准占位符模板。无占位符时通过 `ModelAdapter.generateTemplateAnalysis` 做智能识别，区分 `STYLE_TEMPLATE`、`REFERENCE_DOCUMENT`、`ORDINARY_DOCUMENT`、`UNKNOWN_DOCUMENT`，并返回文种推断、建议占位符、置信度和说明。
