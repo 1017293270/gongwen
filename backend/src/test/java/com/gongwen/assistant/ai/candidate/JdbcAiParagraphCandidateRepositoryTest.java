@@ -7,6 +7,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import java.sql.ResultSet;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -26,6 +28,16 @@ class JdbcAiParagraphCandidateRepositoryTest {
     private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
     private final JdbcAiParagraphCandidateRepository repository =
             new JdbcAiParagraphCandidateRepository(jdbcTemplate, new ObjectMapper());
+
+    @Test
+    void migrationConstrainsTargetNodeToCandidateDraft() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/V20__ai_paragraph_candidate.sql"));
+
+        assertThat(migration).contains("idx_draft_node_draft_id_id_unique");
+        assertThat(migration).contains("on draft_node(draft_id, id)");
+        assertThat(migration).contains("foreign key (draft_id, target_node_id)");
+        assertThat(migration).contains("references draft_node(draft_id, id)");
+    }
 
     @Test
     void recordAndDtoPreservePointsAndNormalizeStatus() {

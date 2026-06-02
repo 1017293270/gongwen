@@ -1,7 +1,10 @@
+create unique index idx_draft_node_draft_id_id_unique
+    on draft_node(draft_id, id);
+
 create table ai_paragraph_candidate (
     id bigserial primary key,
     draft_id bigint not null references draft(id) on delete cascade,
-    target_node_id bigint references draft_node(id) on delete set null,
+    target_node_id bigint,
     target_node_role varchar(80) not null default '',
     target_node_title varchar(255) not null default '',
     outline_trace_id uuid,
@@ -18,7 +21,11 @@ create table ai_paragraph_candidate (
     accepted_at timestamptz,
     accepted_by bigint references app_user(id) on delete set null,
     created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now()
+    updated_at timestamptz not null default now(),
+    constraint fk_ai_paragraph_candidate_target_node_draft
+        foreign key (draft_id, target_node_id)
+        references draft_node(draft_id, id)
+        on delete set null (target_node_id)
 );
 
 create index idx_ai_paragraph_candidate_draft_section
