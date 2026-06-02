@@ -645,7 +645,8 @@ describe('App', () => {
     expect(within(outlineResult).getByText('缺失信息：会议时间')).toBeInTheDocument();
   });
 
-  it('generates body paragraph from an outline section and refreshes the preview', async () => {
+  it('generates a paragraph candidate from an outline section without replacing the preview', async () => {
+    const eventSources = stubEventSource();
     const generatedDraft = {
       ...sampleDraft('正文生成草稿'),
       blocks: [
@@ -665,9 +666,9 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(sampleOutline()))
       .mockResolvedValueOnce(jsonResponse({
-        traceId: '22222222-2222-2222-2222-222222222222',
-        draft: generatedDraft,
-        block: generatedDraft.blocks[2],
+        jobId: 'job-single',
+        candidateIds: [11],
+        cancelled: false,
       }));
     stubFetch(fetchMock);
 
@@ -678,24 +679,16 @@ describe('App', () => {
     await userEvent.type(screen.getByLabelText('提纲补充要求'), '突出执行要求');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
     await screen.findByRole('dialog', { name: '生成提纲' });
-    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成正文：一、主要事项' }));
+    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成正文候选：一、主要事项' }));
 
-    expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/drafts/1/ai/paragraph', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        heading: '一、主要事项',
-        points: ['说明安排', '明确分工'],
-        instruction: '突出执行要求',
-        sortOrder: 30,
-      }),
-    }));
-    expect(await screen.findByText('正文已生成')).toBeInTheDocument();
+    expect(eventSources).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'))).toBe(false);
     const preview = screen.getByLabelText('公文预览');
-    expect(within(preview).getByText('一、主要事项')).toBeInTheDocument();
-    expect(within(preview).getByText('说明安排；明确分工。')).toBeInTheDocument();
+    expect(within(preview).getByText('正文内容')).toBeInTheDocument();
   });
 
-  it('generates all body paragraphs from the outline in order', async () => {
+  it('generates all outline sections as paragraph candidates without replacing the preview', async () => {
+    const eventSources = stubEventSource();
     const outline = {
       ...sampleOutline(),
       sections: [
@@ -727,14 +720,9 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(outline))
       .mockResolvedValueOnce(jsonResponse({
-        traceId: '22222222-2222-2222-2222-222222222222',
-        draft: firstDraft,
-        block: firstDraft.blocks[2],
-      }))
-      .mockResolvedValueOnce(jsonResponse({
-        traceId: '33333333-3333-3333-3333-333333333333',
-        draft: secondDraft,
-        block: secondDraft.blocks[6],
+        jobId: 'job-all',
+        candidateIds: [11, 12],
+        cancelled: false,
       }));
     stubFetch(fetchMock);
 
@@ -744,30 +732,13 @@ describe('App', () => {
     await screen.findByDisplayValue('全局生成草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
     await screen.findByRole('dialog', { name: '生成提纲' });
-    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成全部正文' }));
+    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成全部正文候选' }));
 
     const paragraphCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'));
-    expect(paragraphCalls).toHaveLength(2);
-    expect(paragraphCalls[0][1]).toEqual(expect.objectContaining({
-      body: JSON.stringify({
-        heading: '一、主要事项',
-        points: ['说明安排'],
-        instruction: '',
-        sortOrder: 30,
-      }),
-    }));
-    expect(paragraphCalls[1][1]).toEqual(expect.objectContaining({
-      body: JSON.stringify({
-        heading: '二、工作要求',
-        points: ['落实责任'],
-        instruction: '',
-        sortOrder: 31,
-      }),
-    }));
-    expect(await screen.findByText('全部正文已生成')).toBeInTheDocument();
+    expect(paragraphCalls).toHaveLength(0);
+    expect(eventSources).toHaveLength(1);
     const preview = screen.getByLabelText('公文预览');
-    expect(within(preview).getByText('二、工作要求')).toBeInTheDocument();
-    expect(within(preview).getByText('落实责任。')).toBeInTheDocument();
+    expect(within(preview).getByText('正文内容')).toBeInTheDocument();
   });
 
   it('generates paragraph candidates from the outline without replacing body immediately', async () => {

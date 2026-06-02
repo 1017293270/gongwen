@@ -549,6 +549,7 @@ export type ParagraphCandidateJobResponse = {
 export type ParagraphCandidateJobEventName =
   | 'batch_started'
   | 'candidate_started'
+  | 'candidate_delta'
   | 'candidate_ready'
   | 'candidate_error'
   | 'batch_done'
@@ -562,6 +563,7 @@ export type ParagraphCandidateJobEvent = {
   status: AiParagraphCandidateStatus | '';
   errorCode: string;
   message: string;
+  delta: string;
 };
 
 export type AiParagraphCandidateAcceptResponse = {

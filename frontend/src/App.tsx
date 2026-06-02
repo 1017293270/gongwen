@@ -57,7 +57,6 @@ import {
   getTemplateDocumentKind,
   getTemplateStructureFormatting,
   generateDraftOutline,
-  generateDraftParagraph,
   generateLocalOperation,
   getDraft,
   initializeDraftNodes,
@@ -1451,6 +1450,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     [
       'batch_started',
       'candidate_started',
+      'candidate_delta',
       'candidate_ready',
       'candidate_error',
       'batch_done',
@@ -1505,7 +1505,16 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         return candidate;
       }
       if (payload.event === 'candidate_started') {
-        return { ...candidate, status: 'STREAMING', errorCode: '', errorMessage: '' };
+        return { ...candidate, status: 'STREAMING', candidateText: '', errorCode: '', errorMessage: '' };
+      }
+      if (payload.event === 'candidate_delta') {
+        return {
+          ...candidate,
+          status: 'STREAMING',
+          candidateText: `${candidate.candidateText}${payload.delta ?? ''}`,
+          errorCode: '',
+          errorMessage: '',
+        };
       }
       if (payload.event === 'candidate_ready') {
         return { ...candidate, status: 'READY', errorCode: '', errorMessage: '' };
@@ -1690,93 +1699,31 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   }
 
   async function handleGenerateParagraph(sectionIndex: number) {
-    if (!draft || !outline) {
-      return;
-    }
-    const section = outline.sections[sectionIndex];
-    const key = section.heading;
-    const sortOrder = 30 + sectionIndex;
-
-    try {
-      setAllParagraphStatus('idle');
-      setAllParagraphError('');
-      setParagraphStatuses((current) => ({ ...current, [key]: 'generating' }));
-      setParagraphErrors((current) => ({ ...current, [key]: '' }));
-      const targetNodeContext = aiNodeContextForWorkbenchNode(bodySectionNodes[sectionIndex] ?? null);
-      const generated = await generateDraftParagraph(draft.id, section, outlineInstruction, sortOrder, targetNodeContext ?? undefined);
-      setDraft(generated.draft);
-      setBlocks(generated.draft.blocks);
-      syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
-      markRenderPreviewOutdated();
-      setParagraphStatuses((current) => ({ ...current, [key]: 'success' }));
-      setStatus('saved');
-      setStatusMessage('正文已生成并保存');
-      showToast({ title: '正文已生成', description: section.heading, tone: 'success' });
-    } catch (error) {
-      if (handleAuthenticationRequiredError(error)) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : '正文生成失败';
-      setParagraphStatuses((current) => ({ ...current, [key]: 'error' }));
-      setParagraphErrors((current) => ({ ...current, [key]: message }));
-      showToast({ title: message, tone: 'error' });
-    }
+    await handleGenerateAllParagraphCandidates([sectionIndex]);
   }
 
   async function handleGenerateAllParagraphs() {
-    if (!draft || !outline || outline.sections.length === 0) {
-      return;
-    }
-
-    let activeSectionHeading = '';
-    try {
-      setAllParagraphStatus('generating');
-      setAllParagraphError('');
-      setParagraphErrors({});
-      let latestDraft = draft;
-      for (const [index, section] of outline.sections.entries()) {
-        activeSectionHeading = section.heading;
-        setParagraphStatuses((current) => ({ ...current, [section.heading]: 'generating' }));
-        const targetNodeContext = aiNodeContextForWorkbenchNode(bodySectionNodes[index] ?? null);
-        const generated = await generateDraftParagraph(latestDraft.id, section, outlineInstruction, 30 + index, targetNodeContext ?? undefined);
-        latestDraft = generated.draft;
-        setDraft(generated.draft);
-        setBlocks(generated.draft.blocks);
-        syncGeneratedDraftNodes(generated.draft.nodes, generated.node);
-        markRenderPreviewOutdated();
-        setParagraphStatuses((current) => ({ ...current, [section.heading]: 'success' }));
-      }
-      setAllParagraphStatus('success');
-      setStatus('saved');
-      setStatusMessage('全部正文已生成并保存');
-      showToast({ title: '全部正文已生成', description: `${outline.sections.length} 个段落已保存`, tone: 'success' });
-    } catch (error) {
-      if (handleAuthenticationRequiredError(error)) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : '全部正文生成失败';
-      setAllParagraphStatus('error');
-      setAllParagraphError(activeSectionHeading ? `${activeSectionHeading}：${message}` : message);
-      if (activeSectionHeading) {
-        setParagraphStatuses((current) => ({ ...current, [activeSectionHeading]: 'error' }));
-        setParagraphErrors((current) => ({ ...current, [activeSectionHeading]: message }));
-      }
-      showToast({ title: '全部正文生成中断', description: activeSectionHeading || undefined, tone: 'error' });
-    }
+    await handleGenerateAllParagraphCandidates();
   }
 
-  async function handleGenerateAllParagraphCandidates() {
+  async function handleGenerateAllParagraphCandidates(sectionIndexes?: number[]) {
     if (!draft || !outline || outline.sections.length === 0) {
       showToast({ title: '请先生成提纲', tone: 'info' });
       return;
     }
 
-    const sections = outline.sections.map<ParagraphCandidateSectionRequest>((section, index) => ({
+    const indexes = sectionIndexes && sectionIndexes.length > 0
+      ? sectionIndexes
+      : outline.sections.map((_, index) => index);
+    const sections = indexes.map<ParagraphCandidateSectionRequest>((index) => {
+      const section = outline.sections[index];
+      return {
       sectionIndex: index,
       heading: section.heading,
       points: section.points,
       targetNodeId: bodySectionNodes[index]?.draftNodeId ?? null,
-    }));
+      };
+    });
 
     try {
       closeCandidateEventSource();
@@ -1796,7 +1743,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         section,
       )));
       openCandidateEventSource(draft.id, job.jobId);
-      showToast({ title: '段落候选正在生成', description: `${sections.length} 个段落将进入审核区`, tone: 'info' });
+      showToast({ title: '正文候选正在生成', description: `${sections.length} 个段落将进入右栏确认区`, tone: 'info' });
     } catch (error) {
       if (handleAuthenticationRequiredError(error)) {
         return;
@@ -2870,14 +2817,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                   <div className="outline-title">{outline.titleSuggestion}</div>
                   <Button
                     className="outline-generate-all"
-                    disabled={!draft || allParagraphStatus === 'generating' || outline.sections.length === 0}
+                    disabled={!draft || isCandidateGenerating || outline.sections.length === 0}
                     icon={<Sparkles aria-hidden="true" />}
-                    isLoading={allParagraphStatus === 'generating'}
-                    loadingLabel="正在生成全部正文"
+                    isLoading={isCandidateGenerating}
+                    loadingLabel="正在生成正文候选"
                     onClick={() => void handleGenerateAllParagraphs()}
                     variant="secondary"
                   >
-                    {allParagraphStatus === 'error' ? '重试生成全部正文' : '生成全部正文'}
+                    生成全部正文候选
                   </Button>
                 </div>
                 {allParagraphStatus === 'generating' && (
@@ -2892,16 +2839,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                     </ul>
                     <Button
                       className="outline-action"
-                      disabled={!draft || allParagraphStatus === 'generating' || paragraphStatuses[section.heading] === 'generating'}
+                      disabled={!draft || isCandidateGenerating}
                       icon={<Sparkles aria-hidden="true" />}
-                      isLoading={paragraphStatuses[section.heading] === 'generating'}
-                      loadingLabel={`正在生成：${section.heading}`}
+                      isLoading={isCandidateGenerating}
+                      loadingLabel={`正在生成候选：${section.heading}`}
                       onClick={() => void handleGenerateParagraph(index)}
                       variant="secondary"
                     >
-                      {paragraphStatuses[section.heading] === 'error'
-                        ? `重试正文：${section.heading}`
-                        : `生成正文：${section.heading}`}
+                      生成正文候选：{section.heading}
                     </Button>
                     {paragraphStatuses[section.heading] === 'error' && (
                       <StatusMessage title={paragraphErrors[section.heading]} tone="warning" />

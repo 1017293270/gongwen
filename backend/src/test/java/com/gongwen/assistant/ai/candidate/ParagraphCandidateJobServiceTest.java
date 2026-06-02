@@ -43,9 +43,11 @@ class ParagraphCandidateJobServiceTest {
         assertThat(sender.names()).containsExactly(
                 "batch_started",
                 "candidate_started",
+                "candidate_delta",
                 "candidate_ready",
                 "batch_done"
         );
+        assertThat(sender.events.get(2).delta()).isEqualTo("generated");
     }
 
     @Test

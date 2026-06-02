@@ -134,6 +134,7 @@ public class ParagraphCandidateJobService {
                             candidate.errorMessage()
                     ));
                 } else {
+                    sendCandidateDeltas(jobId, candidate, sender);
                     sender.send(ParagraphCandidateJobEvent.candidate(
                             jobId,
                             candidate.id(),
@@ -152,6 +153,26 @@ public class ParagraphCandidateJobService {
             }
         }
         sender.send(ParagraphCandidateJobEvent.batch(jobId, cancelled ? "batch_cancelled" : "batch_done"));
+    }
+
+    private void sendCandidateDeltas(
+            UUID jobId,
+            AiParagraphCandidateDto candidate,
+            ParagraphCandidateJobEventSender sender
+    ) {
+        String text = candidate.candidateText();
+        if (text == null || text.isBlank()) {
+            return;
+        }
+        int chunkSize = 28;
+        for (int start = 0; start < text.length(); start += chunkSize) {
+            int end = Math.min(text.length(), start + chunkSize);
+            sender.send(ParagraphCandidateJobEvent.candidateDelta(
+                    jobId,
+                    candidate.id(),
+                    text.substring(start, end)
+            ));
+        }
     }
 
     @PreDestroy
