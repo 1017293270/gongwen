@@ -7,6 +7,7 @@ import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.draft.UpdateDraftBlocksRequest;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeDto;
+import com.gongwen.assistant.draft.node.DraftNodeFormattingResolver;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
@@ -22,6 +23,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -34,17 +36,20 @@ public class AiParagraphCandidateService {
     private final DraftService draftService;
     private final AiParagraphCandidateRepository candidateRepository;
     private final DraftNodeRepository draftNodeRepository;
+    private final DraftNodeFormattingResolver formattingResolver;
     private final CurrentUserProvider currentUserProvider;
 
     public AiParagraphCandidateService(
             DraftService draftService,
             AiParagraphCandidateRepository candidateRepository,
             DraftNodeRepository draftNodeRepository,
+            DraftNodeFormattingResolver formattingResolver,
             CurrentUserProvider currentUserProvider
     ) {
         this.draftService = draftService;
         this.candidateRepository = candidateRepository;
         this.draftNodeRepository = draftNodeRepository;
+        this.formattingResolver = formattingResolver;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -192,7 +197,18 @@ public class AiParagraphCandidateService {
         return new AiParagraphCandidateAcceptResponse(
                 AiParagraphCandidateDto.from(accepted),
                 updatedDraft,
-                DraftNodeDto.from(updatedNode)
+                hydratedNodeDto(draft, updatedNode)
+        );
+    }
+
+    private DraftNodeDto hydratedNodeDto(DraftDetailDto draft, DraftNode updatedNode) {
+        Map<Long, DraftNodeFormattingResolver.ResolvedDraftNodeFormatting> formattingByNodeId =
+                formattingResolver.resolve(draft.templateVersionId(), List.of(updatedNode));
+        DraftNodeFormattingResolver.ResolvedDraftNodeFormatting formatting = formattingByNodeId.get(updatedNode.id());
+        return DraftNodeDto.from(
+                updatedNode,
+                formatting == null ? null : formatting.baseFormatting(),
+                formatting == null ? null : formatting.effectiveFormatting()
         );
     }
 
