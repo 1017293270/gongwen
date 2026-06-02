@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { Department, DraftBlock } from './draftTypes';
+import type { AiParagraphCandidate, Department, DraftBlock, DraftDetail } from './draftTypes';
 
 describe('App', () => {
   const originalTextareaScrollHeight = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight');
@@ -768,6 +768,179 @@ describe('App', () => {
     const preview = screen.getByLabelText('公文预览');
     expect(within(preview).getByText('二、工作要求')).toBeInTheDocument();
     expect(within(preview).getByText('落实责任。')).toBeInTheDocument();
+  });
+
+  it('generates paragraph candidates from the outline without replacing body immediately', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const eventSources = stubEventSource();
+    const outline = {
+      ...sampleOutline(),
+      sections: [
+        { heading: '一、主要事项', points: ['说明安排'] },
+        { heading: '二、工作要求', points: ['落实责任'] },
+      ],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(sampleDraft('候选段落草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/outline')) {
+        return Promise.resolve(jsonResponse(outline));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates') && !init?.method) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/jobs') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          outlineTraceId: outline.traceId,
+          instructionSummary: '',
+          sections: [
+            { sectionIndex: 0, heading: '一、主要事项', points: ['说明安排'], targetNodeId: null },
+            { sectionIndex: 1, heading: '二、工作要求', points: ['落实责任'], targetNodeId: null },
+          ],
+        });
+        return Promise.resolve(jsonResponse({
+          jobId: 'job-1',
+          candidateIds: [11, 12],
+          cancelled: false,
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await screen.findByDisplayValue('候选段落草稿');
+    await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+    expect(await screen.findAllByText('AI 提纲标题')).not.toHaveLength(0);
+    await userEvent.click(within(screen.getByLabelText('Paragraph candidate canvas')).getByRole('button', { name: 'Generate all' }));
+
+    expect(eventSources).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'))).toBe(false);
+    expect(within(screen.getByLabelText('公文预览')).getByText('正文内容')).toBeInTheDocument();
+  });
+
+  it('accepts a paragraph candidate and replaces the draft body', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const readyCandidate = sampleParagraphCandidate({
+      candidateText: '候选段落文本',
+      status: 'READY',
+    });
+    const acceptedDraft = draftWithBody('候选段落文本');
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(sampleDraft('候选采纳草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates') && !init?.method) {
+        return Promise.resolve(jsonResponse([readyCandidate]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/11/accept') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({
+          candidate: { ...readyCandidate, status: 'ACCEPTED' },
+          draft: acceptedDraft,
+          node: null,
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await screen.findByDisplayValue('候选采纳草稿');
+    await within(screen.getByLabelText('Paragraph candidate canvas')).findByText('候选段落文本');
+    await userEvent.click(await within(screen.getByLabelText('Paragraph candidate canvas')).findByRole('button', { name: 'Confirm replace' }));
+
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/paragraph-candidates/11/accept', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(await within(screen.getByLabelText('公文预览')).findByText('候选段落文本')).toBeInTheDocument();
+  });
+
+  it('confirms before batch accepting ready paragraph candidates', async () => {
+    window.localStorage.setItem('gongwen.currentDraftId', '1');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const firstCandidate = sampleParagraphCandidate({
+      id: 11,
+      sectionIndex: 0,
+      heading: '一、主要事项',
+      candidateText: '第一候选段落',
+      status: 'READY',
+    });
+    const secondCandidate = sampleParagraphCandidate({
+      id: 12,
+      sectionIndex: 1,
+      heading: '二、工作要求',
+      candidateText: '第二候选段落',
+      status: 'EDITED',
+    });
+    const acceptedDraft = {
+      ...sampleDraft('批量候选草稿'),
+      blocks: [
+        { id: 1, blockType: 'TITLE', content: '批量候选草稿', sortOrder: 10 },
+        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+        { id: 3, blockType: 'BODY_PARAGRAPH', content: '第一候选段落', sortOrder: 30 },
+        { id: 7, blockType: 'BODY_PARAGRAPH', content: '第二候选段落', sortOrder: 31 },
+        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+      ],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/document-types')) {
+        return Promise.resolve(jsonResponse([{ code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 }]));
+      }
+      if (url.endsWith('/api/drafts/1')) {
+        return Promise.resolve(jsonResponse(sampleDraft('批量候选草稿')));
+      }
+      if (url.endsWith('/api/drafts/1/materials') || url.includes('/api/templates/versions?')) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates') && !init?.method) {
+        return Promise.resolve(jsonResponse([firstCandidate, secondCandidate]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/accept-batch') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ candidateIds: [11, 12] });
+        return Promise.resolve(jsonResponse({
+          acceptedIds: [11, 12],
+          skippedIds: [],
+          updatedDraft: acceptedDraft,
+        }));
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+    stubFetch(fetchMock);
+
+    render(<App />);
+
+    await openWorkbench();
+    await screen.findByDisplayValue('批量候选草稿');
+    await within(screen.getByLabelText('Paragraph candidate canvas')).findByText('第一候选段落');
+    await userEvent.click(await within(screen.getByLabelText('Paragraph candidate canvas')).findByRole('button', { name: 'Batch confirm' }));
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/ai/paragraph-candidates/accept-batch', expect.objectContaining({
+      method: 'POST',
+    }));
+    expect(await within(screen.getByLabelText('公文预览')).findByText('第二候选段落')).toBeInTheDocument();
   });
 
   it('selects a paragraph, generates a local suggestion, and accepts it through block save', async () => {
@@ -3124,8 +3297,46 @@ function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
     if (!fetchMock.getMockImplementation() && /\/api\/drafts\/\d+\/nodes/.test(url)) {
       return Promise.resolve(jsonResponse([]));
     }
+    if (!fetchMock.getMockImplementation() && /\/api\/drafts\/\d+\/ai\/paragraph-candidates$/.test(url) && !init?.method) {
+      return Promise.resolve(jsonResponse([]));
+    }
     return fetchMock(input, init);
   });
+}
+
+function stubEventSource() {
+  const instances: MockEventSource[] = [];
+  class MockEventSource {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 2;
+
+    onerror: ((event: Event) => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    readyState = MockEventSource.CONNECTING;
+    url: string;
+    withCredentials: boolean;
+
+    constructor(url: string, init?: EventSourceInit) {
+      this.url = url;
+      this.withCredentials = Boolean(init?.withCredentials);
+      instances.push(this);
+    }
+
+    addEventListener() {
+      return undefined;
+    }
+
+    removeEventListener() {
+      return undefined;
+    }
+
+    close() {
+      this.readyState = MockEventSource.CLOSED;
+    }
+  }
+  vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
+  return instances;
 }
 
 function sampleAuthUser() {
@@ -3155,6 +3366,7 @@ function sampleDraft(title: string) {
     documentTypeCode: 'NOTICE',
     title,
     status: 'DRAFT',
+    templateVersionId: null,
     blocks: [
       { id: 1, blockType: 'TITLE', content: title, sortOrder: 10 },
       { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
@@ -3164,6 +3376,46 @@ function sampleDraft(title: string) {
       { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
     ],
     nodes: [],
+  };
+}
+
+function draftWithBody(content: string): DraftDetail {
+  return {
+    ...sampleDraft('候选采纳草稿'),
+    blocks: [
+      { id: 1, blockType: 'TITLE', content: '候选采纳草稿', sortOrder: 10 },
+      { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
+      { id: 3, blockType: 'BODY_PARAGRAPH', content, sortOrder: 30 },
+      { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
+      { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
+      { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
+    ],
+  };
+}
+
+function sampleParagraphCandidate(overrides: Partial<AiParagraphCandidate> = {}): AiParagraphCandidate {
+  return {
+    id: 11,
+    draftId: 1,
+    targetNodeId: null,
+    targetNodeRole: 'BODY',
+    targetNodeTitle: '正文',
+    outlineTraceId: '11111111-1111-1111-1111-111111111111',
+    paragraphTraceId: null,
+    sectionIndex: 0,
+    heading: '一、主要事项',
+    points: ['说明安排'],
+    instructionSummary: '',
+    candidateText: '',
+    candidateTextDigest: '',
+    status: 'PENDING',
+    errorCode: '',
+    errorMessage: '',
+    acceptedAt: null,
+    acceptedBy: null,
+    createdAt: '2026-06-01T00:00:00Z',
+    updatedAt: '2026-06-01T00:00:00Z',
+    ...overrides,
   };
 }
 

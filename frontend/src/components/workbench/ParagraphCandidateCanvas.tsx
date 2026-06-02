@@ -49,7 +49,7 @@ export function ParagraphCandidateCanvas({
 
   return (
     <section className="paragraph-candidate-canvas" aria-label="Paragraph candidate canvas">
-      <header className="paragraph-candidate-canvas-header">
+      <div className="paragraph-candidate-canvas-header">
         <div>
           <div className="outline-title">Paragraph candidates</div>
           <div className="panel-kicker">
@@ -82,7 +82,7 @@ export function ParagraphCandidateCanvas({
             Batch confirm
           </Button>
         </div>
-      </header>
+      </div>
 
       {isGenerating ? (
         <StatusMessage title="Generating candidates" tone="info">

@@ -31,13 +31,18 @@ import {
   createDepartment,
   createDraft,
   createDocumentType,
+  createParagraphCandidateJob,
   createTemplate,
   createUser,
   ApiRequestError,
+  acceptParagraphCandidate,
+  acceptParagraphCandidateBatch,
+  cancelParagraphCandidateJob,
   deleteDepartment,
   deleteDraft,
   deleteDocumentType,
   deleteTemplate,
+  discardParagraphCandidate,
   disableUser,
   downloadExportRecord,
   exportDraftWord,
@@ -61,6 +66,7 @@ import {
   listDocumentTypes,
   listDraftNodes,
   listInsertableDraftNodeRoles,
+  listParagraphCandidates,
   listDrafts,
   listExportRecords,
   listDraftMaterials,
@@ -69,6 +75,7 @@ import {
   listUsers,
   login,
   logout,
+  openParagraphCandidateJobEvents,
   resetUserPassword,
   reinitializeDraftNodes,
   publishStructureMapping,
@@ -76,12 +83,14 @@ import {
   requestRenderPreview,
   restoreDraftNodeFormatOverride,
   retryExportRecord,
+  retryParagraphCandidate,
   runQualityCheck,
   saveDraftNode,
   saveDraftNodeFormatOverride,
   saveDraftBlocks,
   saveStructureMappingDraft,
   testAiProviderConnection,
+  updateParagraphCandidateText,
   updateAiProviderSettings,
   updateDepartment,
   updateDraftTitle,
@@ -108,6 +117,7 @@ import {
   type WorkbenchPreviewRequestStatus,
 } from './components/workbench/WorkbenchExportPanel';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
+import { ParagraphCandidateCanvas } from './components/workbench/ParagraphCandidateCanvas';
 import { WorkbenchPreview } from './components/workbench/WorkbenchPreview';
 import { WorkbenchStructureTree, type ReinitializeNodeStatus } from './components/workbench/WorkbenchStructureTree';
 import { TemplateParseWorkspace } from './components/template/TemplateParseWorkspace';
@@ -121,6 +131,7 @@ import type {
   AiLocalOperationType,
   AiNodeRequestContext,
   AiOutline,
+  AiParagraphCandidate,
   AiProviderSettings,
   AiProviderStatus,
   AuthUser,
@@ -139,6 +150,8 @@ import type {
   ExportRecordDetail,
   ExportRecordSummary,
   Material,
+  ParagraphCandidateJobEvent,
+  ParagraphCandidateSectionRequest,
   QualityCheckItem,
   QualityCheckResult,
   StructureMappingItem,
@@ -178,6 +191,7 @@ type WorkbenchStatus = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
 type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
 type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
+type CandidateStatus = 'idle' | 'loading' | 'generating' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
 type AppView =
   | 'overview'
@@ -202,6 +216,7 @@ type DraftWorkspaceData = {
   loadedDraft: DraftDetail;
   loadedDraftNodes: DraftNode[];
   loadedMaterials: Material[];
+  loadedParagraphCandidates: AiParagraphCandidate[];
   loadedTemplateVersions: TemplateVersionSummary[];
   loadedTemplateProfile: TemplateProfile | null;
   loadedStructureOverrides: TemplateStructureOverrideMap;
@@ -220,6 +235,36 @@ function pickLatestTemplateVersions(versions: TemplateVersionSummary[]) {
     }
   });
   return Array.from(latestByTemplateId.values()).sort((left, right) => left.templateName.localeCompare(right.templateName, 'zh-CN'));
+}
+
+function candidatePlaceholderFromSection(
+  draftId: number,
+  candidateId: number,
+  section: ParagraphCandidateSectionRequest,
+): AiParagraphCandidate {
+  const now = new Date().toISOString();
+  return {
+    id: candidateId,
+    draftId,
+    targetNodeId: section.targetNodeId ?? null,
+    targetNodeRole: section.targetNodeRole ?? '',
+    targetNodeTitle: section.targetNodeTitle ?? '',
+    outlineTraceId: null,
+    paragraphTraceId: null,
+    sectionIndex: section.sectionIndex ?? 0,
+    heading: section.heading,
+    points: section.points,
+    instructionSummary: '',
+    candidateText: section.candidateText ?? '',
+    candidateTextDigest: '',
+    status: 'PENDING',
+    errorCode: '',
+    errorMessage: '',
+    acceptedAt: null,
+    acceptedBy: null,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
@@ -354,6 +399,9 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [paragraphErrors, setParagraphErrors] = useState<Record<string, string>>({});
   const [allParagraphStatus, setAllParagraphStatus] = useState<ParagraphStatus>('idle');
   const [allParagraphError, setAllParagraphError] = useState('');
+  const [paragraphCandidates, setParagraphCandidates] = useState<AiParagraphCandidate[]>([]);
+  const [candidateStatus, setCandidateStatus] = useState<CandidateStatus>('idle');
+  const [candidateJobId, setCandidateJobId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [localOperationType, setLocalOperationType] = useState<AiLocalOperationType>('FORMALIZE');
   const [localOperationInstruction, setLocalOperationInstruction] = useState('');
@@ -380,6 +428,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const outlineRequestRef = useRef<AbortController | null>(null);
   const qualityRequestRef = useRef<AbortController | null>(null);
   const localOperationRequestRef = useRef<AbortController | null>(null);
+  const candidateEventSourceRef = useRef<EventSource | null>(null);
   const [aiSettings, setAiSettings] = useState<AiProviderSettings>(DEFAULT_AI_SETTINGS);
   const [aiSettingsApiKey, setAiSettingsApiKey] = useState('');
   const [aiSettingsStatus, setAiSettingsStatus] = useState<AiSettingsStatus>('loading');
@@ -391,6 +440,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const outlineProgress = useEstimatedProgress(outlineStatus === 'generating');
   const qualityProgress = useEstimatedProgress(qualityCheckStatus === 'checking');
   const localOperationProgress = useEstimatedProgress(localOperationStatus === 'generating');
+  const isCandidateGenerating = candidateStatus === 'generating';
   const allParagraphProgress = useMemo(() => {
     if (!outline || outline.sections.length === 0) {
       return 0;
@@ -405,6 +455,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     outlineRequestRef.current?.abort();
     qualityRequestRef.current?.abort();
     localOperationRequestRef.current?.abort();
+    closeCandidateEventSource();
   }, []);
 
   useEffect(() => {
@@ -574,6 +625,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
   async function loadWorkspaceData(loadedDraft: DraftDetail): Promise<DraftWorkspaceData> {
     const loadedMaterials = await listDraftMaterials(loadedDraft.id);
+    const loadedParagraphCandidates = await listParagraphCandidates(loadedDraft.id).catch(() => []);
     const loadedTemplateVersions = await listTemplateVersions(loadedDraft.documentTypeCode).catch(() => []);
     const loadedDraftNodes = await loadDraftNodesForWorkbench(loadedDraft);
     const [loadedTemplateProfile, loadedStructureOverrides, loadedRenderPreview, loadedInsertableRoles] = loadedDraft.templateVersionId
@@ -588,6 +640,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       loadedDraft,
       loadedDraftNodes,
       loadedMaterials,
+      loadedParagraphCandidates,
       loadedTemplateVersions,
       loadedTemplateProfile,
       loadedStructureOverrides,
@@ -613,6 +666,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       loadedDraft,
       loadedDraftNodes,
       loadedMaterials,
+      loadedParagraphCandidates,
       loadedTemplateVersions,
       loadedTemplateProfile,
       loadedStructureOverrides,
@@ -622,6 +676,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setDraft(loadedDraft);
     setBlocks(loadedDraft.blocks);
     setDraftNodes(loadedDraftNodes);
+    setParagraphCandidates(loadedParagraphCandidates);
+    setCandidateStatus('idle');
+    setCandidateJobId(null);
+    closeCandidateEventSource();
     setDirtyDraftNodeIds(new Set());
     setDeletedNodeIds(readDeletedNodeIds(deletedNodeStorageKey(loadedDraft.id, loadedDraft.templateVersionId)));
     setMaterials(loadedMaterials);
@@ -713,6 +771,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         setBlocks([]);
         setDraftNodes([]);
         setDirtyDraftNodeIds(new Set());
+        setParagraphCandidates([]);
+        setCandidateStatus('idle');
+        setCandidateJobId(null);
+        closeCandidateEventSource();
         setMaterials([]);
         setTemplateVersions([]);
         setSelectedTemplateProfile(null);
@@ -1365,6 +1427,125 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
   }
 
+  function closeCandidateEventSource() {
+    candidateEventSourceRef.current?.close();
+    candidateEventSourceRef.current = null;
+  }
+
+  function openCandidateEventSource(draftId: number, jobId: string) {
+    const source = openParagraphCandidateJobEvents(draftId, jobId);
+    candidateEventSourceRef.current = source;
+    const handleMessage = (event: MessageEvent) => {
+      handleParagraphCandidateJobEvent(draftId, event);
+    };
+    source.onmessage = handleMessage;
+    source.onerror = () => {
+      if (candidateEventSourceRef.current !== source) {
+        return;
+      }
+      setCandidateStatus('error');
+      setCandidateJobId(null);
+      closeCandidateEventSource();
+      showToast({ title: '段落候选生成连接已中断', tone: 'error' });
+    };
+    [
+      'batch_started',
+      'candidate_started',
+      'candidate_ready',
+      'candidate_error',
+      'batch_done',
+      'batch_cancelled',
+    ].forEach((eventName) => {
+      source.addEventListener(eventName, ((event: MessageEvent) => {
+        handleParagraphCandidateJobEvent(draftId, event, eventName);
+      }) as EventListener);
+    });
+  }
+
+  function handleParagraphCandidateJobEvent(draftId: number, event: MessageEvent, fallbackEvent?: string) {
+    const payload = parseParagraphCandidateEvent(event.data, fallbackEvent);
+    if (!payload) {
+      return;
+    }
+    if (payload.candidate) {
+      upsertParagraphCandidate(payload.candidate);
+    } else if (payload.candidateId) {
+      patchParagraphCandidateFromEvent(payload);
+    }
+
+    if (payload.event === 'batch_started') {
+      setCandidateStatus('generating');
+      return;
+    }
+    if (payload.event === 'batch_done' || payload.event === 'batch_cancelled') {
+      closeCandidateEventSource();
+      setCandidateJobId(null);
+      setCandidateStatus('idle');
+      void refreshParagraphCandidates(draftId);
+    }
+  }
+
+  function parseParagraphCandidateEvent(data: string, fallbackEvent?: string) {
+    try {
+      const payload = JSON.parse(data) as Partial<ParagraphCandidateJobEvent> & {
+        candidate?: AiParagraphCandidate;
+      };
+      return {
+        ...payload,
+        event: payload.event ?? fallbackEvent ?? '',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function patchParagraphCandidateFromEvent(payload: Partial<ParagraphCandidateJobEvent>) {
+    setParagraphCandidates((current) => current.map((candidate) => {
+      if (candidate.id !== payload.candidateId) {
+        return candidate;
+      }
+      if (payload.event === 'candidate_started') {
+        return { ...candidate, status: 'STREAMING', errorCode: '', errorMessage: '' };
+      }
+      if (payload.event === 'candidate_ready') {
+        return { ...candidate, status: 'READY', errorCode: '', errorMessage: '' };
+      }
+      if (payload.event === 'candidate_error') {
+        return {
+          ...candidate,
+          status: 'ERROR',
+          errorCode: payload.errorCode ?? '',
+          errorMessage: payload.message ?? '候选段落生成失败',
+        };
+      }
+      return candidate;
+    }));
+  }
+
+  function upsertParagraphCandidate(candidate: AiParagraphCandidate) {
+    setParagraphCandidates((current) => {
+      const exists = current.some((item) => item.id === candidate.id);
+      const nextCandidates = exists
+        ? current.map((item) => item.id === candidate.id ? candidate : item)
+        : [...current, candidate];
+      return nextCandidates.sort((left, right) => left.sectionIndex - right.sectionIndex || left.id - right.id);
+    });
+  }
+
+  async function refreshParagraphCandidates(draftId: number) {
+    const candidates = await listParagraphCandidates(draftId).catch(() => null);
+    if (candidates) {
+      setParagraphCandidates(candidates);
+    }
+  }
+
+  function applyAcceptedCandidateDraft(updatedDraft: DraftDetail, updatedNode: DraftNode | null) {
+    const nextNodes = updatedDraft.nodes ?? (updatedNode ? undefined : draftNodes);
+    setDraft({ ...updatedDraft, nodes: nextNodes ?? draftNodes });
+    setBlocks(updatedDraft.blocks);
+    syncGeneratedDraftNodes(updatedDraft.nodes, updatedNode);
+  }
+
   function isAbortError(error: unknown) {
     return error instanceof DOMException && error.name === 'AbortError';
   }
@@ -1581,6 +1762,181 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         setParagraphErrors((current) => ({ ...current, [activeSectionHeading]: message }));
       }
       showToast({ title: '全部正文生成中断', description: activeSectionHeading || undefined, tone: 'error' });
+    }
+  }
+
+  async function handleGenerateAllParagraphCandidates() {
+    if (!draft || !outline || outline.sections.length === 0) {
+      showToast({ title: '请先生成提纲', tone: 'info' });
+      return;
+    }
+
+    const sections = outline.sections.map<ParagraphCandidateSectionRequest>((section, index) => ({
+      sectionIndex: index,
+      heading: section.heading,
+      points: section.points,
+      targetNodeId: bodySectionNodes[index]?.draftNodeId ?? null,
+    }));
+
+    try {
+      closeCandidateEventSource();
+      setCandidateStatus('generating');
+      setAllParagraphStatus('idle');
+      setAllParagraphError('');
+      setParagraphErrors({});
+      const job = await createParagraphCandidateJob(draft.id, {
+        outlineTraceId: outline.traceId,
+        instructionSummary: outlineInstruction,
+        sections,
+      });
+      setCandidateJobId(job.jobId);
+      setParagraphCandidates(sections.map((section, index) => candidatePlaceholderFromSection(
+        draft.id,
+        job.candidateIds[index] ?? -(index + 1),
+        section,
+      )));
+      openCandidateEventSource(draft.id, job.jobId);
+      showToast({ title: '段落候选正在生成', description: `${sections.length} 个段落将进入审核区`, tone: 'info' });
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '段落候选生成失败';
+      setCandidateStatus('error');
+      setCandidateJobId(null);
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleStopParagraphCandidateJob() {
+    if (!draft || !candidateJobId) {
+      closeCandidateEventSource();
+      setCandidateStatus('idle');
+      return;
+    }
+
+    const stoppingJobId = candidateJobId;
+    closeCandidateEventSource();
+    setCandidateJobId(null);
+    try {
+      await cancelParagraphCandidateJob(draft.id, stoppingJobId);
+      await refreshParagraphCandidates(draft.id);
+      setCandidateStatus('idle');
+      showToast({ title: '段落候选生成已停止', tone: 'info' });
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '停止候选生成失败';
+      setCandidateStatus('error');
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleEditParagraphCandidate(candidate: AiParagraphCandidate, candidateText: string) {
+    if (!draft) {
+      return;
+    }
+    setParagraphCandidates((current) => current.map((item) => (
+      item.id === candidate.id ? { ...item, candidateText, status: 'EDITED' } : item
+    )));
+    try {
+      const updatedCandidate = await updateParagraphCandidateText(draft.id, candidate.id, candidateText);
+      upsertParagraphCandidate(updatedCandidate);
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '候选段落编辑保存失败';
+      setParagraphCandidates((current) => current.map((item) => (
+        item.id === candidate.id ? { ...item, errorMessage: message } : item
+      )));
+    }
+  }
+
+  async function handleRetryParagraphCandidate(candidate: AiParagraphCandidate) {
+    if (!draft) {
+      return;
+    }
+    setParagraphCandidates((current) => current.map((item) => (
+      item.id === candidate.id ? { ...item, status: 'RETRYING', errorMessage: '' } : item
+    )));
+    try {
+      const updatedCandidate = await retryParagraphCandidate(draft.id, candidate.id);
+      upsertParagraphCandidate(updatedCandidate);
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '候选段落重试失败';
+      setParagraphCandidates((current) => current.map((item) => (
+        item.id === candidate.id ? { ...item, status: 'ERROR', errorMessage: message } : item
+      )));
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleDiscardParagraphCandidate(candidate: AiParagraphCandidate) {
+    if (!draft) {
+      return;
+    }
+    try {
+      const updatedCandidate = await discardParagraphCandidate(draft.id, candidate.id);
+      upsertParagraphCandidate(updatedCandidate);
+      showToast({ title: '候选段落已放弃', description: candidate.heading, tone: 'info' });
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '候选段落放弃失败';
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleAcceptParagraphCandidate(candidate: AiParagraphCandidate) {
+    if (!draft) {
+      return;
+    }
+    try {
+      const response = await acceptParagraphCandidate(draft.id, candidate.id);
+      applyAcceptedCandidateDraft(response.draft, response.node);
+      upsertParagraphCandidate(response.candidate);
+      markRenderPreviewOutdated();
+      setStatus('saved');
+      setStatusMessage('候选正文已采纳，真实预览待刷新');
+      showToast({ title: '候选段落已采纳', description: candidate.heading, tone: 'success' });
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '候选段落采纳失败';
+      showToast({ title: message, tone: 'error' });
+    }
+  }
+
+  async function handleAcceptParagraphCandidateBatch(candidates: AiParagraphCandidate[]) {
+    if (!draft || candidates.length === 0) {
+      return;
+    }
+    const confirmed = window.confirm(`批量采纳 ${candidates.length} 条候选段落并替换正文？`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await acceptParagraphCandidateBatch(draft.id, candidates.map((candidate) => candidate.id));
+      applyAcceptedCandidateDraft(response.updatedDraft, null);
+      await refreshParagraphCandidates(draft.id);
+      markRenderPreviewOutdated();
+      setStatus('saved');
+      setStatusMessage('候选正文已批量采纳，真实预览待刷新');
+      showToast({ title: '候选段落已批量采纳', description: `${response.acceptedIds.length} 条已替换`, tone: 'success' });
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '候选段落批量采纳失败';
+      showToast({ title: message, tone: 'error' });
     }
   }
 
@@ -2301,6 +2657,18 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                 </button>
               </div>
             )}
+            <ParagraphCandidateCanvas
+              candidates={paragraphCandidates}
+              disabled={!draft || status === 'loading'}
+              isGenerating={isCandidateGenerating}
+              onAccept={(candidate) => void handleAcceptParagraphCandidate(candidate)}
+              onAcceptBatch={(candidates) => void handleAcceptParagraphCandidateBatch(candidates)}
+              onDiscard={(candidate) => void handleDiscardParagraphCandidate(candidate)}
+              onEdit={(candidate, candidateText) => void handleEditParagraphCandidate(candidate, candidateText)}
+              onGenerateAll={() => void handleGenerateAllParagraphCandidates()}
+              onRetry={(candidate) => void handleRetryParagraphCandidate(candidate)}
+              onStop={() => void handleStopParagraphCandidateJob()}
+            />
             <WorkbenchQualityPanel
               disabled={!draft || qualityCheckStatus === 'checking' || status === 'loading'}
               error={qualityCheckError}
