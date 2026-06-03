@@ -1,5 +1,7 @@
 package com.gongwen.assistant.ai;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -173,7 +175,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             if (content.isBlank()) {
                 throw new ModelAdapterException("AI_DEEPSEEK_EMPTY_RESPONSE", "DeepSeek 返回内容为空");
             }
-            return objectMapper.readValue(content, payloadClass);
+            return objectMapper.readValue(extractJsonObject(content), payloadClass);
         } catch (IOException exception) {
             throw new ModelAdapterException("AI_DEEPSEEK_RESPONSE_INVALID", "DeepSeek 返回结构无效");
         } catch (InterruptedException exception) {
@@ -182,6 +184,65 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         } catch (IllegalArgumentException exception) {
             throw new ModelAdapterException("AI_DEEPSEEK_REQUEST_INVALID", "DeepSeek 请求配置无效");
         }
+    }
+
+    static String extractJsonObject(String content) {
+        String normalized = content == null ? "" : stripMarkdownFence(content.strip());
+        if (normalized.isBlank()) {
+            throw new ModelAdapterException("AI_DEEPSEEK_EMPTY_RESPONSE", "DeepSeek 返回内容为空");
+        }
+        if (normalized.startsWith("{") && normalized.endsWith("}")) {
+            return normalized;
+        }
+        int start = normalized.indexOf('{');
+        if (start < 0) {
+            throw new ModelAdapterException("AI_DEEPSEEK_RESPONSE_INVALID", "DeepSeek 返回结构无效");
+        }
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+        for (int i = start; i < normalized.length(); i++) {
+            char current = normalized.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (current == '\\') {
+                escaped = inString;
+                continue;
+            }
+            if (current == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (current == '{') {
+                depth++;
+            } else if (current == '}') {
+                depth--;
+                if (depth == 0) {
+                    return normalized.substring(start, i + 1);
+                }
+            }
+        }
+        throw new ModelAdapterException("AI_DEEPSEEK_RESPONSE_INVALID", "DeepSeek 返回结构无效");
+    }
+
+    private static String stripMarkdownFence(String content) {
+        if (!content.startsWith("```")) {
+            return content;
+        }
+        int firstLineEnd = content.indexOf('\n');
+        if (firstLineEnd < 0) {
+            return content;
+        }
+        int closingFence = content.lastIndexOf("```");
+        if (closingFence <= firstLineEnd) {
+            return content.substring(firstLineEnd + 1).strip();
+        }
+        return content.substring(firstLineEnd + 1, closingFence).strip();
     }
 
     private String systemPrompt(String task) {
@@ -357,8 +418,12 @@ public class DeepSeekModelAdapter implements ModelAdapter {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DeepSeekOutlinePayload(
-            String titleSuggestion,
+            @JsonAlias({"title", "title_suggestion", "标题", "标题建议"}) String titleSuggestion,
+            @JsonAlias({"outline", "items", "提纲", "章节"})
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
             List<DeepSeekOutlineSectionPayload> sections,
+            @JsonAlias({"missing", "missing_information", "缺失信息"})
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
             List<String> missingInformation
     ) {
         private DeepSeekOutlinePayload {
@@ -368,22 +433,34 @@ public class DeepSeekModelAdapter implements ModelAdapter {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record DeepSeekOutlineSectionPayload(String heading, List<String> points) {
+    private record DeepSeekOutlineSectionPayload(
+            @JsonAlias({"title", "headingText", "sectionTitle", "标题", "小标题"}) String heading,
+            @JsonAlias({"items", "keyPoints", "children", "要点"})
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
+            List<String> points
+    ) {
         private DeepSeekOutlineSectionPayload {
             points = points == null ? List.of() : points;
         }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record DeepSeekParagraphPayload(String content) {
+    private record DeepSeekParagraphPayload(
+            @JsonAlias({"text", "paragraph", "body", "正文"}) String content
+    ) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record DeepSeekLocalOperationPayload(String suggestionText) {
+    private record DeepSeekLocalOperationPayload(
+            @JsonAlias({"content", "suggestion", "text", "result", "修改建议"}) String suggestionText
+    ) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record DeepSeekQualityPayload(List<DeepSeekQualitySuggestionPayload> suggestions) {
+    private record DeepSeekQualityPayload(
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
+            List<DeepSeekQualitySuggestionPayload> suggestions
+    ) {
         private DeepSeekQualityPayload {
             suggestions = suggestions == null ? List.of() : suggestions;
         }
@@ -404,7 +481,9 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             String templateKind,
             double confidence,
             String documentTypeCode,
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
             List<String> inferredFields,
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
             List<DeepSeekPlaceholderSuggestionPayload> suggestedPlaceholders,
             String message
     ) {
