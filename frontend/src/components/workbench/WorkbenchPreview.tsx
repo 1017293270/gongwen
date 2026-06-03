@@ -90,8 +90,9 @@ export function WorkbenchPreview({
     && renderPreview.id
     && renderPreview.manifest.pages.length > 0,
   );
+  const canShowFreshRenderedPreview = canShowRenderedPreview && !renderPreviewOutdated;
   const [previewMode, setPreviewMode] = useState<'rendered' | 'structured'>(
-    canShowRenderedPreview ? 'rendered' : 'structured',
+    canShowFreshRenderedPreview ? 'rendered' : 'structured',
   );
   const userSelectedPreviewModeRef = useRef(false);
   const previewNodes = nodes.length > 0
@@ -133,13 +134,13 @@ export function WorkbenchPreview({
   };
 
   useEffect(() => {
-    if (canShowRenderedPreview && !userSelectedPreviewModeRef.current) {
+    if (canShowFreshRenderedPreview && !userSelectedPreviewModeRef.current) {
       setPreviewMode('rendered');
     }
-  }, [canShowRenderedPreview, renderPreview?.id, renderPreview?.updatedAt]);
+  }, [canShowFreshRenderedPreview, renderPreview?.id, renderPreview?.updatedAt]);
 
   const showRenderedPreviewMode = previewMode === 'rendered';
-  const showRenderedPages = canShowRenderedPreview && showRenderedPreviewMode;
+  const showRenderedPages = canShowFreshRenderedPreview && showRenderedPreviewMode;
   const canOpenRenderedMode = canShowRenderedPreview || Boolean(onRefreshRenderPreview);
 
   return (

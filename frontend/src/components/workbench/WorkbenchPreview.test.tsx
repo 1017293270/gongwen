@@ -172,6 +172,49 @@ describe('WorkbenchPreview', () => {
     expect(view.getByText('Editable body text')).toBeInTheDocument();
   });
 
+  it('does not show stale rendered pages when the structured draft is newer', () => {
+    const title = node('title', 'TITLE', 'Rendered notice title', 10);
+    const body = node('body', 'BODY_SECTION', 'Editable body text', 20);
+    const onRefreshRenderPreview = vi.fn();
+
+    const { container } = render(
+      <WorkbenchPreview
+        attachment=""
+        attachmentNode={null}
+        bodySectionNodes={[body]}
+        bodyStyleForNode={() => ({})}
+        date=""
+        dateNode={null}
+        nodes={[title, body]}
+        onRefreshRenderPreview={onRefreshRenderPreview}
+        onRemoveBodyNode={vi.fn()}
+        onSelectNode={vi.fn()}
+        onUpdateAttachment={vi.fn()}
+        onUpdateBodyContent={vi.fn()}
+        onUpdateBodyHeading={vi.fn()}
+        onUpdateDate={vi.fn()}
+        onUpdateRecipient={vi.fn()}
+        onUpdateSignature={vi.fn()}
+        onUpdateTitle={vi.fn()}
+        recipient=""
+        recipientNode={null}
+        registerNodeRef={vi.fn()}
+        renderPreview={readyPreview()}
+        renderPreviewOutdated
+        selectedNodeId={null}
+        signature=""
+        signatureNode={null}
+        syncParagraphEditorHeight={vi.fn()}
+        title={title.content}
+        titleNode={title}
+      />,
+    );
+
+    const view = within(container);
+    expect(view.queryByRole('img', { name: '鐪熷疄棰勮绗?1 椤?' })).not.toBeInTheDocument();
+    expect(view.getByText('Editable body text')).toBeInTheDocument();
+  });
+
   it('edits manually mapped metadata nodes that render as static text', () => {
     const onUpdateNodeContent = vi.fn();
     const organ = node('organ', 'STATIC_TEMPLATE_TEXT', '示例办公室', 10, {
