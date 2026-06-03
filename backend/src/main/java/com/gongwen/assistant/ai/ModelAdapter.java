@@ -1,5 +1,7 @@
 package com.gongwen.assistant.ai;
 
+import java.util.function.Consumer;
+
 public interface ModelAdapter {
     String provider();
 
@@ -13,6 +15,22 @@ public interface ModelAdapter {
 
     default AiParagraphModelResponse generateParagraphCandidate(ParagraphPrompt prompt) {
         return generateParagraph(prompt);
+    }
+
+    default AiParagraphModelResponse streamParagraphCandidate(
+            ParagraphPrompt prompt,
+            Consumer<String> onDelta
+    ) {
+        AiParagraphModelResponse response = generateParagraphCandidate(prompt);
+        String content = response.content();
+        if (content != null && !content.isBlank()) {
+            int chunkSize = 28;
+            for (int start = 0; start < content.length(); start += chunkSize) {
+                int end = Math.min(content.length(), start + chunkSize);
+                onDelta.accept(content.substring(start, end));
+            }
+        }
+        return response;
     }
 
     default AiLocalOperationModelResponse generateLocalOperation(LocalOperationPrompt prompt) {

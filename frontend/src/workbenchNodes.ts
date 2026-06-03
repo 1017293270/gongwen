@@ -150,7 +150,7 @@ function bodyNodeFromDraftNode(
 ): WorkbenchNode {
   const node = bodyNode ?? displayNode;
   const heading = headingNode ? headingNode.content : undefined;
-  const content = bodyNode ? bodyNode.content : '';
+  const content = bodyNode ? bodyContentWithoutRepeatedHeading(heading, bodyNode.content) : '';
   const labelSource = heading?.trim() ? heading : bodyNode?.title ?? displayNode.title ?? '正文';
   return {
     nodeId: `draft-node:${node.id}`,
@@ -170,6 +170,18 @@ function bodyNodeFromDraftNode(
     editable: node.status !== 'LOCKED' && headingNode?.status !== 'LOCKED',
     formatting: formattingFromDraftNode(node),
   };
+}
+
+function bodyContentWithoutRepeatedHeading(heading: string | undefined, content: string) {
+  const normalizedContent = content.trim();
+  if (!heading || !normalizedContent) {
+    return normalizedContent;
+  }
+  return normalizeBodyHeading(heading) === normalizeBodyHeading(normalizedContent) ? '' : normalizedContent;
+}
+
+function normalizeBodyHeading(value: string) {
+  return value.replace(/\s+/g, '').replace(/[：:。；;，,]/g, '').trim();
 }
 
 function combinedDraftNodeStatus(headingNode: DraftNode | null, bodyNode: DraftNode | null) {

@@ -176,6 +176,7 @@ import {
 const DEFAULT_TITLE = '未命名草稿';
 const CURRENT_DRAFT_ID_KEY = 'gongwen.currentDraftId';
 const DELETED_NODE_STORAGE_PREFIX = 'gongwen.deletedNodes';
+const ACTIVE_CANDIDATE_STATUSES = new Set(['PENDING', 'RETRYING', 'STREAMING']);
 
 const BLOCK_SORT_ORDER: Record<string, number> = {
   TITLE: 10,
@@ -240,6 +241,7 @@ function candidatePlaceholderFromSection(
   draftId: number,
   candidateId: number,
   section: ParagraphCandidateSectionRequest,
+  outlineTraceId: string | null,
 ): AiParagraphCandidate {
   const now = new Date().toISOString();
   return {
@@ -248,7 +250,7 @@ function candidatePlaceholderFromSection(
     targetNodeId: section.targetNodeId ?? null,
     targetNodeRole: section.targetNodeRole ?? '',
     targetNodeTitle: section.targetNodeTitle ?? '',
-    outlineTraceId: null,
+    outlineTraceId,
     paragraphTraceId: null,
     sectionIndex: section.sectionIndex ?? 0,
     heading: section.heading,
@@ -264,6 +266,165 @@ function candidatePlaceholderFromSection(
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function outlineCandidateStatusLabel(status: string) {
+  switch (status) {
+    case 'READY':
+      return '已生成';
+    case 'EDITED':
+      return '已编辑';
+    case 'STREAMING':
+    case 'RETRYING':
+      return '生成中';
+    case 'ERROR':
+      return '失败';
+    case 'ACCEPTED':
+      return '已确认';
+    case 'DISCARDED':
+      return '已放弃';
+    case 'CANCELLED':
+      return '已停止';
+    case 'PENDING':
+    default:
+      return '等待中';
+  }
+}
+
+function normalizeOutlineHeading(value: string | null | undefined) {
+  return (value ?? '')
+    .replace(/\s+/g, '')
+    .replace(/[：:。；;，,]/g, '')
+    .trim();
+}
+
+function outlineHeadingMatches(left: string | null | undefined, right: string | null | undefined) {
+  const normalizedLeft = normalizeOutlineHeading(left);
+  const normalizedRight = normalizeOutlineHeading(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function stripCandidateHeadingPrefix(content: string | null | undefined, heading: string | null | undefined) {
+  const normalizedHeading = (heading ?? '').trim();
+  let stripped = (content ?? '').trim();
+  if (!normalizedHeading) {
+    return stripped;
+  }
+  while (stripped.startsWith(normalizedHeading)) {
+    stripped = stripped.slice(normalizedHeading.length).trimStart();
+    while (/^[：:。；;，,\s]/.test(stripped)) {
+      stripped = stripped.slice(1).trimStart();
+    }
+  }
+  return stripped.trim();
+}
+
+function candidateBodyText(candidate: AiParagraphCandidate) {
+  return stripCandidateHeadingPrefix(candidate.candidateText, candidate.heading || candidate.targetNodeTitle);
+}
+
+function hasCandidateBodyText(candidate: AiParagraphCandidate) {
+  const bodyText = candidateBodyText(candidate);
+  return Boolean(bodyText && !outlineHeadingMatches(bodyText, candidate.heading || candidate.targetNodeTitle));
+}
+
+function targetDraftNodeForOutlineHeading(heading: string, nodes: DraftNode[]) {
+  const sortedNodes = nodes
+    .filter((node) => node.status !== 'DELETED')
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
+  for (let index = 0; index < sortedNodes.length; index += 1) {
+    const node = sortedNodes[index];
+    if (!node.role.startsWith('BODY_HEADING_LEVEL_')) {
+      continue;
+    }
+    if (!outlineHeadingMatches(node.content || node.title, heading)) {
+      continue;
+    }
+    const bodyNode = firstRealBodyNodeAfterHeading(sortedNodes, index);
+    if (bodyNode) {
+      return bodyNode;
+    }
+  }
+  return null;
+}
+
+function targetDraftNodeForOutlineSection(sectionIndex: number, heading: string, nodes: DraftNode[]) {
+  const headingTarget = targetDraftNodeForOutlineHeading(heading, nodes);
+  if (headingTarget) {
+    return headingTarget;
+  }
+  const sortedNodes = nodes
+    .filter((node) => node.status !== 'DELETED')
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
+  const sectionBodyNodes: DraftNode[] = [];
+  for (let index = 0; index < sortedNodes.length; index += 1) {
+    if (!sortedNodes[index].role.startsWith('BODY_HEADING_LEVEL_')) {
+      continue;
+    }
+    const bodyNode = firstRealBodyNodeAfterHeading(sortedNodes, index);
+    if (bodyNode) {
+      sectionBodyNodes.push(bodyNode);
+    }
+  }
+  return sectionBodyNodes[sectionIndex] ?? null;
+}
+
+function firstRealBodyNodeAfterHeading(sortedNodes: DraftNode[], headingIndex: number) {
+  for (let nextIndex = headingIndex + 1; nextIndex < sortedNodes.length; nextIndex += 1) {
+    const nextNode = sortedNodes[nextIndex];
+    if (nextNode.role.startsWith('BODY_HEADING_LEVEL_')) {
+      return null;
+    }
+    if (nextNode.role === 'BODY' && looksLikeRealBodyNode(nextNode)) {
+      return nextNode;
+    }
+  }
+  return null;
+}
+
+function looksLikeRealBodyNode(node: DraftNode) {
+  if (node.role.startsWith('BODY_HEADING_LEVEL_')) {
+    return true;
+  }
+  if (node.role !== 'BODY') {
+    return false;
+  }
+  const compact = (node.content || node.title || '').replace(/\s+/g, '');
+  if (!compact) {
+    return true;
+  }
+  if (compact.startsWith('附件') || compact.startsWith('联系人') || compact.startsWith('（联系人') || compact.startsWith('(联系人')) {
+    return false;
+  }
+  if (compact.includes('印发') || compact.includes('抄送')) {
+    return false;
+  }
+  if (compact.length <= 32 && /^[0-9Xx]{2,4}年[0-9Xx]{1,2}月[0-9Xx]{1,2}日$/.test(compact)) {
+    return false;
+  }
+  return true;
+}
+
+function defaultOutlineInsertAnchor(nodes: DraftNode[]) {
+  const sortedNodes = nodes
+    .filter((node) => node.status !== 'DELETED')
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
+  const firstRealBody = sortedNodes.find((node) => node.role === 'BODY' && looksLikeRealBodyNode(node));
+  if (firstRealBody) {
+    return firstRealBody;
+  }
+  const firstHeading = sortedNodes.find((node) => node.role.startsWith('BODY_HEADING_LEVEL_'));
+  return firstHeading ?? null;
+}
+
+function previousOutlineTargetNode(sectionIndex: number, sections: AiOutline['sections'], nodes: DraftNode[]) {
+  for (let index = sectionIndex - 1; index >= 0; index -= 1) {
+    const targetNode = targetDraftNodeForOutlineSection(index, sections[index].heading, nodes);
+    if (targetNode) {
+      return targetNode;
+    }
+  }
+  return null;
 }
 
 const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
@@ -450,6 +611,34 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       .length;
     return Math.round((completedCount / outline.sections.length) * 100);
   }, [outline, paragraphStatuses]);
+  const outlineDialogCandidates = useMemo(() => {
+    if (!outline) {
+      return [];
+    }
+    const activeCandidateIds = new Set(candidateJobIdsRef.current);
+    return paragraphCandidates
+      .filter((candidate) => {
+        if (candidate.status === 'DISCARDED') {
+          return false;
+        }
+        if (candidate.outlineTraceId && candidate.outlineTraceId === outline.traceId) {
+          return true;
+        }
+        return activeCandidateIds.has(candidate.id);
+      })
+      .sort((left, right) => left.sectionIndex - right.sectionIndex || left.id - right.id);
+  }, [outline, paragraphCandidates, candidateStatus]);
+  const outlineDialogCandidateTextCount = outlineDialogCandidates.filter(hasCandidateBodyText).length;
+  const outlineDialogGeneratingCandidateCount = outlineDialogCandidates
+    .filter((candidate) => ACTIVE_CANDIDATE_STATUSES.has(candidate.status))
+    .length;
+  const outlineDialogAcceptableCandidates = outlineDialogCandidates
+    .filter((candidate) => (candidate.status === 'READY' || candidate.status === 'EDITED') && hasCandidateBodyText(candidate));
+  const isOutlineBatchGenerating = isCandidateGenerating && outlineDialogGeneratingCandidateCount > 1;
+  const outlineSectionIsGenerating = (sectionIndex: number) => isCandidateGenerating
+    && outlineDialogCandidates.some((candidate) => (
+      candidate.sectionIndex === sectionIndex && ACTIVE_CANDIDATE_STATUSES.has(candidate.status)
+    ));
 
   useEffect(() => () => {
     outlineRequestRef.current?.abort();
@@ -1314,6 +1503,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     sourceBlocks = blocks,
     sourceBodyNodes = bodySectionNodes,
   ): DraftBlockUpdate[] {
+    const hasStructuredDraftNodes = draftNodes.length > 0;
     const nonBodyBlocks = sourceBlocks
       .filter((block) => block.blockType !== 'BODY_PARAGRAPH')
       .map((block) => ({
@@ -1321,7 +1511,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         content: block.content,
         sortOrder: block.sortOrder,
       }));
-    const bodyBlocksFromPaper = sourceBodyNodes
+    const bodyBlocksFromPaper = hasStructuredDraftNodes ? [] : sourceBodyNodes
       .map((node, index) => ({
         blockType: 'BODY_PARAGRAPH',
         content: composeBodySectionParts(node.heading ?? '', node.content),
@@ -1697,6 +1887,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setParagraphErrors({});
       setAllParagraphStatus('idle');
       setAllParagraphError('');
+      candidateJobIdsRef.current = [];
       setOutlineStatus('success');
       showToast({ title: '提纲已生成', description: generatedOutline.titleSuggestion, tone: 'success' });
     } catch (error) {
@@ -1726,26 +1917,85 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     await handleGenerateAllParagraphCandidates();
   }
 
+  async function ensureParagraphCandidateTarget(
+    sectionIndex: number,
+    heading: string,
+    workingNodes: DraftNode[],
+    anchorNode: DraftNode | null,
+  ) {
+    const matchedTarget = targetDraftNodeForOutlineSection(sectionIndex, heading, workingNodes);
+    if (matchedTarget) {
+      return {
+        nodes: workingNodes,
+        targetNode: matchedTarget,
+      };
+    }
+    if (!draft?.templateVersionId) {
+      return {
+        nodes: workingNodes,
+        targetNode: null,
+      };
+    }
+
+    const existingNodeIds = new Set(workingNodes.map((node) => node.id));
+    const insertAnchor = anchorNode && looksLikeRealBodyNode(anchorNode)
+      ? anchorNode
+      : defaultOutlineInsertAnchor(workingNodes);
+    const insertedNodes = await insertDraftNode(draft.id, {
+      role: 'BODY_HEADING_LEVEL_1',
+      anchorNodeId: insertAnchor?.id ?? null,
+      position: insertAnchor ? 'AFTER' : 'END_OF_BODY',
+    });
+    const createdNodes = insertedNodes.filter((node) => !existingNodeIds.has(node.id));
+    const headingNode = createdNodes.find((node) => node.role.startsWith('BODY_HEADING_LEVEL_')) ?? null;
+    const bodyNode = createdNodes.find((node) => node.role === 'BODY') ?? null;
+    let nextNodes = insertedNodes;
+    if (headingNode) {
+      const savedHeadingNode = await saveDraftNode(draft.id, headingNode.id, heading, 'USER_FILLED');
+      nextNodes = insertedNodes.map((node) => node.id === savedHeadingNode.id ? savedHeadingNode : node);
+    }
+    setDraftNodes(nextNodes);
+    setDraft((currentDraft) => currentDraft ? { ...currentDraft, nodes: nextNodes } : currentDraft);
+    setDirtyDraftNodeIds(new Set());
+    markRenderPreviewOutdated();
+    return {
+      nodes: nextNodes,
+      targetNode: bodyNode,
+    };
+  }
+
   async function handleGenerateAllParagraphCandidates(sectionIndexes?: number[]) {
     if (!draft || !outline || outline.sections.length === 0) {
       showToast({ title: '请先生成提纲', tone: 'info' });
       return;
     }
 
-    const indexes = sectionIndexes && sectionIndexes.length > 0
-      ? sectionIndexes
-      : outline.sections.map((_, index) => index);
-    const sections = indexes.map<ParagraphCandidateSectionRequest>((index) => {
-      const section = outline.sections[index];
-      return {
-      sectionIndex: index,
-      heading: section.heading,
-      points: section.points,
-      targetNodeId: bodySectionNodes[index]?.draftNodeId ?? null,
-      };
-    });
-
     try {
+      const indexes = sectionIndexes && sectionIndexes.length > 0
+        ? sectionIndexes
+        : outline.sections.map((_, index) => index);
+      const sections: ParagraphCandidateSectionRequest[] = [];
+      let workingNodes = draftNodes;
+      let lastTargetNode: DraftNode | null = null;
+      for (const index of indexes) {
+        const section = outline.sections[index];
+        const anchorNode = lastTargetNode ?? previousOutlineTargetNode(index, outline.sections, workingNodes);
+        const resolvedTarget = await ensureParagraphCandidateTarget(index, section.heading, workingNodes, anchorNode);
+        workingNodes = resolvedTarget.nodes;
+        const targetNode = resolvedTarget.targetNode;
+        if (targetNode) {
+          lastTargetNode = targetNode;
+        }
+        sections.push({
+          sectionIndex: index,
+          heading: section.heading,
+          points: section.points,
+          targetNodeId: targetNode?.id ?? null,
+          targetNodeRole: targetNode?.role ?? '',
+          targetNodeTitle: section.heading,
+        });
+      }
+
       closeCandidateEventSource();
       candidateJobIdsRef.current = [];
       setCandidateStatus('generating');
@@ -1759,11 +2009,21 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       });
       setCandidateJobId(job.jobId);
       candidateJobIdsRef.current = job.candidateIds;
-      setParagraphCandidates(sections.map((section, index) => candidatePlaceholderFromSection(
+      const replacementSectionIndexes = new Set(sections.map((section) => section.sectionIndex ?? 0));
+      const placeholders = sections.map((section, index) => candidatePlaceholderFromSection(
         draft.id,
         job.candidateIds[index] ?? -(index + 1),
         section,
-      )));
+        outline.traceId,
+      ));
+      setParagraphCandidates((current) => {
+        const keptCandidates = current.filter((candidate) => !(
+          candidate.outlineTraceId === outline.traceId
+          && replacementSectionIndexes.has(candidate.sectionIndex)
+        ));
+        return [...keptCandidates, ...placeholders]
+          .sort((left, right) => left.sectionIndex - right.sectionIndex || left.id - right.id);
+      });
       openCandidateEventSource(draft.id, job.jobId);
       showToast({ title: '正文候选正在生成', description: `${sections.length} 个段落将进入右栏确认区`, tone: 'info' });
     } catch (error) {
@@ -1875,6 +2135,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     try {
       const response = await acceptParagraphCandidate(draft.id, candidate.id);
       applyAcceptedCandidateDraft(response.draft, response.node);
+      const refreshedNodes = draft.templateVersionId ? await listDraftNodes(draft.id).catch(() => null) : null;
+      if (refreshedNodes) {
+        setDraftNodes(refreshedNodes);
+        setDirtyDraftNodeIds(new Set());
+      }
       upsertParagraphCandidate(response.candidate);
       markRenderPreviewOutdated();
       setStatus('saved');
@@ -1901,6 +2166,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     try {
       const response = await acceptParagraphCandidateBatch(draft.id, candidates.map((candidate) => candidate.id));
       applyAcceptedCandidateDraft(response.updatedDraft, null);
+      const refreshedNodes = draft.templateVersionId ? await listDraftNodes(draft.id).catch(() => null) : null;
+      if (refreshedNodes) {
+        setDraftNodes(refreshedNodes);
+        setDirtyDraftNodeIds(new Set());
+      }
       await refreshParagraphCandidates(draft.id);
       markRenderPreviewOutdated();
       setStatus('saved');
@@ -2822,7 +3092,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               {outlineStatus === 'generating' ? '取消生成' : '关闭'}
             </Button>
           )}
-          className="ai-task-dialog"
+          className="ai-task-dialog outline-task-dialog"
           description="提纲结果、缺失信息和正文生成入口集中在这里，不再撑高右侧面板。"
           onClose={closeAiDialog}
           open={activeAiDialog === 'outline'}
@@ -2840,52 +3110,148 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               </StatusMessage>
             )}
             {outline && (
-              <div className="outline-result" aria-label="AI 提纲结果">
-                <div className="outline-result-header">
-                  <div className="outline-title">{outline.titleSuggestion}</div>
-                  <Button
-                    className="outline-generate-all"
-                    disabled={!draft || isCandidateGenerating || outline.sections.length === 0}
-                    icon={<Sparkles aria-hidden="true" />}
-                    isLoading={isCandidateGenerating}
-                    loadingLabel="正在生成正文候选"
-                    onClick={() => void handleGenerateAllParagraphs()}
-                    variant="secondary"
-                  >
-                    生成全部正文候选
-                  </Button>
-                </div>
-                {allParagraphStatus === 'generating' && (
-                  <AiProgress detail="按提纲顺序逐段保存到 Word 预览" label="正文生成进度" value={allParagraphProgress} />
-                )}
-                {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
-                {outline.sections.map((section, index) => (
-                  <div className="outline-section" key={section.heading}>
-                    <div className="outline-heading">{section.heading}</div>
-                    <ul>
-                      {section.points.map((point) => <li key={point}>{point}</li>)}
-                    </ul>
+              <div className="outline-dialog-grid">
+                <div className="outline-result" aria-label="AI 提纲结果">
+                  <div className="outline-result-header">
+                    <div className="outline-title">{outline.titleSuggestion}</div>
                     <Button
-                      className="outline-action"
-                      disabled={!draft || isCandidateGenerating}
+                      className="outline-generate-all"
+                      disabled={!draft || isCandidateGenerating || outline.sections.length === 0}
                       icon={<Sparkles aria-hidden="true" />}
-                      isLoading={isCandidateGenerating}
-                      loadingLabel={`正在生成候选：${section.heading}`}
-                      onClick={() => void handleGenerateParagraph(index)}
+                      isLoading={isOutlineBatchGenerating}
+                      loadingLabel="正在生成正文候选"
+                      onClick={() => void handleGenerateAllParagraphs()}
                       variant="secondary"
                     >
-                      生成正文候选：{section.heading}
+                      生成全部正文候选
                     </Button>
-                    {paragraphStatuses[section.heading] === 'error' && (
-                      <StatusMessage title={paragraphErrors[section.heading]} tone="warning" />
-                    )}
                   </div>
-                ))}
-                {outline.missingInformation.length > 0 && (
-                  <div className="outline-missing">
-                    缺失信息：{outline.missingInformation.join('、')}
+                  {allParagraphStatus === 'generating' && (
+                    <AiProgress detail="按提纲顺序逐段生成正文候选" label="正文生成进度" value={allParagraphProgress} />
+                  )}
+                  {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
+                  {outline.sections.map((section, index) => {
+                    const isSectionGenerating = outlineSectionIsGenerating(index);
+                    return (
+                      <div className="outline-section" key={section.heading}>
+                        <div className="outline-heading">{section.heading}</div>
+                        <ul>
+                          {section.points.map((point) => <li key={point}>{point}</li>)}
+                        </ul>
+                        <Button
+                          className="outline-action"
+                          disabled={!draft || isCandidateGenerating}
+                          icon={<Sparkles aria-hidden="true" />}
+                          isLoading={isSectionGenerating}
+                          loadingLabel={`正在生成候选：${section.heading}`}
+                          onClick={() => void handleGenerateParagraph(index)}
+                          variant="secondary"
+                        >
+                          生成正文候选：{section.heading}
+                        </Button>
+                        {paragraphStatuses[section.heading] === 'error' && (
+                          <StatusMessage title={paragraphErrors[section.heading]} tone="warning" />
+                        )}
+                      </div>
+                    );
+                  })}
+                  {outline.missingInformation.length > 0 && (
+                    <div className="outline-missing">
+                      缺失信息：{outline.missingInformation.join('、')}
+                    </div>
+                  )}
+                </div>
+
+                <section className="outline-body-stream-panel" aria-label="正文生成预览">
+                  <div className="outline-body-stream-header">
+                    <div>
+                      <div className="outline-title">正文生成</div>
+                      <div className="panel-kicker">
+                        {outlineDialogCandidates.length > 0
+                          ? `${outlineDialogCandidates.length} 段，${outlineDialogCandidateTextCount} 段已有内容`
+                          : '等待生成'}
+                      </div>
+                    </div>
+                    <div className="outline-body-stream-toolbar">
+                      <Button
+                        disabled={!draft || isCandidateGenerating || outlineDialogAcceptableCandidates.length === 0}
+                        icon={<Check aria-hidden="true" />}
+                        onClick={() => void handleAcceptParagraphCandidateBatch(outlineDialogAcceptableCandidates)}
+                        variant="secondary"
+                      >
+                        批量确认
+                      </Button>
+                      <Button
+                        disabled={!draft || !isCandidateGenerating}
+                        icon={<X aria-hidden="true" />}
+                        onClick={() => void handleStopParagraphCandidateJob()}
+                        variant="ghost"
+                      >
+                        停止
+                      </Button>
+                    </div>
                   </div>
-                )}
+
+                  {outlineDialogCandidates.length === 0 ? (
+                    <StatusMessage title="暂无正文内容" tone="info">
+                      点击左侧生成全部正文候选，或选择单段生成。
+                    </StatusMessage>
+                  ) : (
+                    <div className="outline-body-stream-list">
+                      {outlineDialogCandidates.map((candidate) => {
+                        const bodyText = candidateBodyText(candidate);
+                        const canAcceptCandidate = (candidate.status === 'READY' || candidate.status === 'EDITED')
+                          && hasCandidateBodyText(candidate);
+                        const hasTitleOnlyResult = (candidate.status === 'READY' || candidate.status === 'EDITED')
+                          && !hasCandidateBodyText(candidate);
+                        return (
+                          <article className="outline-body-stream-item" key={candidate.id}>
+                            <div className="outline-body-stream-item-header">
+                              <div className="outline-heading">{candidate.heading || `第 ${candidate.sectionIndex + 1} 段`}</div>
+                              <span className="paragraph-candidate-status">
+                                {outlineCandidateStatusLabel(candidate.status)}
+                              </span>
+                            </div>
+                            {candidate.status === 'ERROR' && candidate.errorMessage ? (
+                              <StatusMessage title={candidate.errorMessage} tone="warning" />
+                            ) : null}
+                            {!candidate.targetNodeId ? (
+                              <StatusMessage title="将按提纲顺序匹配正文结构" tone="info">
+                                这是旧候选，确认时会自动匹配对应正文小标题后的正文节点。
+                              </StatusMessage>
+                            ) : null}
+                            {hasTitleOnlyResult ? (
+                              <StatusMessage title="未生成正文内容" tone="warning">
+                                当前候选只包含标题，请重新生成这一段。
+                              </StatusMessage>
+                            ) : null}
+                            {bodyText ? (
+                              <div className="outline-body-stream-text">{bodyText}</div>
+                            ) : (
+                              <div className="paragraph-candidate-skeleton" aria-hidden="true">
+                                <span />
+                                <span />
+                                <span />
+                              </div>
+                            )}
+                            {candidate.status === 'READY' || candidate.status === 'EDITED' ? (
+                              <div className="outline-body-stream-actions">
+                                <Button
+                                  disabled={!draft || isCandidateGenerating || !canAcceptCandidate}
+                                  icon={<Check aria-hidden="true" />}
+                                  onClick={() => void handleAcceptParagraphCandidate(candidate)}
+                                  variant="secondary"
+                                >
+                                  确认替换
+                                </Button>
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
               </div>
             )}
             {!outline && outlineStatus !== 'generating' && outlineStatus !== 'error' && (

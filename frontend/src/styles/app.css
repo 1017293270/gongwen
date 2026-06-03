@@ -2375,6 +2375,10 @@ textarea.field {
   max-height: min(760px, calc(100vh - 48px));
 }
 
+.outline-task-dialog {
+  width: min(1120px, 100%);
+}
+
 .template-profile-dialog {
   width: min(920px, 100%);
   max-height: min(760px, calc(100vh - 48px));
@@ -2518,6 +2522,13 @@ textarea.field {
   padding: var(--space-3);
 }
 
+.outline-dialog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+}
+
 .outline-title {
   color: var(--color-text);
   font-size: var(--text-sm);
@@ -2570,6 +2581,62 @@ textarea.field {
   color: var(--color-warning);
   font-size: var(--text-xs);
   line-height: var(--leading-body);
+}
+
+.outline-body-stream-panel {
+  display: grid;
+  max-height: min(620px, calc(100vh - 188px));
+  gap: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: var(--space-3);
+}
+
+.outline-body-stream-header,
+.outline-body-stream-item-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-2);
+}
+
+.outline-body-stream-toolbar,
+.outline-body-stream-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.outline-body-stream-list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.outline-body-stream-item {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-left: 3px solid var(--color-info);
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: var(--space-3);
+}
+
+.outline-body-stream-text {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-surface-warm);
+  padding: var(--space-3);
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  white-space: pre-wrap;
 }
 
 .local-operation {
@@ -4098,8 +4165,13 @@ button.template-card:disabled {
   }
 
   .ai-task-summary,
-  .outline-result-header {
+  .outline-result-header,
+  .outline-dialog-grid {
     grid-template-columns: 1fr;
+  }
+
+  .outline-body-stream-panel {
+    max-height: none;
   }
 
   .paragraph-candidate-canvas-header {

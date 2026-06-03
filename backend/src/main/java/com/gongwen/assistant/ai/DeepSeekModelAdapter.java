@@ -7,15 +7,20 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 @Component
 public class DeepSeekModelAdapter implements ModelAdapter {
@@ -73,6 +78,21 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 DeepSeekParagraphPayload.class
         );
         return new AiParagraphModelResponse(payload.content());
+    }
+
+    @Override
+    public AiParagraphModelResponse streamParagraphCandidate(
+            ParagraphPrompt prompt,
+            Consumer<String> onDelta
+    ) {
+        String content = postPlainTextStream(
+                List.of(
+                        Map.of("role", "system", "content", "你负责生成单个严肃中文公文正文段落。只输出正文纯文本，不要输出 JSON、Markdown 或解释。不要编造材料中不存在的事实。"),
+                        Map.of("role", "user", "content", paragraphStreamUserPrompt(prompt))
+                ),
+                onDelta
+        );
+        return new AiParagraphModelResponse(content);
     }
 
     @Override
@@ -186,6 +206,77 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         }
     }
 
+    private String postPlainTextStream(
+            List<Map<String, String>> messages,
+            Consumer<String> onDelta
+    ) {
+        DeepSeekRuntimeConfig config = configurationState.deepSeekRuntimeConfig();
+        if (config.apiKey() == null || config.apiKey().isBlank()) {
+            throw new ModelAdapterException("AI_DEEPSEEK_API_KEY_REQUIRED", "请先配置 DeepSeek API Key");
+        }
+        try {
+            String body = objectMapper.writeValueAsString(Map.of(
+                    "model", config.model(),
+                    "messages", messages,
+                    "stream", true,
+                    "temperature", 0.2
+            ));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(config.baseUrl() + "/chat/completions"))
+                    .timeout(Duration.ofSeconds(config.timeoutSeconds()))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+                throw new ModelAdapterException(
+                        "AI_DEEPSEEK_HTTP_ERROR",
+                        errorBody.isBlank() ? "DeepSeek 返回 HTTP " + response.statusCode() : "DeepSeek 返回 HTTP " + response.statusCode()
+                );
+            }
+            StringBuilder content = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String delta = streamDeltaFromLine(line);
+                    if (delta == null) {
+                        continue;
+                    }
+                    if (!delta.isEmpty()) {
+                        content.append(delta);
+                        onDelta.accept(delta);
+                    }
+                }
+            }
+            if (content.isEmpty()) {
+                throw new ModelAdapterException("AI_DEEPSEEK_EMPTY_RESPONSE", "DeepSeek 返回内容为空");
+            }
+            return content.toString();
+        } catch (IOException exception) {
+            throw new ModelAdapterException("AI_DEEPSEEK_RESPONSE_INVALID", "DeepSeek 返回结构无效");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ModelAdapterException("AI_DEEPSEEK_INTERRUPTED", "DeepSeek 调用被中断");
+        } catch (IllegalArgumentException exception) {
+            throw new ModelAdapterException("AI_DEEPSEEK_REQUEST_INVALID", "DeepSeek 请求配置无效");
+        }
+    }
+
+    private String streamDeltaFromLine(String line) throws IOException {
+        String normalized = line == null ? "" : line.strip();
+        if (normalized.isBlank() || !normalized.startsWith("data:")) {
+            return null;
+        }
+        String data = normalized.substring("data:".length()).strip();
+        if (data.isBlank() || "[DONE]".equals(data)) {
+            return null;
+        }
+        DeepSeekStreamChunk chunk = objectMapper.readValue(data, DeepSeekStreamChunk.class);
+        return chunk.firstDeltaContent();
+    }
+
     static String extractJsonObject(String content) {
         String normalized = content == null ? "" : stripMarkdownFence(content.strip());
         if (normalized.isBlank()) {
@@ -282,6 +373,35 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 2. content 只生成这一段，不要生成其他提纲章节，也不要解释生成过程。
                 3. 如果段落标题已经带有序号，直接保留该序号；不要新增第二套序号。
                 4. 正文应承接标题，语气严肃克制，事实只能来自字段摘要、材料摘要和补充要求。
+                文种：%s
+                标题：%s
+                段落标题：%s
+                段落要点：%s
+                字段摘要：%s
+                材料摘要：%s
+                目标节点：%s
+                补充要求：%s
+                """.formatted(
+                prompt.documentTypeCode(),
+                prompt.title(),
+                prompt.heading(),
+                prompt.points(),
+                prompt.fieldSummaries(),
+                prompt.materialSummaries(),
+                prompt.nodeContext().promptSummary(),
+                prompt.instruction()
+        );
+    }
+
+    private String paragraphStreamUserPrompt(ParagraphPrompt prompt) {
+        return """
+                请基于以下信息生成一个公文正文段落。
+                输出要求：
+                1. 只输出正文纯文本，不要输出 JSON、Markdown、代码块或解释。
+                2. 正文必须以“段落标题”原文开头，不要省略、改写或另造标题。
+                3. 只生成这一段，不要生成其他提纲章节。
+                4. 如果段落标题已经带有序号，直接保留该序号；不要新增第二套序号。
+                5. 正文应承接标题，语气严肃克制，事实只能来自字段摘要、材料摘要和补充要求。
                 文种：%s
                 标题：%s
                 段落标题：%s
@@ -414,6 +534,25 @@ public class DeepSeekModelAdapter implements ModelAdapter {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record DeepSeekMessage(String content) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekStreamChunk(List<DeepSeekStreamChoice> choices) {
+        private String firstDeltaContent() {
+            if (choices == null || choices.isEmpty()) {
+                return "";
+            }
+            DeepSeekStreamDelta delta = choices.getFirst().delta();
+            return delta == null || delta.content() == null ? "" : delta.content();
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekStreamChoice(DeepSeekStreamDelta delta) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record DeepSeekStreamDelta(String content) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

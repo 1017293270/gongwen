@@ -28,6 +28,38 @@ const DISCARDABLE_STATUSES = new Set<AiParagraphCandidateStatus>([
   'CANCELLED',
 ]);
 
+function normalizeHeading(value: string | null | undefined) {
+  return (value ?? '')
+    .replace(/\s+/g, '')
+    .replace(/[：:。；;，,]/g, '')
+    .trim();
+}
+
+function stripCandidateHeadingPrefix(content: string | null | undefined, heading: string | null | undefined) {
+  const normalizedHeading = (heading ?? '').trim();
+  let stripped = (content ?? '').trim();
+  if (!normalizedHeading) {
+    return stripped;
+  }
+  while (stripped.startsWith(normalizedHeading)) {
+    stripped = stripped.slice(normalizedHeading.length).trimStart();
+    while (/^[：:。；;，,\s]/.test(stripped)) {
+      stripped = stripped.slice(1).trimStart();
+    }
+  }
+  return stripped.trim();
+}
+
+function candidateBodyText(candidate: AiParagraphCandidate) {
+  return stripCandidateHeadingPrefix(candidate.candidateText, candidate.heading || candidate.targetNodeTitle);
+}
+
+function hasCandidateBodyText(candidate: AiParagraphCandidate) {
+  const bodyText = candidateBodyText(candidate);
+  const heading = candidate.heading || candidate.targetNodeTitle;
+  return Boolean(bodyText && normalizeHeading(bodyText) !== normalizeHeading(heading));
+}
+
 export function ParagraphCandidateCanvas({
   candidates,
   disabled,
@@ -45,7 +77,7 @@ export function ParagraphCandidateCanvas({
     [candidates],
   );
   const acceptableCandidates = useMemo(
-    () => visibleCandidates.filter((candidate) => ACCEPTABLE_STATUSES.has(candidate.status)),
+    () => visibleCandidates.filter((candidate) => ACCEPTABLE_STATUSES.has(candidate.status) && hasCandidateBodyText(candidate)),
     [visibleCandidates],
   );
   const hasCandidates = visibleCandidates.length > 0;
@@ -141,8 +173,11 @@ function ParagraphCandidateCard({
 }: ParagraphCandidateCardProps) {
   const status = displayStatus(candidate.status);
   const title = candidate.heading || candidate.targetNodeTitle || `候选 ${candidate.sectionIndex + 1}`;
+  const bodyText = candidateBodyText(candidate);
   const isEditable = EDITABLE_STATUSES.has(candidate.status);
-  const canAccept = ACCEPTABLE_STATUSES.has(candidate.status);
+  const hasBodyText = hasCandidateBodyText(candidate);
+  const canAccept = ACCEPTABLE_STATUSES.has(candidate.status) && hasBodyText;
+  const hasTitleOnlyResult = ACCEPTABLE_STATUSES.has(candidate.status) && !hasBodyText;
   const isActiveGeneration = ACTIVE_GENERATION_STATUSES.has(candidate.status);
   const canRetry = RETRYABLE_STATUSES.has(candidate.status) || (!isGenerating && isActiveGeneration);
   const canDiscard = DISCARDABLE_STATUSES.has(candidate.status) || (!isGenerating && isActiveGeneration);
@@ -175,7 +210,13 @@ function ParagraphCandidateCard({
         <StatusMessage title={candidate.errorMessage} tone="warning" />
       ) : null}
 
-      {isPending && !candidate.candidateText ? (
+      {hasTitleOnlyResult ? (
+        <StatusMessage title="未生成正文内容" tone="warning">
+          当前候选只包含标题，请重新生成这一段。
+        </StatusMessage>
+      ) : null}
+
+      {isPending && !bodyText ? (
         <div className="paragraph-candidate-skeleton" aria-hidden="true">
           <span />
           <span />
@@ -188,14 +229,14 @@ function ParagraphCandidateCard({
           label={`${title} 候选正文`}
           onChange={(event) => onEdit(candidate, event.target.value)}
           rows={4}
-          value={candidate.candidateText}
+          value={bodyText}
         />
       )}
 
       <div className="paragraph-candidate-actions">
         {canAccept ? (
           <Button
-            disabled={disabled}
+            disabled={disabled || !hasBodyText}
             icon={<Check aria-hidden="true" />}
             onClick={() => onAccept(candidate)}
             variant="secondary"

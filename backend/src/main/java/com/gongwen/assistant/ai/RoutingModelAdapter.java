@@ -3,6 +3,8 @@ package com.gongwen.assistant.ai;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
+import java.util.function.Consumer;
+
 @Primary
 @Component
 public class RoutingModelAdapter implements ModelAdapter {
@@ -38,6 +40,19 @@ public class RoutingModelAdapter implements ModelAdapter {
     @Override
     public AiParagraphModelResponse generateParagraph(ParagraphPrompt prompt) {
         return activeAdapter().generateParagraph(prompt);
+    }
+
+    @Override
+    public AiParagraphModelResponse generateParagraphCandidate(ParagraphPrompt prompt) {
+        return activeAdapter().generateParagraphCandidate(prompt);
+    }
+
+    @Override
+    public AiParagraphModelResponse streamParagraphCandidate(
+            ParagraphPrompt prompt,
+            Consumer<String> onDelta
+    ) {
+        return activeAdapter().streamParagraphCandidate(prompt, onDelta);
     }
 
     @Override

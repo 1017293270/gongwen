@@ -131,7 +131,11 @@ public class ParagraphCandidateJobService {
             }
             sender.send(ParagraphCandidateJobEvent.candidate(jobId, candidateId, "candidate_started", "RETRYING"));
             try {
-                AiParagraphCandidateDto candidate = candidateService.retry(draftId, candidateId);
+                AtomicBoolean receivedDelta = new AtomicBoolean(false);
+                AiParagraphCandidateDto candidate = candidateService.retryStreaming(draftId, candidateId, delta -> {
+                    receivedDelta.set(true);
+                    sender.send(ParagraphCandidateJobEvent.candidateDelta(jobId, candidateId, delta));
+                });
                 if ("ERROR".equals(candidate.status())) {
                     sender.send(ParagraphCandidateJobEvent.candidateError(
                             jobId,
@@ -141,7 +145,9 @@ public class ParagraphCandidateJobService {
                             candidate.errorMessage()
                     ));
                 } else {
-                    sendCandidateDeltas(jobId, candidate, sender);
+                    if (!receivedDelta.get()) {
+                        sendCandidateDeltas(jobId, candidate, sender);
+                    }
                     sender.send(ParagraphCandidateJobEvent.candidate(
                             jobId,
                             candidate.id(),

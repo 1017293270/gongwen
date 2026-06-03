@@ -33,8 +33,10 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 @Service
 public class AiParagraphCandidateService {
@@ -135,7 +137,51 @@ public class AiParagraphCandidateService {
         ParagraphPrompt prompt = buildCandidatePrompt(draft, candidate);
         try {
             AiParagraphModelResponse modelResponse = modelAdapter.generateParagraphCandidate(prompt);
-            String paragraphContent = normalizeParagraphContent(modelResponse.content(), prompt.heading());
+            String paragraphContent = normalizeCandidateContent(modelResponse.content(), prompt.heading());
+            return candidateRepository.updateTextAndStatus(
+                            candidate.id(),
+                            paragraphContent,
+                            "READY",
+                            digest(paragraphContent)
+                    )
+                    .map(AiParagraphCandidateDto::from)
+                    .orElseThrow(() -> candidateMissing(candidate.id()));
+        } catch (ModelAdapterException exception) {
+            return candidateRepository.updateStatusAndError(
+                            candidate.id(),
+                            "ERROR",
+                            exception.errorCode(),
+                            exception.getMessage()
+                    )
+                    .map(AiParagraphCandidateDto::from)
+                    .orElseThrow(() -> candidateMissing(candidate.id()));
+        } catch (IllegalArgumentException exception) {
+            return candidateRepository.updateStatusAndError(
+                            candidate.id(),
+                            "ERROR",
+                            "AI_RESPONSE_INVALID",
+                            exception.getMessage()
+                    )
+                    .map(AiParagraphCandidateDto::from)
+                    .orElseThrow(() -> candidateMissing(candidate.id()));
+        }
+    }
+
+    @Transactional
+    public AiParagraphCandidateDto retryStreaming(
+            long draftId,
+            long candidateId,
+            Consumer<String> onDelta
+    ) {
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        AiParagraphCandidate candidate = ownedCandidate(draft.id(), candidateId);
+        candidateRepository.updateStatusAndError(candidate.id(), "RETRYING", "", "")
+                .orElseThrow(() -> candidateMissing(candidate.id()));
+
+        ParagraphPrompt prompt = buildCandidatePrompt(draft, candidate);
+        try {
+            AiParagraphModelResponse modelResponse = modelAdapter.streamParagraphCandidate(prompt, onDelta);
+            String paragraphContent = normalizeCandidateContent(modelResponse.content(), prompt.heading());
             return candidateRepository.updateTextAndStatus(
                             candidate.id(),
                             paragraphContent,
@@ -235,17 +281,28 @@ public class AiParagraphCandidateService {
         }
         DraftNode targetNode = targetNode(draft.id(), candidate);
         String nodeStatus = "EDITED".equals(candidate.status()) ? "USER_MODIFIED_AFTER_AI" : "AI_GENERATED";
+        String acceptedContent = contentForTargetNode(candidate, targetNode);
+        if (!hasSubstantiveBodyText(acceptedContent, candidate.heading())) {
+            throw new AiParagraphCandidateException(
+                    "AI_CANDIDATE_BODY_REQUIRED",
+                    "候选正文只有标题，请重新生成或补充正文后再确认"
+            );
+        }
         DraftNode updatedNode = draftNodeRepository.updateContent(
                         draft.id(),
                         targetNode.id(),
-                        candidate.candidateText(),
+                        acceptedContent,
                         nodeStatus
                 )
-                .orElseThrow(() -> targetMissing(candidate.targetNodeId()));
-        DraftDetailDto updatedDraft = draftService.updateBlocks(
-                draft.id(),
-                new UpdateDraftBlocksRequest(upsertParagraphBlock(draft, candidate.candidateText(), updatedNode.sortOrder()))
-        );
+                .orElseThrow(() -> targetMissing(targetNode.id()));
+        updatePairedHeadingIfNeeded(draft.id(), targetNode, candidate.heading(), nodeStatus);
+        DraftDetailDto updatedDraft = draft;
+        if (candidate.targetNodeId() == null) {
+            updatedDraft = draftService.updateBlocks(
+                    draft.id(),
+                    new UpdateDraftBlocksRequest(upsertParagraphBlock(draft, acceptedContent, updatedNode.sortOrder()))
+            );
+        }
         AiParagraphCandidate accepted = candidateRepository.markAccepted(
                         candidate.id(),
                         candidate.paragraphTraceId() == null ? UUID.randomUUID() : candidate.paragraphTraceId(),
@@ -257,6 +314,27 @@ public class AiParagraphCandidateService {
                 updatedDraft,
                 hydratedNodeDto(draft, updatedNode)
         );
+    }
+
+    private String contentForTargetNode(AiParagraphCandidate candidate, DraftNode targetNode) {
+        if (!"BODY".equals(targetNode.role())) {
+            return candidate.candidateText();
+        }
+        return stripHeadingPrefix(candidate.candidateText(), candidate.heading());
+    }
+
+    private void updatePairedHeadingIfNeeded(long draftId, DraftNode bodyNode, String heading, String status) {
+        if (!"BODY".equals(bodyNode.role()) || heading == null || heading.isBlank()) {
+            return;
+        }
+        pairedHeadingForBody(draftNodeRepository.findByDraftId(draftId), bodyNode)
+                .filter(headingNode -> !headingMatches(headingNode.content(), heading))
+                .ifPresent(headingNode -> draftNodeRepository.updateContent(
+                        draftId,
+                        headingNode.id(),
+                        heading.strip(),
+                        status
+                ));
     }
 
     private DraftNodeDto hydratedNodeDto(DraftDetailDto draft, DraftNode updatedNode) {
@@ -343,16 +421,16 @@ public class AiParagraphCandidateService {
     }
 
     private DraftNode targetNode(long draftId, AiParagraphCandidate candidate) {
-        if (candidate.targetNodeId() == null) {
-            throw new AiParagraphCandidateException(
-                    "AI_CANDIDATE_TARGET_REQUIRED",
-                    "Target node is required before accept"
-            );
-        }
-        DraftNode targetNode = draftNodeRepository.findByDraftId(draftId).stream()
+        List<DraftNode> draftNodes = draftNodeRepository.findByDraftId(draftId);
+        DraftNode targetNode = candidate.targetNodeId() == null
+                ? resolveTargetNode(draftNodes, candidate)
+                : draftNodes.stream()
                 .filter(node -> node.id() == candidate.targetNodeId())
                 .findFirst()
                 .orElseThrow(() -> targetMissing(candidate.targetNodeId()));
+        if (!isAcceptableCandidateTarget(targetNode)) {
+            targetNode = resolveTargetNode(draftNodes, candidate);
+        }
         if (TARGET_BLOCKED_STATUSES.contains(targetNode.status())) {
             throw new AiParagraphCandidateException(
                     "AI_CANDIDATE_TARGET_BLOCKED",
@@ -360,6 +438,121 @@ public class AiParagraphCandidateService {
             );
         }
         return targetNode;
+    }
+
+    private boolean isAcceptableCandidateTarget(DraftNode node) {
+        return node != null && "BODY".equals(node.role()) && looksLikeBodyContent(node.content());
+    }
+
+    private DraftNode resolveTargetNode(List<DraftNode> draftNodes, AiParagraphCandidate candidate) {
+        List<DraftNode> sortedNodes = draftNodes.stream()
+                .filter(node -> !"DELETED".equalsIgnoreCase(node.status()))
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        return targetNodeByHeading(sortedNodes, candidate.heading())
+                .or(() -> targetNodeByHeading(sortedNodes, candidate.targetNodeTitle()))
+                .or(() -> targetNodeBySectionIndex(sortedNodes, candidate.sectionIndex()))
+                .orElseThrow(() -> new AiParagraphCandidateException(
+                        "AI_CANDIDATE_TARGET_REQUIRED",
+                        "候选正文未匹配到可替换的正文结构，请先重新生成提纲或调整结构映射"
+                ));
+    }
+
+    private Optional<DraftNode> targetNodeByHeading(List<DraftNode> sortedNodes, String heading) {
+        if (heading == null || heading.isBlank()) {
+            return Optional.empty();
+        }
+        for (int index = 0; index < sortedNodes.size(); index++) {
+            DraftNode node = sortedNodes.get(index);
+            if (!node.role().startsWith("BODY_HEADING_LEVEL_")) {
+                continue;
+            }
+            if (!headingMatches(node.content(), heading) && !headingMatches(node.title(), heading)) {
+                continue;
+            }
+            Optional<DraftNode> bodyNode = firstBodyNodeAfterHeading(sortedNodes, index);
+            if (bodyNode.isPresent()) {
+                return bodyNode;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<DraftNode> targetNodeBySectionIndex(List<DraftNode> sortedNodes, int sectionIndex) {
+        if (sectionIndex < 0) {
+            return Optional.empty();
+        }
+        List<DraftNode> sectionBodyNodes = new ArrayList<>();
+        for (int index = 0; index < sortedNodes.size(); index++) {
+            DraftNode node = sortedNodes.get(index);
+            if (node.role().startsWith("BODY_HEADING_LEVEL_")) {
+                firstBodyNodeAfterHeading(sortedNodes, index).ifPresent(sectionBodyNodes::add);
+            }
+        }
+        return sectionIndex < sectionBodyNodes.size()
+                ? Optional.of(sectionBodyNodes.get(sectionIndex))
+                : Optional.empty();
+    }
+
+    private Optional<DraftNode> firstBodyNodeAfterHeading(List<DraftNode> sortedNodes, int headingIndex) {
+        for (int index = headingIndex + 1; index < sortedNodes.size(); index++) {
+            DraftNode node = sortedNodes.get(index);
+            if (node.role().startsWith("BODY_HEADING_LEVEL_")) {
+                return Optional.empty();
+            }
+            if ("BODY".equals(node.role()) && looksLikeBodyContent(node.content())) {
+                return Optional.of(node);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<DraftNode> pairedHeadingForBody(List<DraftNode> draftNodes, DraftNode bodyNode) {
+        List<DraftNode> sortedNodes = draftNodes.stream()
+                .filter(node -> !"DELETED".equalsIgnoreCase(node.status()))
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        for (int index = 0; index < sortedNodes.size(); index++) {
+            DraftNode node = sortedNodes.get(index);
+            if (node.id() != bodyNode.id()) {
+                continue;
+            }
+            if (index == 0) {
+                return Optional.empty();
+            }
+            DraftNode previous = sortedNodes.get(index - 1);
+            return previous.role().startsWith("BODY_HEADING_LEVEL_")
+                    ? Optional.of(previous)
+                    : Optional.empty();
+        }
+        return Optional.empty();
+    }
+
+    private boolean headingMatches(String left, String right) {
+        String normalizedLeft = normalizeHeading(left);
+        String normalizedRight = normalizeHeading(right);
+        return !normalizedLeft.isBlank() && normalizedLeft.equals(normalizedRight);
+    }
+
+    private String normalizeHeading(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "")
+                .replaceAll("[：:。；;，,]", "")
+                .strip();
+    }
+
+    private boolean looksLikeBodyContent(String content) {
+        String normalized = content == null ? "" : content.strip();
+        if (normalized.isBlank()) {
+            return true;
+        }
+        String compact = normalized.replaceAll("\\s+", "");
+        if (compact.startsWith("附件") || compact.startsWith("联系人") || compact.startsWith("（联系人") || compact.startsWith("(联系人")) {
+            return false;
+        }
+        if (compact.contains("印发") || compact.contains("抄送")) {
+            return false;
+        }
+        return compact.length() > 32 || !compact.matches("^[0-9Xx]{2,4}年[0-9Xx]{1,2}月[0-9Xx]{1,2}日$");
     }
 
     private List<DraftBlockUpdateRequest> upsertParagraphBlock(DraftDetailDto draft, String content, int sortOrder) {
@@ -405,17 +598,51 @@ public class AiParagraphCandidateService {
         return value == null || value.isBlank();
     }
 
-    private String normalizeParagraphContent(String content, String heading) {
+    private String normalizeCandidateContent(String content, String heading) {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("content is required");
         }
         String normalized = content.strip();
+        String bodyText = stripHeadingPrefix(normalized, heading);
+        if (!hasSubstantiveBodyText(bodyText, heading)) {
+            throw new IllegalArgumentException("模型只返回了标题，未生成正文，请重试");
+        }
+        return bodyText;
+    }
+
+    private String stripHeadingPrefix(String content, String heading) {
+        String normalized = content == null ? "" : content.strip();
         String normalizedHeading = heading == null ? "" : heading.strip();
-        if (normalizedHeading.isBlank() || normalized.startsWith(normalizedHeading)) {
+        if (normalized.isBlank() || normalizedHeading.isBlank()) {
             return normalized;
         }
-        String separator = startsWithPunctuation(normalized) ? "" : ": ";
-        return normalizedHeading + separator + normalized;
+        String stripped = normalized;
+        while (!stripped.isBlank() && stripped.startsWith(normalizedHeading)) {
+            stripped = stripped.substring(normalizedHeading.length()).stripLeading();
+            while (!stripped.isBlank() && isLeadingHeadingSeparator(stripped.charAt(0))) {
+                stripped = stripped.substring(1).stripLeading();
+            }
+        }
+        return stripped.strip();
+    }
+
+    private boolean hasSubstantiveBodyText(String content, String heading) {
+        String normalized = content == null ? "" : content.strip();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        return !headingMatches(normalized, heading);
+    }
+
+    private boolean isLeadingHeadingSeparator(char value) {
+        return value == ':'
+                || value == '：'
+                || value == '。'
+                || value == '.'
+                || value == '；'
+                || value == ';'
+                || value == '，'
+                || value == ',';
     }
 
     private boolean startsWithPunctuation(String value) {

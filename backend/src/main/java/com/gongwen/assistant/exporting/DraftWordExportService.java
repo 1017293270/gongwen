@@ -53,7 +53,7 @@ public class DraftWordExportService {
     private static final Set<String> ORIGINAL_NODE_REPLACEMENT_KINDS =
             Set.of("REFERENCE_DOCUMENT", "OFFICIAL_DOCUMENT");
     private static final Set<String> NON_REPLACEABLE_ORIGINAL_ROLES =
-            Set.of("UNKNOWN", "STATIC_TEXT", "IGNORE", "HEADER", "FOOTER");
+            Set.of("UNKNOWN", "STATIC_TEXT", "IGNORE", "HEADER", "FOOTER", "TABLE_ATTACHMENT");
     private static final Set<String> REQUIRED_MAPPING_ROLES = Set.of("TITLE", "BODY");
     private static final Pattern CHINESE_DATE_LINE_PATTERN = Pattern.compile("^\\d{4}\u5e74\\d{1,2}\u6708\\d{1,2}\u65e5$");
     private static final String STRATEGY_PLACEHOLDER_REPLACEMENT = "PLACEHOLDER_REPLACEMENT";
@@ -551,7 +551,7 @@ public class DraftWordExportService {
                 .filter(node -> !isDeletedDraftNode(node))
                 .filter(node -> !isBlank(node.templateNodeKey()))
                 .filter(node -> !isSyntheticDraftNode(node))
-                .filter(node -> isReplaceableOriginalRole(node.role()))
+                .filter(this::isReplaceableOriginalNode)
                 .forEach(node -> replacements.put(node.templateNodeKey(), node.content() == null ? "" : node.content()));
         return replacements;
     }
@@ -565,7 +565,7 @@ public class DraftWordExportService {
                 .filter(node -> !isDeletedDraftNode(node))
                 .filter(this::isSyntheticDraftNode)
                 .filter(node -> !isBlank(node.metadata().anchorTemplateNodeKey()))
-                .filter(node -> isReplaceableOriginalRole(node.role()))
+                .filter(this::isReplaceableOriginalNode)
                 .map(node -> new DocxNodeReplacementRenderer.NodeInsertion(
                         node.metadata().anchorTemplateNodeKey(),
                         insertionPositionForExport(node.metadata().insertPosition()),
@@ -614,6 +614,14 @@ public class DraftWordExportService {
         return !normalizedRole.isBlank() && !NON_REPLACEABLE_ORIGINAL_ROLES.contains(normalizedRole);
     }
 
+    private boolean isReplaceableOriginalNode(DraftNode node) {
+        if (node == null || !isReplaceableOriginalRole(node.role())) {
+            return false;
+        }
+        String role = normalizeRole(node.role());
+        return !"BODY".equals(role) || isBodyNode(node);
+    }
+
     private String firstNodeValue(List<DraftNode> nodes, String role, String fallback) {
         return nodes.stream()
                 .filter(node -> role.equals(normalizeRole(node.role())))
@@ -633,7 +641,28 @@ public class DraftWordExportService {
 
     private boolean isBodyNode(DraftNode node) {
         String role = normalizeRole(node.role());
-        return "BODY".equals(role) || role.startsWith("BODY_HEADING");
+        if (role.startsWith("BODY_HEADING")) {
+            return true;
+        }
+        return "BODY".equals(role) && looksLikeBodyContent(node.content());
+    }
+
+    private boolean looksLikeBodyContent(String content) {
+        String normalized = content == null ? "" : content.strip();
+        if (normalized.isBlank()) {
+            return false;
+        }
+        String compact = normalized.replaceAll("\\s+", "");
+        if (compact.startsWith("附件") || compact.startsWith("联系人") || compact.startsWith("（联系人") || compact.startsWith("(联系人")) {
+            return false;
+        }
+        if (compact.contains("印发") || compact.contains("抄送")) {
+            return false;
+        }
+        if (compact.length() <= 32 && compact.matches("^[0-9Xx]{2,4}年[0-9Xx]{1,2}月[0-9Xx]{1,2}日$")) {
+            return false;
+        }
+        return true;
     }
 
     private void ensureRequiredSlots(Map<String, String> values, StructureMappingProfile mapping) {
