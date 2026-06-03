@@ -2484,10 +2484,12 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       if (!updatedDraft) {
         return;
       }
-      const preview = await requestDraftRenderPreview(updatedDraft.id);
+      const requestedPreview = await requestDraftRenderPreview(updatedDraft.id);
+      setWorkbenchRenderPreview(requestedPreview);
+      const preview = await waitForDraftRenderPreview(updatedDraft.id, requestedPreview);
       const resultMessage = renderPreviewResultMessage(preview);
       setWorkbenchRenderPreview(preview);
-      setRenderPreviewOutdated(false);
+      setRenderPreviewOutdated(!isRenderPreviewTerminal(preview));
       setWorkbenchRenderPreviewStatus('idle');
       setWorkbenchRenderPreviewMessage(resultMessage);
       if (!silent) {
@@ -2509,6 +2511,29 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         showToast({ title: message, tone: 'error' });
       }
     }
+  }
+
+  async function waitForDraftRenderPreview(draftId: number, initialPreview: DocumentRenderPreview) {
+    let latestPreview = initialPreview;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (isRenderPreviewTerminal(latestPreview)) {
+        return latestPreview;
+      }
+      await delay(1200);
+      const polledPreview = await getDraftRenderPreview(draftId).catch(() => null);
+      if (polledPreview) {
+        latestPreview = polledPreview;
+      }
+    }
+    return latestPreview;
+  }
+
+  function isRenderPreviewTerminal(preview: DocumentRenderPreview) {
+    return preview.status === 'READY' || preview.status === 'FAILED' || preview.status === 'UNSUPPORTED';
+  }
+
+  function delay(ms: number) {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
   }
 
   function handleDiscardLocalOperation() {
