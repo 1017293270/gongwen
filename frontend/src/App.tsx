@@ -1853,7 +1853,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     }
     try {
       const updatedCandidate = await discardParagraphCandidate(draft.id, candidate.id);
-      upsertParagraphCandidate(updatedCandidate);
+      if (updatedCandidate.status === 'DISCARDED') {
+        setParagraphCandidates((current) => current.filter((item) => item.id !== updatedCandidate.id));
+      } else {
+        upsertParagraphCandidate(updatedCandidate);
+      }
       showToast({ title: '候选段落已放弃', description: candidate.heading, tone: 'info' });
     } catch (error) {
       if (handleAuthenticationRequiredError(error)) {

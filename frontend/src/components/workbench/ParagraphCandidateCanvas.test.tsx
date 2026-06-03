@@ -130,4 +130,40 @@ describe('ParagraphCandidateCanvas', () => {
     expect(onRetry).toHaveBeenCalledWith(error);
     expect(onDiscard).toHaveBeenCalledWith(error);
   });
+
+  it('hides completed candidates and keeps interrupted pending candidates actionable', async () => {
+    const onRetry = vi.fn();
+    const onDiscard = vi.fn();
+    const pending = candidate(4, 'PENDING', '');
+
+    render(
+      <ParagraphCandidateCanvas
+        candidates={[
+          pending,
+          candidate(5, 'DISCARDED', 'Discarded paragraph'),
+          candidate(6, 'ACCEPTED', 'Accepted paragraph'),
+        ]}
+        disabled={false}
+        isGenerating={false}
+        onAccept={vi.fn()}
+        onAcceptBatch={vi.fn()}
+        onDiscard={onDiscard}
+        onEdit={vi.fn()}
+        onGenerateAll={vi.fn()}
+        onRetry={onRetry}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Discarded paragraph')).not.toBeInTheDocument();
+    expect(screen.queryByText('Accepted paragraph')).not.toBeInTheDocument();
+
+    const pendingCard = screen.getByLabelText('候选 Heading 4');
+    const actionButtons = within(pendingCard).getAllByRole('button');
+    await userEvent.click(actionButtons[0]);
+    await userEvent.click(actionButtons[1]);
+
+    expect(onRetry).toHaveBeenCalledWith(pending);
+    expect(onDiscard).toHaveBeenCalledWith(pending);
+  });
 });

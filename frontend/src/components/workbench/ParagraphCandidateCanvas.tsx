@@ -19,10 +19,9 @@ export type ParagraphCandidateCanvasProps = {
 const ACCEPTABLE_STATUSES = new Set<AiParagraphCandidateStatus>(['READY', 'EDITED']);
 const EDITABLE_STATUSES = new Set<AiParagraphCandidateStatus>(['READY', 'EDITED']);
 const RETRYABLE_STATUSES = new Set<AiParagraphCandidateStatus>(['ERROR', 'CANCELLED']);
+const ACTIVE_GENERATION_STATUSES = new Set<AiParagraphCandidateStatus>(['PENDING', 'RETRYING', 'STREAMING']);
+const HIDDEN_STATUSES = new Set<AiParagraphCandidateStatus>(['ACCEPTED', 'DISCARDED']);
 const DISCARDABLE_STATUSES = new Set<AiParagraphCandidateStatus>([
-  'PENDING',
-  'RETRYING',
-  'STREAMING',
   'READY',
   'EDITED',
   'ERROR',
@@ -41,11 +40,15 @@ export function ParagraphCandidateCanvas({
   onRetry,
   onStop,
 }: ParagraphCandidateCanvasProps) {
-  const acceptableCandidates = useMemo(
-    () => candidates.filter((candidate) => ACCEPTABLE_STATUSES.has(candidate.status)),
+  const visibleCandidates = useMemo(
+    () => candidates.filter((candidate) => !HIDDEN_STATUSES.has(candidate.status)),
     [candidates],
   );
-  const hasCandidates = candidates.length > 0;
+  const acceptableCandidates = useMemo(
+    () => visibleCandidates.filter((candidate) => ACCEPTABLE_STATUSES.has(candidate.status)),
+    [visibleCandidates],
+  );
+  const hasCandidates = visibleCandidates.length > 0;
 
   return (
     <section className="paragraph-candidate-canvas" aria-label="正文候选画布">
@@ -53,7 +56,7 @@ export function ParagraphCandidateCanvas({
         <div>
           <div className="outline-title">正文候选</div>
           <div className="panel-kicker">
-            {hasCandidates ? `${candidates.length} 条候选，${acceptableCandidates.length} 条可采纳` : '暂无候选'}
+            {hasCandidates ? `${visibleCandidates.length} 条候选，${acceptableCandidates.length} 条可采纳` : '暂无候选'}
           </div>
         </div>
         <div className="paragraph-candidate-toolbar">
@@ -96,15 +99,17 @@ export function ParagraphCandidateCanvas({
         </StatusMessage>
       ) : (
         <div className="paragraph-candidate-list">
-          {candidates.map((candidate) => (
+          {visibleCandidates.map((candidate) => (
             <ParagraphCandidateCard
               candidate={candidate}
               disabled={disabled}
+              isGenerating={isGenerating}
               key={candidate.id}
               onAccept={onAccept}
               onDiscard={onDiscard}
               onEdit={onEdit}
               onRetry={onRetry}
+              onStop={onStop}
             />
           ))}
         </div>
@@ -116,26 +121,31 @@ export function ParagraphCandidateCanvas({
 type ParagraphCandidateCardProps = {
   candidate: AiParagraphCandidate;
   disabled: boolean;
+  isGenerating: boolean;
   onAccept: (candidate: AiParagraphCandidate) => void;
   onRetry: (candidate: AiParagraphCandidate) => void;
   onDiscard: (candidate: AiParagraphCandidate) => void;
   onEdit: (candidate: AiParagraphCandidate, candidateText: string) => void;
+  onStop: () => void;
 };
 
 function ParagraphCandidateCard({
   candidate,
   disabled,
+  isGenerating,
   onAccept,
   onDiscard,
   onEdit,
   onRetry,
+  onStop,
 }: ParagraphCandidateCardProps) {
   const status = displayStatus(candidate.status);
   const title = candidate.heading || candidate.targetNodeTitle || `候选 ${candidate.sectionIndex + 1}`;
   const isEditable = EDITABLE_STATUSES.has(candidate.status);
   const canAccept = ACCEPTABLE_STATUSES.has(candidate.status);
-  const canRetry = RETRYABLE_STATUSES.has(candidate.status);
-  const canDiscard = DISCARDABLE_STATUSES.has(candidate.status);
+  const isActiveGeneration = ACTIVE_GENERATION_STATUSES.has(candidate.status);
+  const canRetry = RETRYABLE_STATUSES.has(candidate.status) || (!isGenerating && isActiveGeneration);
+  const canDiscard = DISCARDABLE_STATUSES.has(candidate.status) || (!isGenerating && isActiveGeneration);
   const isPending = status.key === 'pending' || status.key === 'streaming';
 
   return (
@@ -183,30 +193,49 @@ function ParagraphCandidateCard({
       )}
 
       <div className="paragraph-candidate-actions">
-        <Button
-          disabled={disabled || !canAccept}
-          icon={<Check aria-hidden="true" />}
-          onClick={() => onAccept(candidate)}
-          variant="secondary"
-        >
-          确认替换
-        </Button>
-        <Button
-          disabled={disabled || !canRetry}
-          icon={<RotateCcw aria-hidden="true" />}
-          onClick={() => onRetry(candidate)}
-          variant="ghost"
-        >
-          重试
-        </Button>
-        <Button
-          disabled={disabled || !canDiscard}
-          icon={<Trash2 aria-hidden="true" />}
-          onClick={() => onDiscard(candidate)}
-          variant="ghost"
-        >
-          放弃
-        </Button>
+        {canAccept ? (
+          <Button
+            disabled={disabled}
+            icon={<Check aria-hidden="true" />}
+            onClick={() => onAccept(candidate)}
+            variant="secondary"
+          >
+            确认替换
+          </Button>
+        ) : null}
+        {isActiveGeneration && isGenerating ? (
+          <Button
+            disabled={disabled}
+            icon={<Square aria-hidden="true" />}
+            onClick={onStop}
+            variant="ghost"
+          >
+            停止
+          </Button>
+        ) : (
+          <>
+            {canRetry ? (
+              <Button
+                disabled={disabled}
+                icon={<RotateCcw aria-hidden="true" />}
+                onClick={() => onRetry(candidate)}
+                variant="ghost"
+              >
+                重试
+              </Button>
+            ) : null}
+            {canDiscard ? (
+              <Button
+                disabled={disabled}
+                icon={<Trash2 aria-hidden="true" />}
+                onClick={() => onDiscard(candidate)}
+                variant="ghost"
+              >
+                放弃
+              </Button>
+            ) : null}
+          </>
+        )}
       </div>
     </article>
   );
