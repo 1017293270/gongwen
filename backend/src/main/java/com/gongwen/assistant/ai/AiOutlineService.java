@@ -66,7 +66,7 @@ public class AiOutlineService {
             return response;
         } catch (ModelAdapterException exception) {
             traceRepository.save(failedTrace(traceId, draftId, prompt, exception.errorCode(), exception.getMessage(), startedAt));
-            throw new AiOutlineException("AI_MODEL_UNAVAILABLE", "AI 服务暂不可用，请稍后重试");
+            throw new AiOutlineException("AI_MODEL_UNAVAILABLE", "AI 服务暂不可用：" + exception.getMessage());
         } catch (IllegalArgumentException exception) {
             traceRepository.save(failedTrace(traceId, draftId, prompt, "AI_RESPONSE_INVALID", exception.getMessage(), startedAt));
             throw new AiOutlineException("AI_RESPONSE_INVALID", "AI 返回结构无效，请重试");
