@@ -36,6 +36,7 @@ export function WorkbenchStructureTree({
   onReinitialize,
 }: WorkbenchStructureTreeProps) {
   const [bodyGroupOpen, setBodyGroupOpen] = useState(true);
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   const [insertPosition, setInsertPosition] = useState<InsertDraftNodePosition>('AFTER');
   const [insertRole, setInsertRole] = useState('');
   const structureNodes = nodes.filter((node) => node.nodeType !== 'BODY_SECTION');
@@ -56,6 +57,12 @@ export function WorkbenchStructureTree({
     }
   }, [availableInsertRoles, insertRole]);
 
+  useEffect(() => {
+    if (reinitializeStatus === 'success' || reinitializeStatus === 'error') {
+      setMaintenanceOpen(true);
+    }
+  }, [reinitializeStatus]);
+
   function handleInsertBodyStructure() {
     if (!onInsertBodyStructure) {
       return;
@@ -73,71 +80,6 @@ export function WorkbenchStructureTree({
         <div className="paragraph-index-header">
           <span className="field-label">结构树</span>
           <span className="paragraph-count">{structureNodes.length} 结构 · {bodySectionNodes.length} 正文</span>
-        </div>
-        <div className="workbench-structure-actions">
-          <p>按当前已发布映射重新生成节点。默认使用原稿内容覆盖旧节点；需要保留已有编辑时可单独选择。</p>
-          <div className="workbench-structure-action-row">
-            <Button
-              disabled={!canReinitialize || reinitializeStatus === 'running'}
-              icon={<RotateCcw aria-hidden="true" />}
-              isLoading={reinitializeStatus === 'running'}
-              loadingLabel="正在重建结构"
-              onClick={() => onReinitialize(false)}
-              variant="secondary"
-            >
-              从原稿重建结构
-            </Button>
-            <Button
-              disabled={!canReinitialize || reinitializeStatus === 'running'}
-              icon={<RotateCcw aria-hidden="true" />}
-              onClick={() => onReinitialize(true)}
-              variant="ghost"
-            >
-              保留编辑重建
-            </Button>
-          </div>
-        </div>
-        {reinitializeMessage && (
-          <StatusMessage
-            title={reinitializeMessage}
-            tone={reinitializeStatus === 'error' ? 'warning' : 'success'}
-          />
-        )}
-        <div className="workbench-insert-structure" aria-label="新增正文结构">
-          <label>
-            <span>插入位置</span>
-            <select
-              aria-label="插入位置"
-              disabled={!canInsertBodyStructure}
-              onChange={(event) => setInsertPosition(event.target.value as InsertDraftNodePosition)}
-              value={insertPosition}
-            >
-              <option value="AFTER">当前结构之后</option>
-              <option value="BEFORE">当前结构之前</option>
-              <option value="END_OF_BODY">正文末尾</option>
-            </select>
-          </label>
-          <label>
-            <span>新增结构</span>
-            <select
-              aria-label="新增结构"
-              disabled={!canInsertBodyStructure}
-              onChange={(event) => setInsertRole(event.target.value)}
-              value={activeInsertRole}
-            >
-              {availableInsertRoles.map((role) => (
-                <option key={role.role} value={role.role}>{role.label}</option>
-              ))}
-            </select>
-          </label>
-          <Button
-            disabled={!canInsertBodyStructure || !onInsertBodyStructure || (insertPosition !== 'END_OF_BODY' && !selectedBodyNode)}
-            icon={<Plus aria-hidden="true" />}
-            onClick={handleInsertBodyStructure}
-            variant="secondary"
-          >
-            新增结构
-          </Button>
         </div>
         {nodes.length > 0 ? (
           <div className="structure-tree-list">
@@ -214,6 +156,87 @@ export function WorkbenchStructureTree({
         ) : (
           <p className="empty-note">暂无结构节点，先绑定模板或填写正文。</p>
         )}
+        <details
+          aria-label="结构维护"
+          className="workbench-structure-maintenance"
+          onToggle={(event) => setMaintenanceOpen(event.currentTarget.open)}
+          open={maintenanceOpen}
+        >
+          <summary className="workbench-structure-maintenance-summary">
+            <span>
+              <span className="structure-tree-body-title">结构维护</span>
+              <span className="structure-tree-body-meta">重建结构、新增正文节点</span>
+            </span>
+            <ChevronDown aria-hidden="true" size={16} />
+          </summary>
+          <div className="workbench-structure-maintenance-body">
+            <div className="workbench-structure-actions">
+              <p>按当前已发布映射重新生成节点。默认使用原稿内容覆盖旧节点；需要保留已有编辑时可单独选择。</p>
+              <div className="workbench-structure-action-row">
+                <Button
+                  disabled={!canReinitialize || reinitializeStatus === 'running'}
+                  icon={<RotateCcw aria-hidden="true" />}
+                  isLoading={reinitializeStatus === 'running'}
+                  loadingLabel="正在重建结构"
+                  onClick={() => onReinitialize(false)}
+                  variant="secondary"
+                >
+                  从原稿重建结构
+                </Button>
+                <Button
+                  disabled={!canReinitialize || reinitializeStatus === 'running'}
+                  icon={<RotateCcw aria-hidden="true" />}
+                  onClick={() => onReinitialize(true)}
+                  variant="ghost"
+                >
+                  保留编辑重建
+                </Button>
+              </div>
+            </div>
+            {reinitializeMessage && (
+              <StatusMessage
+                title={reinitializeMessage}
+                tone={reinitializeStatus === 'error' ? 'warning' : 'success'}
+              />
+            )}
+            <div className="workbench-insert-structure" aria-label="新增正文结构">
+              <label>
+                <span>插入位置</span>
+                <select
+                  aria-label="插入位置"
+                  disabled={!canInsertBodyStructure}
+                  onChange={(event) => setInsertPosition(event.target.value as InsertDraftNodePosition)}
+                  value={insertPosition}
+                >
+                  <option value="AFTER">当前结构之后</option>
+                  <option value="BEFORE">当前结构之前</option>
+                  <option value="END_OF_BODY">正文末尾</option>
+                </select>
+              </label>
+              <label>
+                <span>新增结构</span>
+                <select
+                  aria-label="新增结构"
+                  disabled={!canInsertBodyStructure}
+                  onChange={(event) => setInsertRole(event.target.value)}
+                  value={activeInsertRole}
+                >
+                  {availableInsertRoles.map((role) => (
+                    <option key={role.role} value={role.role}>{role.label}</option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                disabled={!canInsertBodyStructure || !onInsertBodyStructure || (insertPosition !== 'END_OF_BODY' && !selectedBodyNode)}
+                icon={<Plus aria-hidden="true" />}
+                onClick={handleInsertBodyStructure}
+                variant="secondary"
+              >
+                新增结构
+              </Button>
+            </div>
+          </div>
+        </details>
       </section>
     </>
   );

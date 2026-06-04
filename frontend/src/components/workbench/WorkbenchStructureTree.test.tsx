@@ -98,6 +98,7 @@ describe('WorkbenchStructureTree', () => {
       />,
     );
 
+    await userEvent.click(screen.getByText('结构维护'));
     const insertPanel = screen.getByLabelText('新增正文结构');
     await userEvent.selectOptions(within(insertPanel).getByLabelText('插入位置'), 'BEFORE');
     await userEvent.selectOptions(within(insertPanel).getByLabelText('新增结构'), 'BODY_HEADING_LEVEL_2');

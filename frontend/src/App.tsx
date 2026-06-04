@@ -115,6 +115,11 @@ import {
   type WorkbenchExportStatus,
   type WorkbenchPreviewRequestStatus,
 } from './components/workbench/WorkbenchExportPanel';
+import { WorkbenchContextPanel } from './components/workbench/WorkbenchContextPanel';
+import {
+  WorkbenchInspectorPanel,
+  type WorkbenchInspectorSection,
+} from './components/workbench/WorkbenchInspectorPanel';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
 import { ParagraphCandidateCanvas } from './components/workbench/ParagraphCandidateCanvas';
 import { WorkbenchPreview } from './components/workbench/WorkbenchPreview';
@@ -563,6 +568,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [candidateStatus, setCandidateStatus] = useState<CandidateStatus>('idle');
   const [candidateJobId, setCandidateJobId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [rightInspectorSection, setRightInspectorSection] = useState<WorkbenchInspectorSection>('ai');
   const [localOperationType, setLocalOperationType] = useState<AiLocalOperationType>('FORMALIZE');
   const [localOperationInstruction, setLocalOperationInstruction] = useState('');
   const [localOperationStatus, setLocalOperationStatus] = useState<LocalOperationStatus>('idle');
@@ -1114,6 +1120,14 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setNodeFormatStatus('idle');
     setNodeFormatError('');
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      setRightInspectorSection('ai');
+      return;
+    }
+    setRightInspectorSection(selectedNodeActionKind === 'quality-check' ? 'review' : 'ai');
+  }, [selectedNodeId, selectedNodeActionKind]);
 
   function handleSidebarNavigate(view: AppView) {
     if (view === 'drafts') {
@@ -2743,111 +2757,44 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
         {activeView === 'workbench' && (
           <main className="workbench">
-            <section className="panel" aria-label="起草信息">
-          <div className="panel-header">
-            <h2 className="panel-title">文种、模板与材料</h2>
-            <p className="panel-kicker">当前草稿：{currentDocumentType?.name ?? '通知'}</p>
-          </div>
-          <div className="panel-body">
-            <SelectField
-              disabled={documentTypes.length === 0 || status === 'loading'}
-              hint="切换后会进入该文种当前草稿；若该文种暂无草稿，则返回对应目录。"
-              label="文种"
-              onChange={(event) => void handleWorkbenchDocumentTypeChange(event.target.value)}
-              value={currentWorkbenchDocumentTypeCode}
-            >
-              {documentTypes.length === 0 ? <option value="NOTICE">通知</option> : documentTypes.map((type) => (
-                <option key={type.code} value={type.code}>{type.name}</option>
-              ))}
-            </SelectField>
-
-            <SelectField
-              disabled={!draft || latestTemplateVersions.length === 0}
-              hint={latestTemplateVersions.length === 0 ? '暂无已解析模板，先通过模板 API 上传版本。' : '仅展示每个模板的最新版本，质检会按所选模板检查占位符适配。'}
-              label="套版模板"
-              onChange={(event) => void handleTemplateVersionChange(event.target.value ? Number(event.target.value) : null)}
-              value={draft?.templateVersionId ? String(draft.templateVersionId) : ''}
-            >
-              <option value="">未选择模板</option>
-              {latestTemplateVersions.map((template) => (
-                <option key={template.templateVersionId} value={template.templateVersionId}>
-                  {template.templateName} v{template.versionNo}
-                </option>
-              ))}
-            </SelectField>
-
-            <TextField label="标题" onChange={(event) => updateBlock('TITLE', event.target.value)} value={title} />
-
-            <TextField label="主送" onChange={(event) => updateBlock('RECIPIENT', event.target.value)} value={recipient} />
-
-            <WorkbenchStructureTree
-              bodySectionNodes={bodySectionNodes}
-              canInsertBodyStructure={Boolean(draft?.templateVersionId) && workbenchRenderPreviewStatus !== 'requesting'}
-              canReinitialize={Boolean(draft?.templateVersionId) && status !== 'loading'}
-              insertableRoles={insertableBodyRoles}
-              nodes={workbenchNodes}
-              onInsertBodyStructure={(request) => void handleInsertBodyStructure(request)}
-              onReinitialize={(preserveUserEditedNodes) => void handleReinitializeDraftNodes(preserveUserEditedNodes)}
-              onRemoveBodyNode={removeBodyNode}
-              onSelectNode={selectNode}
-              reinitializeMessage={reinitializeNodeMessage}
-              reinitializeStatus={reinitializeNodeStatus}
-              selectedNodeId={selectedNodeId}
+            <WorkbenchContextPanel
+              attachment={attachment}
+              blockCount={blocks.length}
+              bodySectionCount={bodySectionNodes.length}
+              currentDocumentTypeCode={currentWorkbenchDocumentTypeCode}
+              currentDocumentTypeName={currentDocumentType?.name ?? '通知'}
+              date={date}
+              documentTypes={documentTypes}
+              draft={draft}
+              latestTemplateVersions={latestTemplateVersions}
+              materialStatus={materialStatus}
+              materials={materials}
+              nodeCount={workbenchNodes.length}
+              onDocumentTypeChange={(documentTypeCode) => void handleWorkbenchDocumentTypeChange(documentTypeCode)}
+              onFieldChange={updateBlock}
+              onMaterialUpload={handleMaterialUpload}
+              onTemplateVersionChange={(templateVersionId) => void handleTemplateVersionChange(templateVersionId)}
+              recipient={recipient}
+              signature={signature}
+              status={status}
+              structureTree={(
+                <WorkbenchStructureTree
+                  bodySectionNodes={bodySectionNodes}
+                  canInsertBodyStructure={Boolean(draft?.templateVersionId) && workbenchRenderPreviewStatus !== 'requesting'}
+                  canReinitialize={Boolean(draft?.templateVersionId) && status !== 'loading'}
+                  insertableRoles={insertableBodyRoles}
+                  nodes={workbenchNodes}
+                  onInsertBodyStructure={(request) => void handleInsertBodyStructure(request)}
+                  onReinitialize={(preserveUserEditedNodes) => void handleReinitializeDraftNodes(preserveUserEditedNodes)}
+                  onRemoveBodyNode={removeBodyNode}
+                  onSelectNode={selectNode}
+                  reinitializeMessage={reinitializeNodeMessage}
+                  reinitializeStatus={reinitializeNodeStatus}
+                  selectedNodeId={selectedNodeId}
+                />
+              )}
+              title={title}
             />
-
-            <TextField label="附件" onChange={(event) => updateBlock('ATTACHMENT', event.target.value)} value={attachment} />
-
-            <TextField label="落款" onChange={(event) => updateBlock('SIGNATURE', event.target.value)} value={signature} />
-
-            <TextField label="日期" onChange={(event) => updateBlock('DATE', event.target.value)} value={date} />
-
-            <div className="material-upload">
-              <input
-                accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                aria-label="上传材料文件"
-                className="visually-hidden"
-                disabled={!draft || materialStatus === 'uploading'}
-                id="material-upload"
-                onChange={handleMaterialUpload}
-                type="file"
-              />
-              <label
-                aria-disabled={!draft || materialStatus === 'uploading'}
-                className="ui-button ui-button-secondary upload-label"
-                htmlFor="material-upload"
-              >
-                <Upload aria-hidden="true" />
-                {materialStatus === 'uploading' ? '正在上传材料' : '上传 Word/PDF 材料'}
-              </label>
-            </div>
-
-            <div className="material-list" aria-label="材料列表">
-              {materials.length === 0 ? (
-                <p className="empty-note">
-                  {materialStatus === 'loading' ? '正在加载材料' : '尚未上传材料'}
-                </p>
-              ) : materials.map((material) => (
-                <div className="material-item" key={material.id}>
-                  <FileText aria-hidden="true" className="material-icon" />
-                  <div className="material-copy">
-                    <div className="material-name">{material.originalFileName}</div>
-                    <div className="material-meta">
-                      {material.fileExtension.toUpperCase()} · {formatFileSize(material.fileSizeBytes)} · {material.status === 'READY' ? `提取 ${material.extractedTextLength} 字` : material.errorMessage}
-                    </div>
-                  </div>
-                  <span className={`status-chip ${material.status === 'READY' ? 'success' : 'danger'}`}>
-                    {material.status === 'READY' ? (
-                      <CheckCircle2 aria-hidden="true" className="status-icon" />
-                    ) : (
-                      <AlertCircle aria-hidden="true" className="status-icon" />
-                    )}
-                    {material.status === 'READY' ? '已就绪' : '失败'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-            </section>
 
             <WorkbenchPreview
               attachment={attachment}
@@ -2889,147 +2836,165 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
               titleStyle={titleNodePreviewStyle}
             />
 
-            <section className="panel" aria-label="AI 建议和质检">
-          <div className="panel-header">
-            <h2 className="panel-title">AI 建议与质检</h2>
-            <p className="panel-kicker">{status === 'loading' ? '正在载入' : `草稿 #${draft?.id ?? '-'}`}</p>
-          </div>
-          <div className="panel-body">
-            <StatusMessage title={statusMessage} tone={status === 'error' ? 'warning' : 'success'} />
-            <StatusMessage title={`结构节点 ${workbenchNodes.length} 项，兼容草稿块 ${blocks.length} 项`} tone="success" />
-            <StatusMessage title={`参考材料 ${materials.length} 项`} tone={materials.length > 0 ? 'success' : 'warning'} />
-            <TextareaField
-              aria-label="提纲补充要求"
-              className="outline-instruction"
-              disabled={!draft || outlineStatus === 'generating'}
-              label="补充要求"
-              maxLength={1000}
-              onChange={(event) => setOutlineInstruction(event.target.value)}
-              placeholder="可补充会议重点、语气、必须覆盖的信息"
-              value={outlineInstruction}
-            />
-            <Button
-              disabled={!draft || outlineStatus === 'generating' || allParagraphStatus === 'generating' || status === 'loading'}
-              icon={<Sparkles aria-hidden="true" />}
-              isLoading={outlineStatus === 'generating'}
-              loadingLabel="正在生成提纲"
-              onClick={openOutlineDialog}
-              variant="secondary"
-            >
-              {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
-            </Button>
-            {outlineStatus === 'error' && <StatusMessage title={outlineError} tone="warning" />}
-            {outline && (
-              <div className="ai-task-summary" aria-label="提纲摘要">
-                <span>{outline.titleSuggestion}</span>
-                <button className="summary-link" onClick={() => setActiveAiDialog('outline')} type="button">
-                  查看提纲
-                </button>
-              </div>
-            )}
-            <ParagraphCandidateCanvas
-              candidates={paragraphCandidates}
-              disabled={!draft || status === 'loading'}
-              isGenerating={isCandidateGenerating}
-              onAccept={(candidate) => void handleAcceptParagraphCandidate(candidate)}
-              onAcceptBatch={(candidates) => void handleAcceptParagraphCandidateBatch(candidates)}
-              onDiscard={(candidate) => void handleDiscardParagraphCandidate(candidate)}
-              onEdit={(candidate, candidateText) => void handleEditParagraphCandidate(candidate, candidateText)}
-              onGenerateAll={() => void handleGenerateAllParagraphCandidates()}
-              onRetry={(candidate) => void handleRetryParagraphCandidate(candidate)}
-              onStop={() => void handleStopParagraphCandidateJob()}
-            />
-            <WorkbenchQualityPanel
-              disabled={!draft || qualityCheckStatus === 'checking' || status === 'loading'}
-              error={qualityCheckError}
-              onOpenResult={() => setActiveAiDialog('quality')}
-              onRun={openQualityDialog}
-              result={qualityCheck}
-              status={qualityCheckStatus}
-            />
-            <WorkbenchExportPanel
-              exportError={exportError}
+            <WorkbenchInspectorPanel
+              activeSection={rightInspectorSection}
+              blockCount={blocks.length}
+              candidateCount={paragraphCandidates.length}
+              candidateSlot={(
+                <ParagraphCandidateCanvas
+                  candidates={paragraphCandidates}
+                  disabled={!draft || status === 'loading'}
+                  isGenerating={isCandidateGenerating}
+                  onAccept={(candidate) => void handleAcceptParagraphCandidate(candidate)}
+                  onAcceptBatch={(candidates) => void handleAcceptParagraphCandidateBatch(candidates)}
+                  onDiscard={(candidate) => void handleDiscardParagraphCandidate(candidate)}
+                  onEdit={(candidate, candidateText) => void handleEditParagraphCandidate(candidate, candidateText)}
+                  onGenerateAll={() => void handleGenerateAllParagraphCandidates()}
+                  onRetry={(candidate) => void handleRetryParagraphCandidate(candidate)}
+                  onStop={() => void handleStopParagraphCandidateJob()}
+                />
+              )}
+              candidateStatus={candidateStatus}
+              draftId={draft?.id ?? null}
+              exportSlot={(
+                <WorkbenchExportPanel
+                  exportError={exportError}
+                  exportStatus={exportStatus}
+                  hasDraft={Boolean(draft)}
+                  isWorkbenchLoading={status === 'loading'}
+                  onExportWord={() => void handleExportWord()}
+                  onRefreshPreview={() => void handleRefreshWorkbenchPreview()}
+                  preview={workbenchRenderPreview}
+                  previewMessage={workbenchRenderPreviewMessage}
+                  previewOutdated={renderPreviewOutdated}
+                  previewStatus={workbenchRenderPreviewStatus}
+                  templateVersionId={draft?.templateVersionId ?? null}
+                />
+              )}
               exportStatus={exportStatus}
-              hasDraft={Boolean(draft)}
-              isWorkbenchLoading={status === 'loading'}
-              onExportWord={() => void handleExportWord()}
-              onRefreshPreview={() => void handleRefreshWorkbenchPreview()}
-              preview={workbenchRenderPreview}
-              previewMessage={workbenchRenderPreviewMessage}
-              previewOutdated={renderPreviewOutdated}
-              previewStatus={workbenchRenderPreviewStatus}
-              templateVersionId={draft?.templateVersionId ?? null}
-            />
-            <NodeFormatPanel
-              disabled={selectedNodeFormatDisabled}
-              effectiveFormatting={selectedDraftNode?.effectiveFormatting ?? selectedNode?.formatting ?? null}
-              error={nodeFormatError}
-              formatOverride={selectedDraftNode?.formatOverride ?? null}
-              nodeLabel={selectedNodeFormatLabel}
-              onRestore={() => void handleRestoreNodeFormatOverride()}
-              onSave={(formatOverride) => void handleSaveNodeFormatOverride(formatOverride)}
-              previewOutdated={renderPreviewOutdated}
-              status={nodeFormatStatus}
-            />
-            <div className="local-operation" aria-label="局部段落操作">
-              <div className="local-operation-header">
-                <div>
-                  <div className="outline-title">{selectedNodePanelTitle}</div>
-                  <div className="panel-kicker">{selectedNodePanelKicker}</div>
-                </div>
-              </div>
-              {selectedNodeSupportsLocalOperation ? (
-                <>
-                  <div className="operation-grid" role="group" aria-label="局部操作类型">
-                    {selectedLocalOperationOptions.map((option) => (
-                      <button
-                        aria-pressed={localOperationType === option.value}
-                        className={`operation-choice ${localOperationType === option.value ? 'selected' : ''}`}
-                        disabled={localOperationStatus === 'generating' || localOperationStatus === 'saving'}
-                        key={option.value}
-                        onClick={() => setLocalOperationType(option.value)}
-                        type="button"
-                      >
-                        {option.label}
+              formatSlot={(
+                <NodeFormatPanel
+                  disabled={selectedNodeFormatDisabled}
+                  effectiveFormatting={selectedDraftNode?.effectiveFormatting ?? selectedNode?.formatting ?? null}
+                  error={nodeFormatError}
+                  formatOverride={selectedDraftNode?.formatOverride ?? null}
+                  nodeLabel={selectedNodeFormatLabel}
+                  onRestore={() => void handleRestoreNodeFormatOverride()}
+                  onSave={(formatOverride) => void handleSaveNodeFormatOverride(formatOverride)}
+                  previewOutdated={renderPreviewOutdated}
+                  status={nodeFormatStatus}
+                />
+              )}
+              localOperationSlot={(
+                <div className="local-operation" aria-label="局部段落操作">
+                  {selectedNodeSupportsLocalOperation ? (
+                    <>
+                      <div className="operation-grid" role="group" aria-label="局部操作类型">
+                        {selectedLocalOperationOptions.map((option) => (
+                          <button
+                            aria-pressed={localOperationType === option.value}
+                            className={`operation-choice ${localOperationType === option.value ? 'selected' : ''}`}
+                            disabled={localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                            key={option.value}
+                            onClick={() => setLocalOperationType(option.value)}
+                            type="button"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <TextareaField
+                        aria-label="局部补充要求"
+                        className="outline-instruction"
+                        disabled={!draft || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
+                        label="局部补充要求"
+                        maxLength={1000}
+                        onChange={(event) => setLocalOperationInstruction(event.target.value)}
+                        placeholder="可补充语气、长度、必须保留或强化的信息"
+                        value={localOperationInstruction}
+                      />
+                    </>
+                  ) : (
+                    <StatusMessage title={selectedNode ? '该结构节点建议先通过质检确认，不直接改写正文。' : '未选择结构时，可使用上方提纲生成、基础质检和 Word 导出。'} />
+                  )}
+                  {localOperationError && <StatusMessage title={localOperationError} tone="warning" />}
+                  {localOperationSuggestion && (
+                    <div className="ai-task-summary" aria-label="段落建议摘要">
+                      <span>已生成 {localOperationLabel(localOperationSuggestion.operationType)} 建议</span>
+                      <button className="summary-link" onClick={() => setActiveAiDialog('local')} type="button">
+                        查看建议
                       </button>
-                    ))}
-                  </div>
-                  <TextareaField
-                    aria-label="局部补充要求"
-                    className="outline-instruction"
-                    disabled={!draft || localOperationStatus === 'generating' || localOperationStatus === 'saving'}
-                    label="局部补充要求"
-                    maxLength={1000}
-                    onChange={(event) => setLocalOperationInstruction(event.target.value)}
-                    placeholder="可补充语气、长度、必须保留或强化的信息"
-                    value={localOperationInstruction}
-                  />
-                </>
-              ) : (
-                <StatusMessage title={selectedNode ? '该结构节点建议先通过质检确认，不直接改写正文。' : '未选择结构时，可使用上方提纲生成、基础质检和 Word 导出。'} />
-              )}
-              <Button
-                disabled={selectedNodeActionDisabled}
-                icon={selectedNodeActionKind === 'quality-check' ? <CheckCircle2 aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-                isLoading={selectedNodeActionLoading}
-                loadingLabel={selectedNodeActionKind === 'quality-check' ? '正在质检' : '正在生成建议'}
-                onClick={openLocalOperationDialog}
-                variant="secondary"
-              >
-                {selectedNodeActionButtonLabel}
-              </Button>
-              {localOperationError && <StatusMessage title={localOperationError} tone="warning" />}
-              {localOperationSuggestion && (
-                <div className="ai-task-summary" aria-label="段落建议摘要">
-                  <span>已生成 {localOperationLabel(localOperationSuggestion.operationType)} 建议</span>
-                  <button className="summary-link" onClick={() => setActiveAiDialog('local')} type="button">
-                    查看建议
-                  </button>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          </div>
-            </section>
+              materialCount={materials.length}
+              node={selectedNode}
+              nodeCount={workbenchNodes.length}
+              nodeKicker={selectedNodePanelKicker}
+              nodeTitle={selectedNodePanelTitle}
+              onSectionChange={setRightInspectorSection}
+              outlineSlot={(
+                <>
+                  <TextareaField
+                    aria-label="提纲补充要求"
+                    className="outline-instruction"
+                    disabled={!draft || outlineStatus === 'generating'}
+                    label="补充要求"
+                    maxLength={1000}
+                    onChange={(event) => setOutlineInstruction(event.target.value)}
+                    placeholder="可补充会议重点、语气、必须覆盖的信息"
+                    value={outlineInstruction}
+                  />
+                  <Button
+                    disabled={!draft || outlineStatus === 'generating' || allParagraphStatus === 'generating' || status === 'loading'}
+                    icon={<Sparkles aria-hidden="true" />}
+                    isLoading={outlineStatus === 'generating'}
+                    loadingLabel="正在生成提纲"
+                    onClick={openOutlineDialog}
+                    variant="secondary"
+                  >
+                    {outlineStatus === 'error' ? '重试生成提纲' : '生成提纲'}
+                  </Button>
+                  {outlineStatus === 'error' && <StatusMessage title={outlineError} tone="warning" />}
+                  {outline && (
+                    <div className="ai-task-summary" aria-label="提纲摘要">
+                      <span>{outline.titleSuggestion}</span>
+                      <button className="summary-link" onClick={() => setActiveAiDialog('outline')} type="button">
+                        查看提纲
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+              outlineStatus={outlineStatus}
+              primaryAction={(
+                <Button
+                  disabled={selectedNodeActionDisabled}
+                  icon={selectedNodeActionKind === 'quality-check' ? <CheckCircle2 aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+                  isLoading={selectedNodeActionLoading}
+                  loadingLabel={selectedNodeActionKind === 'quality-check' ? '正在质检' : '正在生成建议'}
+                  onClick={openLocalOperationDialog}
+                  variant="secondary"
+                >
+                  {selectedNodeActionButtonLabel}
+                </Button>
+              )}
+              qualitySlot={(
+                <WorkbenchQualityPanel
+                  disabled={!draft || qualityCheckStatus === 'checking' || status === 'loading'}
+                  error={qualityCheckError}
+                  onOpenResult={() => setActiveAiDialog('quality')}
+                  onRun={openQualityDialog}
+                  result={qualityCheck}
+                  status={qualityCheckStatus}
+                />
+              )}
+              qualityStatus={qualityCheckStatus}
+              renderPreviewOutdated={renderPreviewOutdated}
+              statusMessage={statusMessage}
+              statusTone={status === 'error' ? 'warning' : status === 'loading' ? 'info' : 'success'}
+            />
           </main>
         )}
 
@@ -7110,16 +7075,6 @@ function readDeletedNodeIds(storageKey: string) {
 
 function writeDeletedNodeIds(storageKey: string, nodeIds: Set<string>) {
   window.localStorage.setItem(storageKey, JSON.stringify([...nodeIds]));
-}
-
-function formatFileSize(size: number) {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatTimestamp(value: string) {

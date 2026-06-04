@@ -773,8 +773,8 @@ describe('App', () => {
           outlineTraceId: outline.traceId,
           instructionSummary: '',
           sections: [
-            { sectionIndex: 0, heading: '一、主要事项', points: ['说明安排'], targetNodeId: null },
-            { sectionIndex: 1, heading: '二、工作要求', points: ['落实责任'], targetNodeId: null },
+            { sectionIndex: 0, heading: '一、主要事项', points: ['说明安排'], targetNodeId: null, targetNodeRole: '', targetNodeTitle: '一、主要事项' },
+            { sectionIndex: 1, heading: '二、工作要求', points: ['落实责任'], targetNodeId: null, targetNodeRole: '', targetNodeTitle: '二、工作要求' },
           ],
         });
         return Promise.resolve(jsonResponse({
@@ -1167,6 +1167,7 @@ describe('App', () => {
 
     await openWorkbench();
     await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    await openInspectorSection('格式');
 
     await userEvent.type(screen.getByLabelText('中文字体'), 'KaiTi');
     await userEvent.clear(screen.getByLabelText('字号'));
@@ -1217,6 +1218,7 @@ describe('App', () => {
 
     await openWorkbench();
     await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    await openInspectorSection('格式');
 
     expect(screen.getByLabelText('中文字体')).toHaveValue('FangSong');
     expect(screen.getByLabelText('西文字体')).toHaveValue('Times New Roman');
@@ -1292,6 +1294,7 @@ describe('App', () => {
 
     await openWorkbench();
     await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    await openInspectorSection('格式');
     expect(screen.getByLabelText('中文字体')).toHaveValue('FangSong');
     expect(screen.getByLabelText('字号')).toHaveValue(16);
     expect(screen.getByLabelText('段后')).toHaveValue(300);
@@ -1353,6 +1356,7 @@ describe('App', () => {
 
     await openWorkbench();
     await userEvent.click(await within(screen.getByLabelText('结构节点树')).findByText('节点事项'));
+    await openInspectorSection('格式');
     expect(screen.getByLabelText('中文字体')).toHaveValue('KaiTi');
 
     await userEvent.click(screen.getByRole('button', { name: '恢复模板默认' }));
@@ -1484,6 +1488,7 @@ describe('App', () => {
 
     await openWorkbench();
     await screen.findByDisplayValue('质检草稿');
+    await openInspectorSection('质检');
     await userEvent.click(within(screen.getByLabelText('基础质检')).getByRole('button', { name: '运行质检' }));
 
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/quality-check', expect.objectContaining({
@@ -1613,6 +1618,7 @@ describe('App', () => {
 
     await openWorkbench();
     await screen.findByLabelText('标题');
+    await openInspectorSection('导出');
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/render-preview', expect.objectContaining({
       headers: expect.any(Object),
     }));
@@ -1624,6 +1630,7 @@ describe('App', () => {
     const bodyEditor = await within(preview).findByLabelText(/编辑段落/);
     fireEvent.change(bodyEditor, { target: { value: 'A' } });
 
+    await openInspectorSection('导出');
     await userEvent.click(screen.getByRole('button', { name: '刷新预览' }));
 
     expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/drafts/1/blocks', expect.objectContaining({
@@ -3185,6 +3192,10 @@ describe('App', () => {
 
 async function openWorkbench() {
   await userEvent.click(await screen.findByRole('button', { name: '工作台' }));
+}
+
+async function openInspectorSection(name: 'AI' | '格式' | '质检' | '导出') {
+  await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name }));
 }
 
 function jsonResponse<T>(data: T) {
