@@ -106,7 +106,7 @@ class AiParagraphCandidateServiceTest {
         AiParagraphCandidateDto generated = service.retry(draft.id(), pending.id());
 
         assertThat(generated.status()).isEqualTo("READY");
-        assertThat(generated.candidateText()).isEqualTo("Section 1: generated body");
+        assertThat(generated.candidateText()).isEqualTo("generated body");
         assertThat(generated.candidateTextDigest()).isNotBlank();
         assertThat(generated.errorCode()).isBlank();
         assertThat(modelAdapter.lastPrompt.heading()).isEqualTo("Section 1");
@@ -115,10 +115,30 @@ class AiParagraphCandidateServiceTest {
         assertThat(modelAdapter.lastPrompt.materialSummaries()).contains("brief.docx: material text");
         assertThat(modelAdapter.lastPrompt.nodeContext().nodeId()).isEqualTo(10L);
         assertThat(modelAdapter.lastPrompt.nodeContext().nodeContext()).isEqualTo("existing node");
+        assertThat(modelAdapter.lastPrompt.formattingSummary())
+                .contains("targetRole=BODY", "font=SourceFangSong", "firstLineIndentTwip=720");
         assertThat(draftRepository.draft.blocks()).extracting(DraftBlockDto::content).containsExactly("existing body");
         assertThat(draftNodeRepository.findByDraftId(draft.id())).extracting(DraftNode::content).containsExactly("existing node");
         assertThat(draftRepository.replaceCalls).isZero();
         assertThat(draftNodeRepository.updateCalls).isZero();
+    }
+
+    @Test
+    void retryRejectsTitleOnlyCandidateWithoutChangingDraft() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "Draft", List.of(
+                new DraftBlockUpdateRequest("BODY_PARAGRAPH", "existing body", 30)
+        ));
+        draftNodeRepository.nodes = List.of(draftNode(10L, draft.id(), "BODY", "Body", "existing node", 30, "USER_FILLED"));
+        AiParagraphCandidate pending = candidateRepository.insert(candidate(draft.id(), 10L, 1, "PENDING", ""));
+        modelAdapter.content = "Section 1";
+
+        AiParagraphCandidateDto generated = service.retry(draft.id(), pending.id());
+
+        assertThat(generated.status()).isEqualTo("ERROR");
+        assertThat(generated.errorCode()).isEqualTo("AI_RESPONSE_INVALID");
+        assertThat(generated.errorMessage()).contains("模型只返回了标题");
+        assertThat(draftRepository.draft.blocks()).extracting(DraftBlockDto::content).containsExactly("existing body");
+        assertThat(draftNodeRepository.findByDraftId(draft.id())).extracting(DraftNode::content).containsExactly("existing node");
     }
 
     @Test
@@ -379,7 +399,7 @@ class AiParagraphCandidateServiceTest {
     }
 
     private static final class FixedCandidateModelAdapter implements ModelAdapter {
-        private final String content;
+        private String content;
         private ParagraphPrompt lastPrompt;
         private ModelAdapterException exception;
 

@@ -34,6 +34,7 @@ import {
   createParagraphCandidateJob,
   createTemplate,
   createUser,
+  applyDraftOutline,
   ApiRequestError,
   acceptParagraphCandidate,
   acceptParagraphCandidateBatch,
@@ -134,6 +135,7 @@ import type {
   AiLocalOperationType,
   AiNodeRequestContext,
   AiOutline,
+  AppliedOutlineSectionTarget,
   AiParagraphCandidate,
   AiProviderSettings,
   AiProviderStatus,
@@ -194,6 +196,7 @@ const BLOCK_SORT_ORDER: Record<string, number> = {
 type WorkbenchStatus = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
 type MaterialStatus = 'loading' | 'idle' | 'uploading' | 'error';
 type OutlineStatus = 'idle' | 'generating' | 'success' | 'error';
+type ApplyOutlineStatus = 'idle' | 'applying' | 'applied' | 'error';
 type ParagraphStatus = 'idle' | 'generating' | 'success' | 'error';
 type CandidateStatus = 'idle' | 'loading' | 'generating' | 'error';
 type LocalOperationStatus = 'idle' | 'generating' | 'suggested' | 'saving' | 'saved' | 'error';
@@ -431,6 +434,14 @@ function previousOutlineTargetNode(sectionIndex: number, sections: AiOutline['se
   return null;
 }
 
+function draftHasGeneratedBodyContent(nodes: DraftNode[]) {
+  return nodes.some((node) => (
+    node.status !== 'DELETED'
+    && node.role === 'BODY'
+    && Boolean((node.content || '').trim())
+  ));
+}
+
 const LOCAL_OPERATION_OPTIONS: Array<{ value: AiLocalOperationType; label: string }> = [
   { value: 'FORMALIZE', label: '正式化' },
   { value: 'COMPRESS', label: '压缩' },
@@ -558,6 +569,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
   const [outlineStatus, setOutlineStatus] = useState<OutlineStatus>('idle');
   const [outlineError, setOutlineError] = useState('');
   const [outlineInstruction, setOutlineInstruction] = useState('');
+  const [appliedOutlineTraceId, setAppliedOutlineTraceId] = useState<string | null>(null);
+  const [outlineSectionTargets, setOutlineSectionTargets] = useState<AppliedOutlineSectionTarget[]>([]);
+  const [applyOutlineStatus, setApplyOutlineStatus] = useState<ApplyOutlineStatus>('idle');
+  const [applyOutlineError, setApplyOutlineError] = useState('');
+  const [outlineFormattingWarnings, setOutlineFormattingWarnings] = useState<string[]>([]);
   const [activeAiDialog, setActiveAiDialog] = useState<AiDialog>(null);
   const [paragraphStatuses, setParagraphStatuses] = useState<Record<string, ParagraphStatus>>({});
   const [paragraphErrors, setParagraphErrors] = useState<Record<string, string>>({});
@@ -644,6 +660,10 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     && outlineDialogCandidates.some((candidate) => (
       candidate.sectionIndex === sectionIndex && ACTIVE_CANDIDATE_STATUSES.has(candidate.status)
     ));
+  const outlineApplied = Boolean(outline && appliedOutlineTraceId === outline.traceId);
+  const outlineSectionTargetsByIndex = useMemo(() => new Map(
+    outlineSectionTargets.map((target) => [target.sectionIndex, target]),
+  ), [outlineSectionTargets]);
 
   useEffect(() => () => {
     outlineRequestRef.current?.abort();
@@ -886,6 +906,11 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
     setRenderPreviewOutdated(false);
     setSelectedNodeId(null);
     setOutline(null);
+    setAppliedOutlineTraceId(null);
+    setOutlineSectionTargets([]);
+    setApplyOutlineStatus('idle');
+    setApplyOutlineError('');
+    setOutlineFormattingWarnings([]);
     setQualityCheck(null);
     setLocalOperationSuggestion(null);
     setLocalOperationStatus('idle');
@@ -968,6 +993,12 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
         setParagraphCandidates([]);
         setCandidateStatus('idle');
         setCandidateJobId(null);
+        setOutline(null);
+        setAppliedOutlineTraceId(null);
+        setOutlineSectionTargets([]);
+        setApplyOutlineStatus('idle');
+        setApplyOutlineError('');
+        setOutlineFormattingWarnings([]);
         closeCandidateEventSource();
         setMaterials([]);
         setTemplateVersions([]);
@@ -1857,6 +1888,17 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setBlocks(updatedDraft.blocks);
       setDraftNodes(updatedDraftNodes);
       setInsertableBodyRoles(updatedInsertableRoles);
+      setOutline(null);
+      setAppliedOutlineTraceId(null);
+      setOutlineSectionTargets([]);
+      setApplyOutlineStatus('idle');
+      setApplyOutlineError('');
+      setOutlineFormattingWarnings([]);
+      setParagraphCandidates([]);
+      candidateJobIdsRef.current = [];
+      setCandidateStatus('idle');
+      setCandidateJobId(null);
+      closeCandidateEventSource();
       setWorkbenchRenderPreview(null);
       setWorkbenchRenderPreviewStatus('idle');
       setWorkbenchRenderPreviewMessage('');
@@ -1896,6 +1938,12 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       setOutlineError('');
       const generatedOutline = await generateDraftOutline(draft.id, outlineInstruction, controller.signal);
       setOutline(generatedOutline);
+      setAppliedOutlineTraceId(null);
+      setOutlineSectionTargets([]);
+      setApplyOutlineStatus('idle');
+      setApplyOutlineError('');
+      setOutlineFormattingWarnings([]);
+      setParagraphCandidates([]);
       setParagraphStatuses({});
       setParagraphErrors({});
       setAllParagraphStatus('idle');
@@ -1928,6 +1976,66 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
   async function handleGenerateAllParagraphs() {
     await handleGenerateAllParagraphCandidates();
+  }
+
+  async function handleApplyOutline() {
+    if (!draft || !outline || outline.sections.length === 0) {
+      showToast({ title: '请先生成提纲', tone: 'info' });
+      return;
+    }
+    if (isCandidateGenerating) {
+      showToast({ title: '正文候选生成中，请先停止后再应用新提纲', tone: 'info' });
+      return;
+    }
+    if (draftHasGeneratedBodyContent(draftNodes)) {
+      const confirmed = window.confirm('应用提纲会替换当前正文区结构和正文内容，标题、主送、落款、日期、材料会保留。确定继续吗？');
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      setApplyOutlineStatus('applying');
+      setApplyOutlineError('');
+      const savedNodes = await saveDirtyDraftNodes();
+      if (savedNodes !== draftNodes) {
+        setDraftNodes(savedNodes);
+      }
+      const response = await applyDraftOutline(draft.id, {
+        outlineTraceId: outline.traceId,
+        titleSuggestion: outline.titleSuggestion,
+        sections: outline.sections,
+      });
+      setDraftNodes(response.nodes);
+      setDraft((currentDraft) => currentDraft ? { ...currentDraft, nodes: response.nodes } : currentDraft);
+      setAppliedOutlineTraceId(outline.traceId);
+      setOutlineSectionTargets(response.sectionTargets);
+      setOutlineFormattingWarnings(response.formattingWarnings);
+      setParagraphCandidates([]);
+      candidateJobIdsRef.current = [];
+      setCandidateStatus('idle');
+      setCandidateJobId(null);
+      setParagraphStatuses({});
+      setParagraphErrors({});
+      setAllParagraphStatus('idle');
+      setAllParagraphError('');
+      setDirtyDraftNodeIds(new Set());
+      markRenderPreviewOutdated();
+      setApplyOutlineStatus('applied');
+      showToast({
+        title: '提纲已应用',
+        description: '正文结构已按提纲重建，可继续生成正文候选。',
+        tone: 'success',
+      });
+    } catch (error) {
+      if (handleAuthenticationRequiredError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : '应用提纲失败';
+      setApplyOutlineStatus('error');
+      setApplyOutlineError(message);
+      showToast({ title: message, tone: 'error' });
+    }
   }
 
   async function ensureParagraphCandidateTarget(
@@ -1982,29 +2090,31 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
       showToast({ title: '请先生成提纲', tone: 'info' });
       return;
     }
+    if (!outlineApplied) {
+      const message = '请先应用提纲，系统会按提纲重建正文结构后再生成正文候选。';
+      setAllParagraphStatus('error');
+      setAllParagraphError(message);
+      showToast({ title: message, tone: 'info' });
+      return;
+    }
 
     try {
       const indexes = sectionIndexes && sectionIndexes.length > 0
         ? sectionIndexes
         : outline.sections.map((_, index) => index);
       const sections: ParagraphCandidateSectionRequest[] = [];
-      let workingNodes = draftNodes;
-      let lastTargetNode: DraftNode | null = null;
       for (const index of indexes) {
         const section = outline.sections[index];
-        const anchorNode = lastTargetNode ?? previousOutlineTargetNode(index, outline.sections, workingNodes);
-        const resolvedTarget = await ensureParagraphCandidateTarget(index, section.heading, workingNodes, anchorNode);
-        workingNodes = resolvedTarget.nodes;
-        const targetNode = resolvedTarget.targetNode;
-        if (targetNode) {
-          lastTargetNode = targetNode;
+        const target = outlineSectionTargetsByIndex.get(index);
+        if (!target?.bodyNodeId) {
+          throw new Error(`提纲“${section.heading}”尚未绑定正文节点，请重新应用提纲`);
         }
         sections.push({
           sectionIndex: index,
           heading: section.heading,
           points: section.points,
-          targetNodeId: targetNode?.id ?? null,
-          targetNodeRole: targetNode?.role ?? '',
+          targetNodeId: target.bodyNodeId,
+          targetNodeRole: 'BODY',
           targetNodeTitle: section.heading,
         });
       }
@@ -3088,33 +3198,62 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
                 <div className="outline-result" aria-label="AI 提纲结果">
                   <div className="outline-result-header">
                     <div className="outline-title">{outline.titleSuggestion}</div>
-                    <Button
-                      className="outline-generate-all"
-                      disabled={!draft || isCandidateGenerating || outline.sections.length === 0}
-                      icon={<Sparkles aria-hidden="true" />}
-                      isLoading={isOutlineBatchGenerating}
-                      loadingLabel="正在生成正文候选"
-                      onClick={() => void handleGenerateAllParagraphs()}
-                      variant="secondary"
-                    >
-                      生成全部正文候选
-                    </Button>
+                    <div className="outline-result-actions">
+                      <Button
+                        className="outline-apply"
+                        disabled={!draft || isCandidateGenerating || outline.sections.length === 0 || applyOutlineStatus === 'applying'}
+                        icon={<Check aria-hidden="true" />}
+                        isLoading={applyOutlineStatus === 'applying'}
+                        loadingLabel="正在应用提纲"
+                        onClick={() => void handleApplyOutline()}
+                        variant={outlineApplied ? 'secondary' : 'primary'}
+                      >
+                        {outlineApplied ? '已应用提纲' : '应用提纲'}
+                      </Button>
+                      <Button
+                        className="outline-generate-all"
+                        disabled={!draft || !outlineApplied || isCandidateGenerating || outline.sections.length === 0}
+                        icon={<Sparkles aria-hidden="true" />}
+                        isLoading={isOutlineBatchGenerating}
+                        loadingLabel="正在生成正文候选"
+                        onClick={() => void handleGenerateAllParagraphs()}
+                        variant="secondary"
+                      >
+                        生成全部正文候选
+                      </Button>
+                    </div>
                   </div>
+                  {applyOutlineStatus === 'error' && <StatusMessage title={applyOutlineError} tone="warning" />}
+                  {!outlineApplied && applyOutlineStatus !== 'error' && (
+                    <StatusMessage title="应用提纲后会替换正文区结构，并为每个标题创建稳定的正文落点。" tone="info" />
+                  )}
+                  {outlineFormattingWarnings.length > 0 && (
+                    <StatusMessage title={`格式依据提示：${outlineFormattingWarnings.join('；')}`} tone="info" />
+                  )}
                   {allParagraphStatus === 'generating' && (
                     <AiProgress detail="按提纲顺序逐段生成正文候选" label="正文生成进度" value={allParagraphProgress} />
                   )}
                   {allParagraphStatus === 'error' && <StatusMessage title={allParagraphError} tone="warning" />}
                   {outline.sections.map((section, index) => {
                     const isSectionGenerating = outlineSectionIsGenerating(index);
+                    const sourceRefs = section.sourceRefs ?? [];
                     return (
                       <div className="outline-section" key={section.heading}>
-                        <div className="outline-heading">{section.heading}</div>
+                        <div className="outline-heading-row">
+                          <span className="outline-level-chip">{section.level || 1}级</span>
+                          <div className="outline-heading">{section.heading}</div>
+                        </div>
                         <ul>
                           {section.points.map((point) => <li key={point}>{point}</li>)}
                         </ul>
+                        {sourceRefs.length > 0 && (
+                          <div className="outline-source-refs">
+                            参考材料：{sourceRefs.join('、')}
+                          </div>
+                        )}
                         <Button
                           className="outline-action"
-                          disabled={!draft || isCandidateGenerating}
+                          disabled={!draft || !outlineApplied || isCandidateGenerating}
                           icon={<Sparkles aria-hidden="true" />}
                           isLoading={isSectionGenerating}
                           loadingLabel={`正在生成候选：${section.heading}`}
@@ -3168,7 +3307,7 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
 
                   {outlineDialogCandidates.length === 0 ? (
                     <StatusMessage title="暂无正文内容" tone="info">
-                      点击左侧生成全部正文候选，或选择单段生成。
+                      {outlineApplied ? '点击左侧生成全部正文候选，或选择单段生成。' : '请先应用提纲，系统会创建稳定正文落点。'}
                     </StatusMessage>
                   ) : (
                     <div className="outline-body-stream-list">

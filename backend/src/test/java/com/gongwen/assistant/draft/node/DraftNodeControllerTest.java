@@ -9,6 +9,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.test.context.support.WithMockUser;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(DraftNodeController.class)
 @AutoConfigureMockMvc(addFilters = false)
+@WithMockUser(roles = {"DRAFTER"})
 class DraftNodeControllerTest {
     @Autowired
     private MockMvc mockMvc;
@@ -38,13 +40,42 @@ class DraftNodeControllerTest {
 
     @Test
     void initializesNodes() throws Exception {
-        when(service.initializeNodes(5L)).thenReturn(List.of(sampleNode("TITLE", "测试通知")));
+        when(service.initializeNodes(eq(5L), any(InitializeDraftNodesRequest.class)))
+                .thenReturn(List.of(sampleNode("TITLE", "测试通知")));
 
-        mockMvc.perform(post("/api/drafts/5/nodes/initialize"))
+        mockMvc.perform(post("/api/drafts/5/nodes/initialize")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new InitializeDraftNodesRequest("TEMPLATE_HEADINGS_ONLY"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data[0].role").value("TITLE"))
                 .andExpect(jsonPath("$.data[0].content").value("测试通知"));
+
+        verify(service).initializeNodes(eq(5L), any(InitializeDraftNodesRequest.class));
+    }
+
+    @Test
+    void appliesOutline() throws Exception {
+        when(service.applyOutline(eq(5L), any(ApplyOutlineRequest.class)))
+                .thenReturn(new ApplyOutlineResponse(
+                        List.of(sampleNode("BODY", "")),
+                        List.of(new AppliedOutlineSectionTarget(0, "一、总体要求", 1, 21L, 22L)),
+                        List.of("模板未识别出二级标题格式")
+                ));
+
+        mockMvc.perform(post("/api/drafts/5/nodes/apply-outline")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "titleSuggestion": "测试通知",
+                                  "sections": [
+                                    {"level": 1, "heading": "一、总体要求", "points": ["说明背景"], "sourceRefs": ["meeting.docx"]}
+                                  ]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.sectionTargets[0].bodyNodeId").value(22))
+                .andExpect(jsonPath("$.data.formattingWarnings[0]").value("模板未识别出二级标题格式"));
     }
 
     @Test
@@ -146,12 +177,14 @@ class DraftNodeControllerTest {
 
     @Test
     void returnsUnprocessableWhenMappingIsMissing() throws Exception {
-        when(service.initializeNodes(5L)).thenThrow(new DraftNodeException(
+        when(service.initializeNodes(eq(5L), any(InitializeDraftNodesRequest.class))).thenThrow(new DraftNodeException(
                 "STRUCTURE_MAPPING_REQUIRED",
                 "Published structure mapping is required before nodes can be initialized"
         ));
 
-        mockMvc.perform(post("/api/drafts/5/nodes/initialize"))
+        mockMvc.perform(post("/api/drafts/5/nodes/initialize")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errorCode").value("STRUCTURE_MAPPING_REQUIRED"));

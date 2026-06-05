@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { AiParagraphCandidate, Department, DraftBlock, DraftDetail } from './draftTypes';
+import type { AiOutline, AiParagraphCandidate, Department, DraftBlock, DraftDetail, DraftNode } from './draftTypes';
 
 describe('App', () => {
   const originalTextareaScrollHeight = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'scrollHeight');
@@ -647,24 +647,15 @@ describe('App', () => {
 
   it('generates a paragraph candidate from an outline section without replacing the preview', async () => {
     const eventSources = stubEventSource();
-    const generatedDraft = {
-      ...sampleDraft('正文生成草稿'),
-      blocks: [
-        { id: 1, blockType: 'TITLE', content: '正文生成草稿', sortOrder: 10 },
-        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
-        { id: 3, blockType: 'BODY_PARAGRAPH', content: '一、主要事项：说明安排；明确分工。', sortOrder: 30 },
-        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
-        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
-        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
-      ],
-    };
+    const outline = sampleOutline();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse([
         { code: 'NOTICE', name: '通知', status: 'ACTIVE', sortOrder: 1 },
       ]))
       .mockResolvedValueOnce(jsonResponse(sampleDraft('正文生成草稿')))
       .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(jsonResponse(sampleOutline()))
+      .mockResolvedValueOnce(jsonResponse(outline))
+      .mockResolvedValueOnce(jsonResponse(sampleAppliedOutlineResponse(outline, '正文生成草稿')))
       .mockResolvedValueOnce(jsonResponse({
         jobId: 'job-single',
         candidateIds: [11],
@@ -678,13 +669,16 @@ describe('App', () => {
     await screen.findByDisplayValue('正文生成草稿');
     await userEvent.type(screen.getByLabelText('提纲补充要求'), '突出执行要求');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
-    await screen.findByRole('dialog', { name: '生成提纲' });
-    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成正文候选：一、主要事项' }));
+    const outlineResult = await screen.findByLabelText('AI 提纲结果');
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '应用提纲' }));
+    expect(await within(outlineResult).findByRole('button', { name: '已应用提纲' })).toBeInTheDocument();
+    await userEvent.click(await within(outlineResult).findByRole('button', { name: '生成正文候选：一、主要事项' }));
 
     expect(eventSources).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'))).toBe(false);
     const preview = screen.getByLabelText('公文预览');
-    expect(within(preview).getByText('正文内容')).toBeInTheDocument();
+    expect(within(preview).getByText('一、主要事项')).toBeInTheDocument();
+    expect(within(preview).getByText('点击填写正文段落')).toBeInTheDocument();
   });
 
   it('generates all outline sections as paragraph candidates without replacing the preview', async () => {
@@ -692,26 +686,8 @@ describe('App', () => {
     const outline = {
       ...sampleOutline(),
       sections: [
-        { heading: '一、主要事项', points: ['说明安排'] },
-        { heading: '二、工作要求', points: ['落实责任'] },
-      ],
-    };
-    const firstDraft = {
-      ...sampleDraft('全局生成草稿'),
-      blocks: [
-        { id: 1, blockType: 'TITLE', content: '全局生成草稿', sortOrder: 10 },
-        { id: 2, blockType: 'RECIPIENT', content: '各部门、各直属单位', sortOrder: 20 },
-        { id: 3, blockType: 'BODY_PARAGRAPH', content: '一、主要事项：说明安排。', sortOrder: 30 },
-        { id: 4, blockType: 'ATTACHMENT', content: '无', sortOrder: 40 },
-        { id: 5, blockType: 'SIGNATURE', content: '办公室', sortOrder: 50 },
-        { id: 6, blockType: 'DATE', content: '2026年5月25日', sortOrder: 60 },
-      ],
-    };
-    const secondDraft = {
-      ...firstDraft,
-      blocks: [
-        ...firstDraft.blocks,
-        { id: 7, blockType: 'BODY_PARAGRAPH', content: '二、工作要求：落实责任。', sortOrder: 31 },
+        { heading: '一、主要事项', points: ['说明安排'], level: 1 },
+        { heading: '二、工作要求', points: ['落实责任'], level: 1 },
       ],
     };
     const fetchMock = vi.fn()
@@ -719,6 +695,7 @@ describe('App', () => {
       .mockResolvedValueOnce(jsonResponse(sampleDraft('全局生成草稿')))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse(outline))
+      .mockResolvedValueOnce(jsonResponse(sampleAppliedOutlineResponse(outline, '全局生成草稿')))
       .mockResolvedValueOnce(jsonResponse({
         jobId: 'job-all',
         candidateIds: [11, 12],
@@ -731,14 +708,17 @@ describe('App', () => {
     await openWorkbench();
     await screen.findByDisplayValue('全局生成草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
-    await screen.findByRole('dialog', { name: '生成提纲' });
-    await userEvent.click(await within(screen.getByLabelText('AI 提纲结果')).findByRole('button', { name: '生成全部正文候选' }));
+    const outlineResult = await screen.findByLabelText('AI 提纲结果');
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '应用提纲' }));
+    expect(await within(outlineResult).findByRole('button', { name: '已应用提纲' })).toBeInTheDocument();
+    await userEvent.click(await within(outlineResult).findByRole('button', { name: '生成全部正文候选' }));
 
     const paragraphCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'));
     expect(paragraphCalls).toHaveLength(0);
     expect(eventSources).toHaveLength(1);
     const preview = screen.getByLabelText('公文预览');
-    expect(within(preview).getByText('正文内容')).toBeInTheDocument();
+    expect(within(preview).getByText('一、主要事项')).toBeInTheDocument();
+    expect(within(preview).getByText('二、工作要求')).toBeInTheDocument();
   });
 
   it('generates paragraph candidates from the outline without replacing body immediately', async () => {
@@ -747,8 +727,8 @@ describe('App', () => {
     const outline = {
       ...sampleOutline(),
       sections: [
-        { heading: '一、主要事项', points: ['说明安排'] },
-        { heading: '二、工作要求', points: ['落实责任'] },
+        { heading: '一、主要事项', points: ['说明安排'], level: 1 },
+        { heading: '二、工作要求', points: ['落实责任'], level: 1 },
       ],
     };
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -765,6 +745,14 @@ describe('App', () => {
       if (url.endsWith('/api/drafts/1/ai/outline')) {
         return Promise.resolve(jsonResponse(outline));
       }
+      if (url.endsWith('/api/drafts/1/nodes/apply-outline') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          outlineTraceId: outline.traceId,
+          titleSuggestion: outline.titleSuggestion,
+          sections: outline.sections,
+        });
+        return Promise.resolve(jsonResponse(sampleAppliedOutlineResponse(outline, '候选段落草稿')));
+      }
       if (url.endsWith('/api/drafts/1/ai/paragraph-candidates') && !init?.method) {
         return Promise.resolve(jsonResponse([]));
       }
@@ -773,8 +761,8 @@ describe('App', () => {
           outlineTraceId: outline.traceId,
           instructionSummary: '',
           sections: [
-            { sectionIndex: 0, heading: '一、主要事项', points: ['说明安排'], targetNodeId: null, targetNodeRole: '', targetNodeTitle: '一、主要事项' },
-            { sectionIndex: 1, heading: '二、工作要求', points: ['落实责任'], targetNodeId: null, targetNodeRole: '', targetNodeTitle: '二、工作要求' },
+            { sectionIndex: 0, heading: '一、主要事项', points: ['说明安排'], targetNodeId: 202, targetNodeRole: 'BODY', targetNodeTitle: '一、主要事项' },
+            { sectionIndex: 1, heading: '二、工作要求', points: ['落实责任'], targetNodeId: 204, targetNodeRole: 'BODY', targetNodeTitle: '二、工作要求' },
           ],
         });
         return Promise.resolve(jsonResponse({
@@ -792,18 +780,26 @@ describe('App', () => {
     await openWorkbench();
     await screen.findByDisplayValue('候选段落草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
-    expect(await screen.findAllByText('AI 提纲标题')).not.toHaveLength(0);
-    await userEvent.click(within(screen.getByLabelText('AI 提纲结果')).getByRole('button', { name: '生成全部正文候选' }));
+    const outlineResult = await screen.findByLabelText('AI 提纲结果');
+    expect(await within(outlineResult).findAllByText('AI 提纲标题')).not.toHaveLength(0);
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '应用提纲' }));
+    expect(await within(outlineResult).findByRole('button', { name: '已应用提纲' })).toBeInTheDocument();
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '生成全部正文候选' }));
 
     expect(eventSources).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/drafts/1/ai/paragraph'))).toBe(false);
-    expect(within(screen.getByLabelText('公文预览')).getByText('正文内容')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('公文预览')).getByText('一、主要事项')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('公文预览')).getByText('二、工作要求')).toBeInTheDocument();
   });
 
   it('accepts a paragraph candidate and replaces the draft body', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '1');
+    const eventSources = stubEventSource();
+    const outline = sampleOutline();
     const readyCandidate = sampleParagraphCandidate({
       candidateText: '候选段落文本',
+      targetNodeId: 202,
+      targetNodeTitle: '一、主要事项',
       status: 'READY',
     });
     const acceptedDraft = draftWithBody('候选段落文本');
@@ -819,10 +815,27 @@ describe('App', () => {
         return Promise.resolve(jsonResponse([]));
       }
       if (url.endsWith('/api/drafts/1/ai/outline')) {
-        return Promise.resolve(jsonResponse(sampleOutline()));
+        return Promise.resolve(jsonResponse(outline));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/apply-outline') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleAppliedOutlineResponse(outline, '候选采纳草稿')));
       }
       if (url.endsWith('/api/drafts/1/ai/paragraph-candidates') && !init?.method) {
         return Promise.resolve(jsonResponse([readyCandidate]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/jobs') && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          outlineTraceId: outline.traceId,
+          instructionSummary: '',
+          sections: [
+            { sectionIndex: 0, heading: '一、主要事项', points: ['说明安排', '明确分工'], targetNodeId: 202, targetNodeRole: 'BODY', targetNodeTitle: '一、主要事项' },
+          ],
+        });
+        return Promise.resolve(jsonResponse({
+          jobId: 'job-accept',
+          candidateIds: [11],
+          cancelled: false,
+        }));
       }
       if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/11/accept') && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({
@@ -840,6 +853,14 @@ describe('App', () => {
     await openWorkbench();
     await screen.findByDisplayValue('候选采纳草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+    const outlineResult = await screen.findByLabelText('AI 提纲结果');
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '应用提纲' }));
+    expect(await within(outlineResult).findByRole('button', { name: '已应用提纲' })).toBeInTheDocument();
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '生成全部正文候选' }));
+    await waitFor(() => expect(eventSources).toHaveLength(1));
+    eventSources[0].onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ event: 'batch_done' }),
+    }));
     const bodyStream = await screen.findByLabelText('正文生成预览');
     await within(bodyStream).findByText('候选段落文本');
     await userEvent.click(await within(bodyStream).findByRole('button', { name: '确认替换' }));
@@ -853,10 +874,21 @@ describe('App', () => {
   it('confirms before batch accepting ready paragraph candidates', async () => {
     window.localStorage.setItem('gongwen.currentDraftId', '1');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const eventSources = stubEventSource();
+    const outline = {
+      ...sampleOutline(),
+      sections: [
+        { heading: '一、主要事项', points: ['说明安排'], level: 1 },
+        { heading: '二、工作要求', points: ['落实责任'], level: 1 },
+      ],
+    };
     const firstCandidate = sampleParagraphCandidate({
       id: 11,
       sectionIndex: 0,
       heading: '一、主要事项',
+      targetNodeId: 202,
+      targetNodeTitle: '一、主要事项',
+      points: ['说明安排'],
       candidateText: '第一候选段落',
       status: 'READY',
     });
@@ -864,6 +896,9 @@ describe('App', () => {
       id: 12,
       sectionIndex: 1,
       heading: '二、工作要求',
+      targetNodeId: 204,
+      targetNodeTitle: '二、工作要求',
+      points: ['落实责任'],
       candidateText: '第二候选段落',
       status: 'EDITED',
     });
@@ -891,10 +926,20 @@ describe('App', () => {
         return Promise.resolve(jsonResponse([]));
       }
       if (url.endsWith('/api/drafts/1/ai/outline')) {
-        return Promise.resolve(jsonResponse(sampleOutline()));
+        return Promise.resolve(jsonResponse(outline));
+      }
+      if (url.endsWith('/api/drafts/1/nodes/apply-outline') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(sampleAppliedOutlineResponse(outline, '批量候选草稿')));
       }
       if (url.endsWith('/api/drafts/1/ai/paragraph-candidates') && !init?.method) {
         return Promise.resolve(jsonResponse([firstCandidate, secondCandidate]));
+      }
+      if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/jobs') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({
+          jobId: 'job-batch-accept',
+          candidateIds: [11, 12],
+          cancelled: false,
+        }));
       }
       if (url.endsWith('/api/drafts/1/ai/paragraph-candidates/accept-batch') && init?.method === 'POST') {
         expect(JSON.parse(String(init.body))).toEqual({ candidateIds: [11, 12] });
@@ -913,6 +958,14 @@ describe('App', () => {
     await openWorkbench();
     await screen.findByDisplayValue('批量候选草稿');
     await userEvent.click(within(screen.getByLabelText('AI 建议和质检')).getByRole('button', { name: '生成提纲' }));
+    const outlineResult = await screen.findByLabelText('AI 提纲结果');
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '应用提纲' }));
+    expect(await within(outlineResult).findByRole('button', { name: '已应用提纲' })).toBeInTheDocument();
+    await userEvent.click(within(outlineResult).getByRole('button', { name: '生成全部正文候选' }));
+    await waitFor(() => expect(eventSources).toHaveLength(1));
+    eventSources[0].onmessage?.(new MessageEvent('message', {
+      data: JSON.stringify({ event: 'batch_done' }),
+    }));
     const bodyStream = await screen.findByLabelText('正文生成预览');
     await within(bodyStream).findByText('第一候选段落');
     await userEvent.click(await within(bodyStream).findByRole('button', { name: '批量确认' }));
@@ -1541,9 +1594,11 @@ describe('App', () => {
       method: 'PUT',
     }));
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/drafts/1/quality-check'))).toBe(false);
-    expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
-      method: 'POST',
-    }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
+        method: 'POST',
+      }));
+    });
     expect(clickSpy).toHaveBeenCalled();
     expect(await screen.findByText('Word 已导出')).toBeInTheDocument();
   });
@@ -1576,9 +1631,11 @@ describe('App', () => {
     await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: '导出 Word' }));
 
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/drafts/1/quality-check'))).toBe(false);
-    expect(fetchMock).toHaveBeenLastCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
-      method: 'POST',
-    }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
+        method: 'POST',
+      }));
+    });
     expect(clickSpy).toHaveBeenCalled();
   });
 
@@ -1670,9 +1727,11 @@ describe('App', () => {
     await openWorkbench();
     await userEvent.click(within(screen.getByRole('banner')).getByRole('button', { name: '导出 Word' }));
 
-    expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
-      method: 'POST',
-    }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('http://api.test/api/exports/drafts/1/word', expect.objectContaining({
+        method: 'POST',
+      }));
+    });
     expect((await screen.findAllByText('导出必填结构槽位为空：BODY（正文）')).length).toBeGreaterThan(0);
   });
 
@@ -3286,7 +3345,8 @@ function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
     if (!fetchMock.getMockImplementation() && url.includes('/api/templates/versions')) {
       return Promise.resolve(jsonResponse([]));
     }
-    if (!fetchMock.getMockImplementation() && /\/api\/drafts\/\d+\/nodes/.test(url)) {
+    if (!fetchMock.getMockImplementation()
+      && /\/api\/drafts\/\d+\/nodes(?:\/initialize|\/insertable-roles)?$/.test(url)) {
       return Promise.resolve(jsonResponse([]));
     }
     if (!fetchMock.getMockImplementation() && /\/api\/drafts\/\d+\/ai\/paragraph-candidates$/.test(url) && !init?.method) {
@@ -3469,6 +3529,149 @@ function sampleDraftNodes() {
   ];
 }
 
+function sampleDraftNodeBase(overrides: Partial<DraftNode>): DraftNode {
+  return {
+    id: 0,
+    draftId: 1,
+    structureMappingProfileId: 7,
+    templateNodeKey: 'node',
+    parentTemplateNodeKey: null,
+    nodeType: 'PARAGRAPH',
+    role: 'BODY',
+    slotKey: 'body',
+    title: '正文',
+    content: '',
+    sortOrder: 10,
+    status: 'EMPTY',
+    formatOverride: {
+      eastAsiaFont: null,
+      latinFont: null,
+      fontSizePt: null,
+      bold: null,
+      alignment: null,
+      firstLineIndentTwip: null,
+      lineSpacingRule: null,
+      lineSpacingTwip: null,
+      spacingBeforeTwip: null,
+      spacingAfterTwip: null,
+    },
+    createdAt: '2026-06-05T00:00:00Z',
+    updatedAt: '2026-06-05T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function sampleAppliedOutlineResponse(outline: AiOutline = sampleOutline(), draftTitle = '提纲应用草稿') {
+  const nodes: DraftNode[] = [
+    sampleDraftNodeBase({
+      id: 101,
+      templateNodeKey: 'title-node',
+      role: 'TITLE',
+      slotKey: 'title',
+      title: '标题',
+      content: draftTitle,
+      sortOrder: 10,
+      status: 'USER_FILLED',
+    }),
+    sampleDraftNodeBase({
+      id: 102,
+      templateNodeKey: 'recipient-node',
+      role: 'RECIPIENT',
+      slotKey: 'recipient',
+      title: '主送',
+      content: '各部门、各直属单位',
+      sortOrder: 20,
+      status: 'USER_FILLED',
+    }),
+  ];
+  const sectionTargets = outline.sections.map((section, index) => {
+    const level = section.level ?? 1;
+    const headingNodeId = 201 + index * 2;
+    const bodyNodeId = headingNodeId + 1;
+    const groupId = `outline-section-${index}`;
+    nodes.push(sampleDraftNodeBase({
+      id: headingNodeId,
+      templateNodeKey: `outline-heading-${index}`,
+      role: `BODY_HEADING_LEVEL_${level}`,
+      slotKey: 'body',
+      title: '正文标题',
+      content: section.heading,
+      sortOrder: 30 + index * 20,
+      status: 'USER_FILLED',
+      metadata: {
+        synthetic: true,
+        anchorNodeId: null,
+        anchorTemplateNodeKey: '',
+        insertPosition: 'AFTER',
+        groupId,
+        styleSourceNodeKey: `heading-level-${level}`,
+      },
+    }));
+    nodes.push(sampleDraftNodeBase({
+      id: bodyNodeId,
+      templateNodeKey: `outline-body-${index}`,
+      role: 'BODY',
+      slotKey: 'body',
+      title: '正文',
+      content: '',
+      sortOrder: 31 + index * 20,
+      status: 'EMPTY',
+      metadata: {
+        synthetic: true,
+        anchorNodeId: headingNodeId,
+        anchorTemplateNodeKey: `outline-heading-${index}`,
+        insertPosition: 'AFTER',
+        groupId,
+        styleSourceNodeKey: 'body',
+      },
+    }));
+    return {
+      sectionIndex: index,
+      heading: section.heading,
+      level,
+      headingNodeId,
+      bodyNodeId,
+    };
+  });
+  nodes.push(
+    sampleDraftNodeBase({
+      id: 301,
+      templateNodeKey: 'attachment-node',
+      role: 'ATTACHMENT_NOTE',
+      slotKey: 'attachment',
+      title: '附件',
+      content: '无',
+      sortOrder: 900,
+      status: 'USER_FILLED',
+    }),
+    sampleDraftNodeBase({
+      id: 302,
+      templateNodeKey: 'signature-node',
+      role: 'SIGNATURE',
+      slotKey: 'signature',
+      title: '落款',
+      content: '办公室',
+      sortOrder: 910,
+      status: 'USER_FILLED',
+    }),
+    sampleDraftNodeBase({
+      id: 303,
+      templateNodeKey: 'date-node',
+      role: 'DATE',
+      slotKey: 'date',
+      title: '日期',
+      content: '2026年5月25日',
+      sortOrder: 920,
+      status: 'USER_FILLED',
+    }),
+  );
+  return {
+    nodes,
+    sectionTargets,
+    formattingWarnings: [],
+  };
+}
+
 function sampleEffectiveFormatting() {
   return {
     fontFamily: 'FangSong',
@@ -3577,7 +3780,7 @@ function sampleOutline() {
     traceId: '11111111-1111-1111-1111-111111111111',
     titleSuggestion: 'AI 提纲标题',
     sections: [
-      { heading: '一、主要事项', points: ['说明安排', '明确分工'] },
+      { heading: '一、主要事项', points: ['说明安排', '明确分工'], level: 1, sourceRefs: ['meeting.docx'] },
     ],
     missingInformation: ['会议时间'],
   };

@@ -14,6 +14,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.test.context.support.WithMockUser;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.doThrow;
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(TemplateController.class)
 @AutoConfigureMockMvc(addFilters = false)
 @Import(DocxPlaceholderParser.class)
+@WithMockUser(roles = {"TEMPLATE_ADMIN"})
 class TemplateControllerTest {
     @Autowired
     private MockMvc mockMvc;

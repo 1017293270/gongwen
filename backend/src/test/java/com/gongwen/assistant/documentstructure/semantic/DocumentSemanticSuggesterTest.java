@@ -6,6 +6,9 @@ import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
 import com.gongwen.assistant.support.DocxTestFactory;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DocumentSemanticSuggesterTest {
@@ -24,9 +27,27 @@ class DocumentSemanticSuggesterTest {
         assertThat(roleByText(suggested, "一、提高政治站位，把思想和行动统一到重点任务落实上来")).isEqualTo("BODY_HEADING_LEVEL_1");
         assertThat(roleByText(suggested, "二、聚焦关键环节，以务实举措推动工作提质增效")).isEqualTo("BODY_HEADING_LEVEL_1");
         assertThat(roleByText(suggested, "三、压紧压实责任，形成齐抓共管的工作合力")).isEqualTo("BODY_HEADING_LEVEL_1");
+        assertThat(roleByText(suggested, "1. 突出项目牵引。坚持把项目建设作为稳增长、促发展的重要支撑，完善项目清单、责任清单、问题清单。")).isEqualTo("BODY_HEADING_LEVEL_3");
         assertThat(roleByText(suggested, "结束语")).isEqualTo("BODY_HEADING_LEVEL_1");
         assertThat(roleByPrefix(suggested, "今年以来，各部门各单位围绕中心")).isEqualTo("BODY");
         assertThat(roleByPrefix(suggested, "要健全闭环机制")).isEqualTo("BODY");
+    }
+
+    @Test
+    void suggestsOfficialBodyHeadingLevelsByNumbering() {
+        DocumentStructureProfile profile = profileWithTexts(
+                "一、总体要求",
+                "（一）组织领导",
+                "1. 子任务细节",
+                "1、另一项细节"
+        );
+
+        DocumentStructureProfile suggested = suggester.suggest(profile, "REFERENCE_DOCUMENT", "NOTICE");
+
+        assertThat(roleByText(suggested, "一、总体要求")).isEqualTo("BODY_HEADING_LEVEL_1");
+        assertThat(roleByText(suggested, "（一）组织领导")).isEqualTo("BODY_HEADING_LEVEL_2");
+        assertThat(roleByText(suggested, "1. 子任务细节")).isEqualTo("BODY_HEADING_LEVEL_3");
+        assertThat(roleByText(suggested, "1、另一项细节")).isEqualTo("BODY_HEADING_LEVEL_3");
     }
 
     @Test
@@ -71,5 +92,23 @@ class DocumentSemanticSuggesterTest {
                 .findFirst()
                 .orElseThrow()
                 .roleSuggestion();
+    }
+
+    private DocumentStructureProfile profileWithTexts(String... texts) {
+        List<DocumentNode> nodes = java.util.stream.IntStream.range(0, texts.length)
+                .mapToObj(index -> new DocumentNode(
+                        "paragraph-" + index,
+                        null,
+                        "PARAGRAPH",
+                        "UNKNOWN",
+                        texts[index],
+                        texts[index],
+                        index,
+                        "/paragraph-" + index,
+                        null,
+                        List.of()
+                ))
+                .toList();
+        return new DocumentStructureProfile(1, "hash", "document-structure-v1", nodes, List.of(), List.of(), List.of(), Instant.now());
     }
 }

@@ -8,12 +8,13 @@ import java.util.List;
 
 @Component
 public class PromptBuilder {
-    public static final String OUTLINE_PROMPT_VERSION = "outline-v1";
+    public static final String OUTLINE_PROMPT_VERSION = "outline-v2";
     public static final String PARAGRAPH_PROMPT_VERSION = "paragraph-v1";
     public static final String LOCAL_OPERATION_PROMPT_VERSION = "local-operation-v1";
     public static final String QUALITY_CHECK_PROMPT_VERSION = "quality-check-v1";
     private static final int BLOCK_TEXT_LIMIT = 160;
     private static final int MATERIAL_TEXT_LIMIT = 240;
+    private static final int OUTLINE_MATERIAL_TEXT_LIMIT = 600;
 
     public OutlinePrompt buildOutlinePrompt(
             DraftDetailDto draft,
@@ -33,7 +34,11 @@ public class PromptBuilder {
                 .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
                 .toList();
         List<String> materialSummaries = materials.stream()
-                .map(material -> material.originalFileName() + ": " + summarize(material.text(), MATERIAL_TEXT_LIMIT))
+                .map(material -> "materialId=%d;file=%s;summary=%s".formatted(
+                        material.id(),
+                        material.originalFileName(),
+                        summarize(material.text(), OUTLINE_MATERIAL_TEXT_LIMIT)
+                ))
                 .toList();
         String safeInstruction = instruction == null ? "" : instruction.strip();
         AiNodeContext safeNodeContext = nodeContext == null ? AiNodeContext.none() : nodeContext;
@@ -70,6 +75,16 @@ public class PromptBuilder {
             AiParagraphRequest request,
             AiNodeContext nodeContext
     ) {
+        return buildParagraphPrompt(draft, materials, request, nodeContext, "");
+    }
+
+    public ParagraphPrompt buildParagraphPrompt(
+            DraftDetailDto draft,
+            List<MaterialPromptSummary> materials,
+            AiParagraphRequest request,
+            AiNodeContext nodeContext,
+            String formattingSummary
+    ) {
         List<String> fieldSummaries = draft.blocks().stream()
                 .map(block -> block.blockType() + ": " + summarize(block.content(), BLOCK_TEXT_LIMIT))
                 .toList();
@@ -83,6 +98,7 @@ public class PromptBuilder {
                 .toList();
         String instruction = request == null || request.instruction() == null ? "" : request.instruction().strip();
         AiNodeContext safeNodeContext = nodeContext == null ? AiNodeContext.none() : nodeContext;
+        String safeFormattingSummary = formattingSummary == null ? "" : formattingSummary.strip();
         return new ParagraphPrompt(
                 PARAGRAPH_PROMPT_VERSION,
                 draft.documentTypeCode(),
@@ -92,7 +108,7 @@ public class PromptBuilder {
                 fieldSummaries,
                 materialSummaries,
                 instruction,
-                "documentType=%s;draftBlocks=%d;materials=%d;materialSummaryChars=%d;headingChars=%d;points=%d;instructionChars=%d;%s".formatted(
+                "documentType=%s;draftBlocks=%d;materials=%d;materialSummaryChars=%d;headingChars=%d;points=%d;instructionChars=%d;%s;formattingChars=%d".formatted(
                         draft.documentTypeCode(),
                         draft.blocks().size(),
                         materials.size(),
@@ -100,9 +116,11 @@ public class PromptBuilder {
                         heading.length(),
                         points.size(),
                         instruction.length(),
-                        safeNodeContext.traceSummary()
+                        safeNodeContext.traceSummary(),
+                        safeFormattingSummary.length()
                 ),
-                safeNodeContext
+                safeNodeContext,
+                safeFormattingSummary
         );
     }
 

@@ -52,6 +52,130 @@ class DraftNodeServiceTest {
     }
 
     @Test
+    void initializesWorkbenchSkeletonWithTemplateHeadingsOnly() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        DraftNodeService service = service(draftService, new InMemoryDraftNodeRepository(), publishedMapping(), structureProfile());
+
+        List<DraftNodeDto> initialized = service.initializeNodes(
+                5L,
+                new InitializeDraftNodesRequest("TEMPLATE_HEADINGS_ONLY")
+        );
+
+        assertThat(initialized).extracting(DraftNodeDto::role)
+                .containsExactly("TITLE", "BODY_HEADING_LEVEL_1", "BODY", "DATE");
+        assertThat(initialized).extracting(DraftNodeDto::content)
+                .containsExactly("模板标题", "一、工作安排", "", "2026年5月30日");
+        assertThat(bodyNode(initialized).status()).isEqualTo("EMPTY");
+    }
+
+    @Test
+    void appliesOutlineByReplacingOnlyBodyStructureNodes() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(draftService, repository, publishedMapping(), structureProfile());
+        service.initializeNodes(5L);
+
+        ApplyOutlineResponse response = service.applyOutline(5L, new ApplyOutlineRequest(
+                null,
+                "测试通知",
+                List.of(
+                        new com.gongwen.assistant.ai.AiOutlineSection("一、总体要求", List.of("说明背景"), 1, List.of("materialId=1")),
+                        new com.gongwen.assistant.ai.AiOutlineSection("（一）重点任务", List.of("说明任务"), 2, List.of()),
+                        new com.gongwen.assistant.ai.AiOutlineSection("1. 责任分工", List.of("说明分工"), 3, List.of())
+                )
+        ));
+
+        assertThat(response.nodes()).extracting(DraftNodeDto::role)
+                .containsExactly(
+                        "TITLE",
+                        "BODY_HEADING_LEVEL_1",
+                        "BODY",
+                        "BODY_HEADING_LEVEL_2",
+                        "BODY",
+                        "BODY_HEADING_LEVEL_3",
+                        "BODY",
+                        "DATE"
+                );
+        assertThat(response.nodes())
+                .filteredOn(node -> node.role().startsWith("BODY_HEADING_LEVEL_"))
+                .extracting(DraftNodeDto::content)
+                .containsExactly("一、总体要求", "（一）重点任务", "1. 责任分工");
+        assertThat(response.nodes())
+                .filteredOn(node -> "BODY".equals(node.role()))
+                .extracting(DraftNodeDto::content)
+                .containsExactly("", "", "");
+        assertThat(response.sectionTargets()).hasSize(3);
+        assertThat(response.sectionTargets()).allSatisfy(target -> assertThat(target.bodyNodeId()).isNotNull());
+        assertThat(response.nodes())
+                .filteredOn(node -> "DATE".equals(node.role()))
+                .extracting(DraftNodeDto::id)
+                .containsExactly(103L);
+
+        List<DraftNode> allNodes = repository.findByDraftId(5L);
+        assertThat(allNodes)
+                .filteredOn(node -> "heading-node".equals(node.templateNodeKey()) || "body-node".equals(node.templateNodeKey()))
+                .extracting(DraftNode::status)
+                .containsOnly("DELETED");
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic())
+                .hasSize(6)
+                .allSatisfy(node -> {
+                    assertThat(node.metadata().anchorTemplateNodeKey()).isEqualTo("title-node");
+                    assertThat(node.metadata().insertPosition()).isEqualTo("AFTER");
+                    assertThat(node.metadata().groupId()).isNotBlank();
+                });
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("body-node"));
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY_HEADING_LEVEL_1".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("heading-node"));
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY_HEADING_LEVEL_2".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("body-node"));
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY_HEADING_LEVEL_3".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("body-node"));
+    }
+
+    @Test
+    void applyOutlineUsesHeadingNumberingWhenTemplateHeadingRolesAreMisclassified() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(
+                draftService,
+                repository,
+                misclassifiedHeadingMapping(),
+                misclassifiedHeadingStructureProfile()
+        );
+        service.initializeNodes(5L);
+
+        service.applyOutline(5L, new ApplyOutlineRequest(
+                null,
+                "测试通知",
+                List.of(
+                        new com.gongwen.assistant.ai.AiOutlineSection("一、总体要求", List.of(), 1, List.of()),
+                        new com.gongwen.assistant.ai.AiOutlineSection("（一）组织领导", List.of(), 2, List.of()),
+                        new com.gongwen.assistant.ai.AiOutlineSection("1. 子任务细节", List.of(), 3, List.of())
+                )
+        ));
+
+        List<DraftNode> allNodes = repository.findByDraftId(5L);
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY_HEADING_LEVEL_1".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("level1-node"));
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY_HEADING_LEVEL_2".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("level2-node"));
+        assertThat(allNodes)
+                .filteredOn(node -> node.metadata().synthetic() && "BODY_HEADING_LEVEL_3".equals(node.role()))
+                .allSatisfy(node -> assertThat(node.metadata().styleSourceNodeKey()).isEqualTo("level3-node"));
+    }
+
+    @Test
     void initializeReturnsExistingNodesWithoutDuplicating() {
         DraftService draftService = mock(DraftService.class);
         when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
@@ -491,6 +615,89 @@ class DraftNodeServiceTest {
         assertThat(syntheticBody.effectiveFormatting()).isEqualTo(expectedBaseBodyFormatting());
     }
 
+    @Test
+    void legacySyntheticHeadingWithCrossLevelStyleSourceUsesBodyFormatting() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(
+                draftService,
+                repository,
+                publishedMapping(),
+                structureProfile(),
+                Map.of("body-node", templateBodyFormattingOverride())
+        );
+        service.initializeNodes(5L);
+        repository.insertNodes(5L, List.of(new DraftNode(
+                0,
+                5L,
+                100L,
+                "outline-legacy-heading",
+                null,
+                "PARAGRAPH",
+                "BODY_HEADING_LEVEL_2",
+                "BODY_HEADING_LEVEL_2",
+                "BODY_HEADING_LEVEL_2",
+                "（一）旧二级标题",
+                35,
+                "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.synthetic(null, "title-node", "AFTER", "legacy-heading", "heading-node"),
+                null,
+                null
+        )));
+
+        DraftNodeDto legacyHeading = service.listNodes(5L).stream()
+                .filter(node -> "（一）旧二级标题".equals(node.content()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(legacyHeading.metadata().styleSourceNodeKey()).isEqualTo("heading-node");
+        assertThat(legacyHeading.baseFormatting()).isEqualTo(expectedBaseBodyFormatting());
+        assertThat(legacyHeading.effectiveFormatting()).isEqualTo(expectedBaseBodyFormatting());
+    }
+
+    @Test
+    void legacySyntheticHeadingWithMisclassifiedExactStyleSourceUsesNumberedLevelSource() {
+        DraftService draftService = mock(DraftService.class);
+        when(draftService.getDraft(5L)).thenReturn(draftWithTemplate());
+        InMemoryDraftNodeRepository repository = new InMemoryDraftNodeRepository();
+        DraftNodeService service = service(
+                draftService,
+                repository,
+                misclassifiedHeadingMapping(),
+                misclassifiedHeadingStructureProfile()
+        );
+        service.initializeNodes(5L);
+        repository.insertNodes(5L, List.of(new DraftNode(
+                0,
+                5L,
+                100L,
+                "outline-legacy-heading",
+                null,
+                "PARAGRAPH",
+                "BODY_HEADING_LEVEL_2",
+                "BODY_HEADING_LEVEL_2",
+                "BODY_HEADING_LEVEL_2",
+                "（一）旧二级标题",
+                35,
+                "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.synthetic(null, "title-node", "AFTER", "legacy-heading", "level3-node"),
+                null,
+                null
+        )));
+
+        DraftNodeDto legacyHeading = service.listNodes(5L).stream()
+                .filter(node -> "（一）旧二级标题".equals(node.content()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(legacyHeading.metadata().styleSourceNodeKey()).isEqualTo("level3-node");
+        assertThat(legacyHeading.baseFormatting().alignment()).isEqualTo("LEFT");
+        assertThat(legacyHeading.baseFormatting().indentationFirstLine()).isEqualTo(280);
+    }
+
     private DraftNodeService service(
             DraftService draftService,
             InMemoryDraftNodeRepository nodes,
@@ -588,6 +795,29 @@ class DraftNodeServiceTest {
                 ),
                 List.of(),
                 4,
+                0,
+                Instant.now(),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private StructureMappingProfile misclassifiedHeadingMapping() {
+        return new StructureMappingProfile(
+                23L,
+                9L,
+                2,
+                "PUBLISHED",
+                List.of(
+                        item("title-node", "TITLE", 10),
+                        item("level1-node", "BODY_HEADING_LEVEL_1", 20),
+                        item("level2-node", "BODY_HEADING_LEVEL_1", 30),
+                        item("level3-node", "BODY_HEADING_LEVEL_2", 40),
+                        item("body-node", "BODY", 50),
+                        item("date-node", "DATE", 60)
+                ),
+                List.of(),
+                6,
                 0,
                 Instant.now(),
                 Instant.now(),
@@ -702,6 +932,26 @@ class DraftNodeServiceTest {
         );
     }
 
+    private DocumentStructureProfile misclassifiedHeadingStructureProfile() {
+        return new DocumentStructureProfile(
+                1,
+                "hash",
+                "document-structure-v1",
+                List.of(
+                        node("title-node", "TITLE", "模板标题", 10),
+                        node("level1-node", "BODY_HEADING_LEVEL_1", "一、模板一级", 20),
+                        node("level2-node", "BODY_HEADING_LEVEL_1", "（一）模板二级", 30),
+                        node("level3-node", "BODY_HEADING_LEVEL_2", "1. 模板三级", 40),
+                        node("body-node", "BODY", "模板正文", 50),
+                        node("date-node", "DATE", "2026年5月30日", 60)
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
+    }
+
     private DocumentStructureProfile referenceStructureProfile() {
         return new DocumentStructureProfile(
                 1,
@@ -802,6 +1052,38 @@ class DraftNodeServiceTest {
                     40,
                     null,
                     "SourceFangSong",
+                    "SourceRoman",
+                    new TemplateLineSpacingProfile("AUTO", null, 150)
+            );
+        }
+        if ("level2-node".equals(key)) {
+            return new TemplateStructureFormattingProfile(
+                    "SourceKai",
+                    30,
+                    false,
+                    "LEFT",
+                    280,
+                    150,
+                    0,
+                    0,
+                    null,
+                    "SourceKai",
+                    "SourceRoman",
+                    new TemplateLineSpacingProfile("AUTO", null, 150)
+            );
+        }
+        if ("level3-node".equals(key)) {
+            return new TemplateStructureFormattingProfile(
+                    "SourceHei",
+                    30,
+                    true,
+                    "CENTER",
+                    0,
+                    150,
+                    0,
+                    0,
+                    null,
+                    "SourceHei",
                     "SourceRoman",
                     new TemplateLineSpacingProfile("AUTO", null, 150)
             );
@@ -962,6 +1244,39 @@ class DraftNodeServiceTest {
             }
             byDraft.put(draftId, saved);
             return findByDraftId(draftId);
+        }
+
+        @Override
+        public void deleteBodyStructureNodes(long draftId) {
+            byDraft.put(
+                    draftId,
+                    findByDraftId(draftId).stream()
+                            .map(node -> "BODY".equals(node.role()) || node.role().startsWith("BODY_HEADING_LEVEL_")
+                                    ? withStatus(node, "DELETED")
+                                    : node)
+                            .toList()
+            );
+        }
+
+        private DraftNode withStatus(DraftNode node, String status) {
+            return new DraftNode(
+                    node.id(),
+                    node.draftId(),
+                    node.structureMappingProfileId(),
+                    node.templateNodeKey(),
+                    node.parentTemplateNodeKey(),
+                    node.nodeType(),
+                    node.role(),
+                    node.slotKey(),
+                    node.title(),
+                    node.content(),
+                    node.sortOrder(),
+                    status,
+                    node.formatOverride(),
+                    node.metadata(),
+                    node.createdAt(),
+                    Instant.now()
+            );
         }
 
         @Override

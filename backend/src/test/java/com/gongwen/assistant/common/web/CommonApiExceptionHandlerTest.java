@@ -1,6 +1,10 @@
 package com.gongwen.assistant.common.web;
 
+import com.gongwen.assistant.ai.candidate.AiParagraphCandidateException;
+import com.gongwen.assistant.material.MaterialUploadException;
+import com.gongwen.assistant.quality.QualityCheckException;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -14,8 +18,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-
-import org.springframework.beans.factory.annotation.Autowired;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -37,7 +39,7 @@ class CommonApiExceptionHandlerTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errorCode").value("DATA_CONFLICT"))
-                .andExpect(jsonPath("$.message").value("当前操作与已有数据存在关联，无法完成；请检查关联数据后重试"));
+                .andExpect(jsonPath("$.message").value("Data conflict. Please sync latest data and retry."));
     }
 
     @Test
@@ -47,7 +49,7 @@ class CommonApiExceptionHandlerTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"))
-                .andExpect(jsonPath("$.message").value("系统暂时无法完成操作，请稍后重试或联系管理员"));
+                .andExpect(jsonPath("$.message").value("System error occurred while processing request. Please retry later."));
     }
 
     @Test
@@ -58,7 +60,32 @@ class CommonApiExceptionHandlerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.errorCode").value("INVALID_REQUEST"))
-                .andExpect(jsonPath("$.message").value("请求参数有误，请检查后重试"));
+                .andExpect(jsonPath("$.message").value("Request parameter error. Please retry."));
+    }
+
+    @Test
+    void returnsBadRequestForMaterialUploadErrors() throws Exception {
+        mockMvc.perform(get("/test/failing/material-upload"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("MATERIAL_TYPE_NOT_ALLOWED"))
+                .andExpect(jsonPath("$.message").value("Only .docx and .pdf files are supported"));
+    }
+
+    @Test
+    void returnsNotFoundForQualityCheckMissingData() throws Exception {
+        mockMvc.perform(get("/test/failing/quality-check-missing"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("QUALITY_CHECK_NOT_FOUND"));
+    }
+
+    @Test
+    void returnsConflictForBlockedCandidate() throws Exception {
+        mockMvc.perform(get("/test/failing/candidate-blocked"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.errorCode").value("AI_CANDIDATE_TARGET_BLOCKED"));
     }
 
     @RestController
@@ -75,6 +102,21 @@ class CommonApiExceptionHandlerTest {
 
         @PostMapping("/test/failing/validation")
         void validation(@Valid @RequestBody ValidationRequest request) {
+        }
+
+        @GetMapping("/test/failing/material-upload")
+        void materialUpload() {
+            throw new MaterialUploadException("MATERIAL_TYPE_NOT_ALLOWED", "Only .docx and .pdf files are supported");
+        }
+
+        @GetMapping("/test/failing/quality-check-missing")
+        void qualityCheckMissing() {
+            throw new QualityCheckException("QUALITY_CHECK_NOT_FOUND", "Latest quality check is not available");
+        }
+
+        @GetMapping("/test/failing/candidate-blocked")
+        void candidateBlocked() {
+            throw new AiParagraphCandidateException("AI_CANDIDATE_TARGET_BLOCKED", "Target node is blocked");
         }
     }
 

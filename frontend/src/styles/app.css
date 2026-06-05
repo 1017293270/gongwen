@@ -2923,6 +2923,14 @@ textarea.field {
   align-items: center;
 }
 
+.outline-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.outline-apply,
 .outline-generate-all {
   white-space: nowrap;
 }
@@ -2939,11 +2947,35 @@ textarea.field {
   line-height: var(--leading-title);
 }
 
+.outline-heading-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.outline-level-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  padding: 1px var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
 .outline-section ul {
   display: grid;
   gap: 4px;
   margin: 0;
   padding-left: 18px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.outline-source-refs {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   line-height: var(--leading-body);
@@ -2965,9 +2997,9 @@ textarea.field {
 
 .outline-body-stream-panel {
   display: grid;
-  max-height: min(620px, calc(100vh - 188px));
+  align-content: start;
+  min-width: 0;
   gap: var(--space-3);
-  overflow: auto;
   border: 1px solid var(--color-border-subtle);
   border-radius: 8px;
   background: var(--color-surface);
@@ -3006,8 +3038,6 @@ textarea.field {
 }
 
 .outline-body-stream-text {
-  max-height: 220px;
-  overflow: auto;
   border: 1px solid var(--color-border-subtle);
   border-radius: 6px;
   background: var(--color-surface-warm);
@@ -3016,6 +3046,7 @@ textarea.field {
   font-family: var(--font-serif);
   font-size: var(--text-sm);
   line-height: var(--leading-body);
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
@@ -4560,6 +4591,10 @@ button.template-card:disabled {
     grid-template-columns: 1fr;
   }
 
+  .outline-result-actions {
+    justify-content: stretch;
+  }
+
   .outline-body-stream-panel {
     max-height: none;
   }
@@ -4578,6 +4613,7 @@ button.template-card:disabled {
     flex: 1 1 140px;
   }
 
+  .outline-apply,
   .outline-generate-all {
     width: 100%;
   }

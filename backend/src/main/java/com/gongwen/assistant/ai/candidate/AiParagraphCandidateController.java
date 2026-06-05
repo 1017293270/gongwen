@@ -1,12 +1,9 @@
 package com.gongwen.assistant.ai.candidate;
 
 import com.gongwen.assistant.common.api.ApiResponse;
-import com.gongwen.assistant.draft.DraftNotFoundException;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +17,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/drafts/{draftId}/ai/paragraph-candidates")
+@PreAuthorize("hasAnyRole('DRAFTER', 'TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
 public class AiParagraphCandidateController {
     private final AiParagraphCandidateService service;
     private final ParagraphCandidateJobService jobService;
@@ -108,29 +106,5 @@ public class AiParagraphCandidateController {
             @RequestBody(required = false) AcceptParagraphCandidateBatchRequest request
     ) {
         return ApiResponse.ok(service.acceptBatch(draftId, request));
-    }
-
-    @ExceptionHandler(AiParagraphCandidateException.class)
-    public ResponseEntity<ApiResponse<Void>> handleCandidateException(AiParagraphCandidateException exception) {
-        HttpStatus status = switch (exception.errorCode()) {
-            case "AI_CANDIDATE_NOT_FOUND",
-                 "AI_CANDIDATE_DRAFT_MISMATCH",
-                 "AI_CANDIDATE_TARGET_NOT_FOUND",
-                 "AI_CANDIDATE_JOB_NOT_FOUND",
-                 "AI_CANDIDATE_JOB_DRAFT_MISMATCH" -> HttpStatus.NOT_FOUND;
-            case "AI_CANDIDATE_TARGET_BLOCKED",
-                 "AI_CANDIDATE_STATUS_PROTECTED" -> HttpStatus.CONFLICT;
-            default -> HttpStatus.BAD_REQUEST;
-        };
-        return ResponseEntity.status(status)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.error(exception.errorCode(), exception.getMessage()));
-    }
-
-    @ExceptionHandler(DraftNotFoundException.class)
-    public ResponseEntity<ApiResponse<Void>> handleDraftNotFound(DraftNotFoundException exception) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.error("DRAFT_NOT_FOUND", exception.getMessage()));
     }
 }

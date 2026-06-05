@@ -33,14 +33,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.XWPFParagraph;
+import org.apache.poi.xwpf.usermodel.XWPFRun;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -698,6 +703,196 @@ class DraftWordExportServiceTest {
     }
 
     @Test
+    void referenceDocumentExportAppliesLegacyAnchorlessSyntheticOutlineAndRemovesTemplateBody() throws Exception {
+        long draftId = 38L;
+        long templateVersionId = 9L;
+        long mappingProfileId = 61L;
+        byte[] templateBytes = DocxTestFactory.speechReferenceDocument();
+        List<String> oldTemplateBodyTexts;
+        try (XWPFDocument source = new XWPFDocument(new ByteArrayInputStream(templateBytes))) {
+            oldTemplateBodyTexts = source.getParagraphs().subList(4, source.getParagraphs().size()).stream()
+                    .map(paragraph -> paragraph.getText())
+                    .toList();
+        }
+        Path templatePath = tempDir.resolve("reference-document-template-with-applied-outline.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = emptyProfile().withTemplateAnalysis(new TemplateAnalysisProfile(
+                "REFERENCE_DOCUMENT",
+                0.95d,
+                "UNKNOWN",
+                List.of(),
+                List.of(),
+                "reference document",
+                "TEST",
+                "REFERENCE_DOCUMENT",
+                List.of("COMPLETE_REFERENCE_DOCUMENT"),
+                "REVIEW_AND_MAP",
+                List.of()
+        ));
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("paragraph-0", "TITLE", "TITLE", 10),
+                mappingItem("paragraph-4", "BODY", "BODY_PARAGRAPH", 20),
+                mappingItem("paragraph-6", "BODY_HEADING_LEVEL_1", "BODY_HEADING_LEVEL_1", 30)
+        );
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Applied outline draft")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(501L, draftId, mappingProfileId, "paragraph-0", "TITLE", "TITLE", "替换后的讲话标题", 10, DraftNodeFormatOverride.empty()),
+                        outlineDraftNode(503L, draftId, mappingProfileId, "BODY_HEADING_LEVEL_1", "一、应用后的新提纲", 30, "", "paragraph-6"),
+                        outlineDraftNode(504L, draftId, mappingProfileId, "BODY", "应用提纲后生成的新正文", 40, "", "paragraph-4"),
+                        outlineDraftNode(505L, draftId, mappingProfileId, "BODY_HEADING_LEVEL_2", "（一）老草稿跨级样式来源标题", 50, "", "paragraph-6"),
+                        outlineDraftNode(506L, draftId, mappingProfileId, "BODY", "老草稿正文", 60, "", "")
+                )),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(speechBodyRegionStructureProfile())
+        );
+
+        WordExportResult result = service.exportDraft(draftId);
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(result.content()))) {
+            List<String> texts = document.getParagraphs().stream()
+                    .map(paragraph -> paragraph.getText())
+                    .toList();
+            assertThat(texts).contains("一、应用后的新提纲", "应用提纲后生成的新正文", "（一）老草稿跨级样式来源标题", "老草稿正文");
+            assertThat(texts).doesNotContain(oldTemplateBodyTexts.toArray(String[]::new));
+            int legacyHeadingIndex = texts.indexOf("（一）老草稿跨级样式来源标题");
+            assertThat(document.getParagraphs().get(legacyHeadingIndex).getRuns().getFirst().isBold()).isFalse();
+        }
+    }
+
+    @Test
+    void referenceDocumentExportCorrectsMisclassifiedHeadingStyleSourceByNumbering() throws Exception {
+        long draftId = 40L;
+        long templateVersionId = 10L;
+        long mappingProfileId = 63L;
+        byte[] templateBytes = misclassifiedHeadingTemplateDocx();
+        Path templatePath = tempDir.resolve("misclassified-heading-template.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = emptyProfile().withTemplateAnalysis(new TemplateAnalysisProfile(
+                "REFERENCE_DOCUMENT",
+                0.95d,
+                "UNKNOWN",
+                List.of(),
+                List.of(),
+                "reference document",
+                "TEST",
+                "REFERENCE_DOCUMENT",
+                List.of("COMPLETE_REFERENCE_DOCUMENT"),
+                "REVIEW_AND_MAP",
+                List.of()
+        ));
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("paragraph-0", "TITLE", "TITLE", 10),
+                mappingItem("paragraph-1", "BODY_HEADING_LEVEL_1", "BODY_HEADING_LEVEL_1", 20),
+                mappingItem("paragraph-2", "BODY_HEADING_LEVEL_1", "BODY_HEADING_LEVEL_1", 30),
+                mappingItem("paragraph-3", "BODY_HEADING_LEVEL_2", "BODY_HEADING_LEVEL_2", 40),
+                mappingItem("paragraph-4", "BODY", "BODY_PARAGRAPH", 50)
+        );
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Misclassified heading draft")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(701L, draftId, mappingProfileId, "paragraph-0", "TITLE", "TITLE", "替换标题", 10, DraftNodeFormatOverride.empty()),
+                        outlineDraftNode(702L, draftId, mappingProfileId, "BODY_HEADING_LEVEL_2", "（一）应用二级", 20, "paragraph-4", "paragraph-3")
+                )),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(misclassifiedHeadingStructureProfile())
+        );
+
+        WordExportResult result = service.exportDraft(draftId);
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(result.content()))) {
+            List<String> texts = document.getParagraphs().stream()
+                    .map(org.apache.poi.xwpf.usermodel.XWPFParagraph::getText)
+                    .toList();
+            org.apache.poi.xwpf.usermodel.XWPFParagraph inserted = document.getParagraphs().get(texts.indexOf("（一）应用二级"));
+            assertThat(inserted.getAlignment()).isEqualTo(ParagraphAlignment.LEFT);
+            assertThat(inserted.getIndentationFirstLine()).isEqualTo(280);
+        }
+    }
+
+    @Test
+    void originalNodeReplacementAppliesParsedFormattingToInsertedNodes() throws Exception {
+        long draftId = 39L;
+        long templateVersionId = 9L;
+        long mappingProfileId = 62L;
+        byte[] templateBytes = DocxTestFactory.docxWithParagraphs("模板标题", "无缩进正文样式来源");
+        Path templatePath = tempDir.resolve("reference-document-template-with-parsed-formatting.docx");
+        Files.write(templatePath, templateBytes);
+        TemplateProfile profile = emptyProfile().withTemplateAnalysis(new TemplateAnalysisProfile(
+                "REFERENCE_DOCUMENT",
+                0.95d,
+                "UNKNOWN",
+                List.of(),
+                List.of(),
+                "reference document",
+                "TEST",
+                "REFERENCE_DOCUMENT",
+                List.of("COMPLETE_REFERENCE_DOCUMENT"),
+                "REVIEW_AND_MAP",
+                List.of()
+        ));
+        StructureMappingProfile mapping = publishedMapping(templateVersionId, mappingProfileId,
+                mappingItem("paragraph-0", "TITLE", "TITLE", 10),
+                mappingItem("paragraph-1", "BODY", "BODY_PARAGRAPH", 20)
+        );
+        TemplateStructureFormattingProfile parsedBodyFormatting = new TemplateStructureFormattingProfile(
+                "FangSong",
+                32,
+                false,
+                "LEFT",
+                840,
+                150,
+                0,
+                0
+        );
+        DraftWordExportService service = new DraftWordExportService(
+                new FixedDraftRepository(sampleDraft(draftId, templateVersionId, "Parsed formatting draft")),
+                new FixedTemplateVersionRepository(templatePath.toString()),
+                new FixedTemplateRepository(),
+                new FixedTemplateProfileRepository(profile),
+                new FixedTemplateStructureFormattingRepository(Map.of()),
+                new TemplateEffectiveFormattingService(),
+                new WordExportService(new InMemoryExportRecordRepository()),
+                null,
+                new FixedDraftNodeRepository(List.of(
+                        draftNode(601L, draftId, mappingProfileId, "paragraph-0", "TITLE", "TITLE", "替换标题", 10, DraftNodeFormatOverride.empty()),
+                        outlineDraftNode(602L, draftId, mappingProfileId, "BODY", "插入正文", 20, "paragraph-1", "paragraph-1")
+                )),
+                new FixedStructureMappingRepository(mapping),
+                new FixedDocumentStructureProfileRepository(documentStructureProfileWithFormatting(
+                        Map.of("paragraph-1", parsedBodyFormatting),
+                        "paragraph-0",
+                        "paragraph-1"
+                ))
+        );
+
+        WordExportResult result = service.exportDraft(draftId);
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(result.content()))) {
+            List<String> texts = document.getParagraphs().stream()
+                    .map(org.apache.poi.xwpf.usermodel.XWPFParagraph::getText)
+                    .toList();
+            org.apache.poi.xwpf.usermodel.XWPFParagraph inserted = document.getParagraphs().get(texts.indexOf("插入正文"));
+            assertThat(inserted.getIndentationFirstLine()).isEqualTo(840);
+            assertThat(inserted.getSpacingBetween()).isEqualTo(1.5d);
+        }
+    }
+
+    @Test
     void exportsDraftWithoutRequiringQualityCheckResult() throws Exception {
         byte[] templateBytes = DocxTestFactory.docxWithParagraphs(PLACEHOLDER_TITLE, PLACEHOLDER_BODY);
         Path templatePath = tempDir.resolve("quality-independent-template.docx");
@@ -883,6 +1078,19 @@ class DraftWordExportServiceTest {
             int sortOrder,
             String styleSourceNodeKey
     ) {
+        return syntheticDraftNode(id, draftId, mappingProfileId, role, content, sortOrder, "body-source", styleSourceNodeKey);
+    }
+
+    private static DraftNode syntheticDraftNode(
+            long id,
+            long draftId,
+            long mappingProfileId,
+            String role,
+            String content,
+            int sortOrder,
+            String anchorTemplateNodeKey,
+            String styleSourceNodeKey
+    ) {
         return new DraftNode(
                 id,
                 draftId,
@@ -897,7 +1105,37 @@ class DraftWordExportServiceTest {
                 sortOrder,
                 content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
                 DraftNodeFormatOverride.empty(),
-                DraftNodeMetadata.synthetic(null, "body-source", "AFTER", "group-" + id, styleSourceNodeKey),
+                DraftNodeMetadata.synthetic(null, anchorTemplateNodeKey, "AFTER", "group-" + id, styleSourceNodeKey),
+                Instant.now(),
+                Instant.now()
+        );
+    }
+
+    private static DraftNode outlineDraftNode(
+            long id,
+            long draftId,
+            long mappingProfileId,
+            String role,
+            String content,
+            int sortOrder,
+            String anchorTemplateNodeKey,
+            String styleSourceNodeKey
+    ) {
+        return new DraftNode(
+                id,
+                draftId,
+                mappingProfileId,
+                "outline-" + id,
+                null,
+                "PARAGRAPH",
+                role,
+                "BODY".equals(role) ? "BODY_PARAGRAPH" : role,
+                role,
+                content,
+                sortOrder,
+                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.synthetic(null, anchorTemplateNodeKey, "AFTER", "outline-group-" + id, styleSourceNodeKey),
                 Instant.now(),
                 Instant.now()
         );
@@ -919,6 +1157,148 @@ class DraftWordExportServiceTest {
                 ))
                 .toList();
         return new DocumentStructureProfile(1, "hash", "document-structure-v1", nodes, List.of(), List.of(), List.of(), Instant.now());
+    }
+
+    private static DocumentStructureProfile documentStructureProfileWithFormatting(
+            Map<String, TemplateStructureFormattingProfile> formattingByNodeKey,
+            String... nodeKeys
+    ) {
+        List<DocumentNode> nodes = List.of(nodeKeys).stream()
+                .map(nodeKey -> new DocumentNode(
+                        nodeKey,
+                        null,
+                        "PARAGRAPH",
+                        "UNKNOWN",
+                        nodeKey,
+                        nodeKey,
+                        List.of(nodeKeys).indexOf(nodeKey),
+                        "/" + nodeKey,
+                        formattingByNodeKey.get(nodeKey),
+                        List.of()
+                ))
+                .toList();
+        return new DocumentStructureProfile(1, "hash", "document-structure-v1", nodes, List.of(), List.of(), List.of(), Instant.now());
+    }
+
+    private static byte[] misclassifiedHeadingTemplateDocx() throws Exception {
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            styledParagraph(document, "模板标题", ParagraphAlignment.CENTER, 0, true);
+            styledParagraph(document, "一、模板一级", ParagraphAlignment.LEFT, 0, true);
+            styledParagraph(document, "（一）模板二级", ParagraphAlignment.LEFT, 280, false);
+            styledParagraph(document, "1. 模板三级", ParagraphAlignment.CENTER, 0, true);
+            styledParagraph(document, "模板正文", ParagraphAlignment.LEFT, 420, false);
+            document.write(output);
+            return output.toByteArray();
+        }
+    }
+
+    private static void styledParagraph(
+            XWPFDocument document,
+            String text,
+            ParagraphAlignment alignment,
+            int firstLineIndent,
+            boolean bold
+    ) {
+        XWPFParagraph paragraph = document.createParagraph();
+        paragraph.setAlignment(alignment);
+        if (firstLineIndent > 0) {
+            paragraph.setIndentationFirstLine(firstLineIndent);
+        }
+        XWPFRun run = paragraph.createRun();
+        run.setFontFamily("仿宋_GB2312", XWPFRun.FontCharRange.eastAsia);
+        run.setFontSize(16);
+        run.setBold(bold);
+        run.setText(text);
+    }
+
+    private static DocumentStructureProfile misclassifiedHeadingStructureProfile() {
+        return new DocumentStructureProfile(
+                1,
+                "misclassified-heading-hash",
+                "document-structure-v1",
+                List.of(
+                        nodeWithTextAndFormatting("paragraph-0", "TITLE", "模板标题", new TemplateStructureFormattingProfile("FangSong", 32, true, "CENTER", 0, 150, 0, 0)),
+                        nodeWithTextAndFormatting("paragraph-1", "BODY_HEADING_LEVEL_1", "一、模板一级", new TemplateStructureFormattingProfile("FangSong", 32, true, "LEFT", 0, 150, 0, 0)),
+                        nodeWithTextAndFormatting("paragraph-2", "BODY_HEADING_LEVEL_1", "（一）模板二级", new TemplateStructureFormattingProfile("FangSong", 32, false, "LEFT", 280, 150, 0, 0)),
+                        nodeWithTextAndFormatting("paragraph-3", "BODY_HEADING_LEVEL_2", "1. 模板三级", new TemplateStructureFormattingProfile("FangSong", 32, true, "CENTER", 0, 150, 0, 0)),
+                        nodeWithTextAndFormatting("paragraph-4", "BODY", "模板正文", new TemplateStructureFormattingProfile("FangSong", 32, false, "LEFT", 420, 150, 0, 0))
+                ),
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
+    }
+
+    private static DocumentNode nodeWithTextAndFormatting(
+            String nodeKey,
+            String role,
+            String text,
+            TemplateStructureFormattingProfile formatting
+    ) {
+        return new DocumentNode(
+                nodeKey,
+                null,
+                "PARAGRAPH",
+                role,
+                text,
+                text,
+                Integer.parseInt(nodeKey.substring("paragraph-".length())),
+                "/" + nodeKey,
+                formatting,
+                List.of()
+        );
+    }
+
+    private static DocumentStructureProfile speechBodyRegionStructureProfile() {
+        String[] roles = {
+                "TITLE",
+                "STATIC_TEXT",
+                "DATE",
+                "RECIPIENT",
+                "BODY",
+                "BODY",
+                "BODY_HEADING_LEVEL_1",
+                "BODY",
+                "BODY",
+                "BODY_HEADING_LEVEL_1",
+                "BODY",
+                "BODY_HEADING_LEVEL_3",
+                "BODY_HEADING_LEVEL_3",
+                "BODY_HEADING_LEVEL_3",
+                "BODY_HEADING_LEVEL_1",
+                "BODY",
+                "BODY",
+                "BODY_HEADING_LEVEL_1",
+                "BODY",
+                "BODY"
+        };
+        List<DocumentNode> nodes = new ArrayList<>();
+        for (int index = 0; index < roles.length; index++) {
+            nodes.add(new DocumentNode(
+                    "paragraph-" + index,
+                    null,
+                    "PARAGRAPH",
+                    roles[index],
+                    "paragraph-" + index,
+                    "paragraph-" + index,
+                    index,
+                    "/paragraph-" + index,
+                    null,
+                    List.of()
+            ));
+        }
+        return new DocumentStructureProfile(
+                1,
+                "speech-hash",
+                "document-structure-v1",
+                nodes,
+                List.of(),
+                List.of(),
+                List.of(),
+                Instant.now()
+        );
     }
 
     private record FixedDraftRepository(DraftDetailDto draft) implements DraftRepository {

@@ -15,6 +15,10 @@ public interface DraftNodeRepository {
         throw new UnsupportedOperationException("insertNodes is not implemented");
     }
 
+    default void deleteBodyStructureNodes(long draftId) {
+        throw new UnsupportedOperationException("deleteBodyStructureNodes is not implemented");
+    }
+
     default List<DraftNode> updateSortOrders(long draftId, Map<Long, Integer> sortOrdersByNodeId) {
         throw new UnsupportedOperationException("updateSortOrders is not implemented");
     }

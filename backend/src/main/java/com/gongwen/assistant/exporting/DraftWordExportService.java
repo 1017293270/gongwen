@@ -3,8 +3,11 @@ package com.gongwen.assistant.exporting;
 import com.gongwen.assistant.draft.DraftBlockDto;
 import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftRepository;
+import com.gongwen.assistant.documentstructure.DocumentHeadingRoleDetector;
+import com.gongwen.assistant.documentstructure.DocumentNode;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
+import com.gongwen.assistant.documentstructure.mapping.StructureMappingItem;
 import com.gongwen.assistant.documentstructure.mapping.StructureMappingProfile;
 import com.gongwen.assistant.documentstructure.mapping.StructureMappingRepository;
 import com.gongwen.assistant.draft.node.DraftNode;
@@ -33,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -156,8 +160,9 @@ public class DraftWordExportService {
             return exportOriginalNodeReplacement(
                     plan.templateBytes(),
                     plan.request(),
-                    plan.mapping(),
-                    plan.draftNodes()
+                    plan.structureContext(),
+                    plan.draftNodes(),
+                    plan.structureOverrides()
             );
         }
         return wordExportService.export(plan.templateBytes(), plan.request());
@@ -170,8 +175,9 @@ public class DraftWordExportService {
             result = renderOriginalNodeReplacementForPreview(
                     plan.templateBytes(),
                     plan.request(),
-                    plan.mapping(),
-                    plan.draftNodes()
+                    plan.structureContext(),
+                    plan.draftNodes(),
+                    plan.structureOverrides()
             );
         } else {
             result = wordExportService.render(plan.templateBytes(), plan.request());
@@ -237,8 +243,9 @@ public class DraftWordExportService {
                 templateVersionId,
                 templateBytes,
                 request,
-                structureContext.mappingProfile(),
+                structureContext,
                 draftNodes,
+                structureOverrides,
                 strategy
         );
     }
@@ -246,16 +253,18 @@ public class DraftWordExportService {
     private WordExportResult exportOriginalNodeReplacement(
             byte[] templateBytes,
             WordExportRequest request,
-            StructureMappingProfile mapping,
-            List<DraftNode> draftNodes
+            ExportStructureContext structureContext,
+            List<DraftNode> draftNodes,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides
     ) {
         try {
+            StructureMappingProfile mapping = structureContext == null ? null : structureContext.mappingProfile();
             byte[] rendered = nodeReplacementRenderer.render(
                     templateBytes,
                     originalNodeReplacements(draftNodes),
                     ignoredNodeKeys(mapping, draftNodes),
-                    deletedNodeKeys(draftNodes),
-                    originalNodeInsertions(draftNodes)
+                    deletedNodeKeys(draftNodes, structureContext),
+                    originalNodeInsertions(draftNodes, structureContext, request.templateProfile(), structureOverrides)
             );
             return wordExportService.exportRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
@@ -270,16 +279,18 @@ public class DraftWordExportService {
     private WordExportResult renderOriginalNodeReplacementForPreview(
             byte[] templateBytes,
             WordExportRequest request,
-            StructureMappingProfile mapping,
-            List<DraftNode> draftNodes
+            ExportStructureContext structureContext,
+            List<DraftNode> draftNodes,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides
     ) {
         try {
+            StructureMappingProfile mapping = structureContext == null ? null : structureContext.mappingProfile();
             byte[] rendered = nodeReplacementRenderer.render(
                     templateBytes,
                     originalNodeReplacements(draftNodes),
                     ignoredNodeKeys(mapping, draftNodes),
-                    deletedNodeKeys(draftNodes),
-                    originalNodeInsertions(draftNodes)
+                    deletedNodeKeys(draftNodes, structureContext),
+                    originalNodeInsertions(draftNodes, structureContext, request.templateProfile(), structureOverrides)
             );
             return wordExportService.renderRendered(request, rendered);
         } catch (DocxNodeReplacementRenderer.MissingNodeLocatorException exception) {
@@ -556,23 +567,186 @@ public class DraftWordExportService {
         return replacements;
     }
 
-    private List<DocxNodeReplacementRenderer.NodeInsertion> originalNodeInsertions(List<DraftNode> nodes) {
+    private List<DocxNodeReplacementRenderer.NodeInsertion> originalNodeInsertions(
+            List<DraftNode> nodes,
+            ExportStructureContext structureContext,
+            TemplateProfile profile,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides
+    ) {
         if (nodes == null || nodes.isEmpty()) {
             return List.of();
         }
+        String fallbackAnchorNodeKey = fallbackOriginalNodeInsertionAnchor(nodes, structureContext);
         return nodes.stream()
                 .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
                 .filter(node -> !isDeletedDraftNode(node))
                 .filter(this::isSyntheticDraftNode)
-                .filter(node -> !isBlank(node.metadata().anchorTemplateNodeKey()))
                 .filter(this::isReplaceableOriginalNode)
-                .map(node -> new DocxNodeReplacementRenderer.NodeInsertion(
-                        node.metadata().anchorTemplateNodeKey(),
-                        insertionPositionForExport(node.metadata().insertPosition()),
-                        node.content() == null ? "" : node.content(),
-                        node.metadata().styleSourceNodeKey()
-                ))
+                .map(node -> {
+                    String styleSourceNodeKey = insertionStyleSourceNodeKey(node, nodes, structureContext);
+                    return new DocxNodeReplacementRenderer.NodeInsertion(
+                            firstNonBlank(node.metadata().anchorTemplateNodeKey(), fallbackAnchorNodeKey),
+                            insertionPositionForExport(node.metadata().insertPosition()),
+                            node.content() == null ? "" : node.content(),
+                            styleSourceNodeKey,
+                            insertionFormatting(node, styleSourceNodeKey, profile, structureContext, structureOverrides)
+                    );
+                })
+                .filter(insertion -> !isBlank(insertion.anchorNodeKey()))
                 .toList();
+    }
+
+    private TemplateStructureFormattingProfile insertionFormatting(
+            DraftNode node,
+            String styleSourceNodeKey,
+            TemplateProfile profile,
+            ExportStructureContext structureContext,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides
+    ) {
+        if (isBlank(styleSourceNodeKey)) {
+            return null;
+        }
+        TemplateStructureFormattingProfile original = documentStructureFormatting(structureContext, styleSourceNodeKey)
+                .or(() -> structureFormatting(profile, styleSourceNodeKey))
+                .orElse(null);
+        TemplateStructureFormattingProfile structureOverride =
+                structureOverrides == null ? null : structureOverrides.get(styleSourceNodeKey);
+        return templateEffectiveFormattingService.resolveDraftNodeFormatting(
+                null,
+                null,
+                original,
+                structureOverride,
+                node.formatOverride()
+        );
+    }
+
+    private Optional<TemplateStructureFormattingProfile> documentStructureFormatting(
+            ExportStructureContext structureContext,
+            String nodeKey
+    ) {
+        DocumentStructureProfile structureProfile = structureContext == null ? null : structureContext.structureProfile();
+        if (structureProfile == null || structureProfile.nodes() == null || isBlank(nodeKey)) {
+            return Optional.empty();
+        }
+        return structureProfile.nodes().stream()
+                .filter(node -> nodeKey.equals(node.nodeKey()))
+                .findFirst()
+                .map(DocumentNode::formatting);
+    }
+
+    private String insertionStyleSourceNodeKey(
+            DraftNode node,
+            List<DraftNode> nodes,
+            ExportStructureContext structureContext
+    ) {
+        String explicitSourceKey = node.metadata().styleSourceNodeKey();
+        if (!isBlank(explicitSourceKey)) {
+            return normalizedExplicitStyleSourceNodeKey(node, explicitSourceKey, nodes, structureContext);
+        }
+        String sourceKeyFromNodes = styleSourceNodeKeyForRole(nodes, node.role());
+        if (!isBlank(sourceKeyFromNodes)) {
+            return sourceKeyFromNodes;
+        }
+        String sourceKeyFromStructure = styleSourceNodeKeyForRole(structureContext, node.role());
+        if (!isBlank(sourceKeyFromStructure)) {
+            return sourceKeyFromStructure;
+        }
+        StructureMappingProfile mapping = structureContext == null ? null : structureContext.mappingProfile();
+        return styleSourceNodeKeyForRole(mapping, node.role());
+    }
+
+    private String normalizedExplicitStyleSourceNodeKey(
+            DraftNode node,
+            String explicitSourceKey,
+            List<DraftNode> nodes,
+            ExportStructureContext structureContext
+    ) {
+        String nodeRole = normalizeRole(node.role());
+        if (DocumentHeadingRoleDetector.isHeadingRole(nodeRole)) {
+            String sourceTextRole = firstNonBlank(
+                    sourceHeadingRoleFromStructureProfile(structureContext, explicitSourceKey),
+                    sourceHeadingRoleFromDraftNodes(nodes, explicitSourceKey)
+            );
+            if (nodeRole.equals(sourceTextRole)) {
+                return explicitSourceKey;
+            }
+            if (!isBlank(sourceTextRole) && !nodeRole.equals(sourceTextRole)) {
+                return bestStyleSourceNodeKey(node, nodes, structureContext);
+            }
+        }
+        String sourceRole = firstNonBlank(
+                sourceRoleFromStructureProfile(structureContext, explicitSourceKey),
+                sourceRoleFromDraftNodes(nodes, explicitSourceKey)
+        );
+        if (DocumentHeadingRoleDetector.isHeadingRole(nodeRole)
+                && DocumentHeadingRoleDetector.isHeadingRole(sourceRole)
+                && !nodeRole.equals(sourceRole)) {
+            return bestStyleSourceNodeKey(node, nodes, structureContext);
+        }
+        return explicitSourceKey;
+    }
+
+    private String bestStyleSourceNodeKey(DraftNode node, List<DraftNode> nodes, ExportStructureContext structureContext) {
+        String sourceKeyFromNodes = styleSourceNodeKeyForRole(nodes, node.role());
+        if (!isBlank(sourceKeyFromNodes)) {
+            return sourceKeyFromNodes;
+        }
+        String sourceKeyFromStructure = styleSourceNodeKeyForRole(structureContext, node.role());
+        if (!isBlank(sourceKeyFromStructure)) {
+            return sourceKeyFromStructure;
+        }
+        StructureMappingProfile mapping = structureContext == null ? null : structureContext.mappingProfile();
+        String sourceKeyFromMapping = styleSourceNodeKeyForRole(mapping, node.role());
+        return isBlank(sourceKeyFromMapping) ? "" : sourceKeyFromMapping;
+    }
+
+    private String sourceHeadingRoleFromStructureProfile(ExportStructureContext structureContext, String nodeKey) {
+        if (structureContext == null || structureContext.structureProfile() == null || isBlank(nodeKey)) {
+            return "";
+        }
+        return structureContext.structureProfile().nodes().stream()
+                .filter(node -> nodeKey.equals(node.nodeKey()))
+                .findFirst()
+                .map(DocumentNode::text)
+                .map(DocumentHeadingRoleDetector::detect)
+                .orElse("");
+    }
+
+    private String sourceHeadingRoleFromDraftNodes(List<DraftNode> nodes, String nodeKey) {
+        if (nodes == null || nodes.isEmpty() || isBlank(nodeKey)) {
+            return "";
+        }
+        return nodes.stream()
+                .filter(node -> !isSyntheticDraftNode(node))
+                .filter(node -> nodeKey.equals(node.templateNodeKey()))
+                .findFirst()
+                .map(node -> DocumentHeadingRoleDetector.detect(firstNonBlank(node.content(), node.title())))
+                .orElse("");
+    }
+
+    private String sourceRoleFromStructureProfile(ExportStructureContext structureContext, String nodeKey) {
+        if (structureContext == null || structureContext.structureProfile() == null || isBlank(nodeKey)) {
+            return "";
+        }
+        return structureContext.structureProfile().nodes().stream()
+                .filter(node -> nodeKey.equals(node.nodeKey()))
+                .findFirst()
+                .map(DocumentNode::roleSuggestion)
+                .map(this::normalizeRole)
+                .orElse("");
+    }
+
+    private String sourceRoleFromDraftNodes(List<DraftNode> nodes, String nodeKey) {
+        if (nodes == null || nodes.isEmpty() || isBlank(nodeKey)) {
+            return "";
+        }
+        return nodes.stream()
+                .filter(node -> !isSyntheticDraftNode(node))
+                .filter(node -> nodeKey.equals(node.templateNodeKey()))
+                .findFirst()
+                .map(DraftNode::role)
+                .map(this::normalizeRole)
+                .orElse("");
     }
 
     private Set<String> ignoredNodeKeys(StructureMappingProfile mapping, List<DraftNode> draftNodes) {
@@ -585,16 +759,273 @@ public class DraftWordExportService {
                         .collect(Collectors.toSet());
     }
 
-    private Set<String> deletedNodeKeys(List<DraftNode> draftNodes) {
+    private Set<String> deletedNodeKeys(List<DraftNode> draftNodes, ExportStructureContext structureContext) {
         if (draftNodes == null) {
             return Set.of();
         }
-        return draftNodes.stream()
+        Set<String> deletedKeys = draftNodes.stream()
                 .filter(this::isDeletedDraftNode)
                 .filter(node -> !isSyntheticDraftNode(node))
                 .map(DraftNode::templateNodeKey)
                 .filter(nodeKey -> !isBlank(nodeKey))
-                .collect(Collectors.toSet());
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (hasOutlineSyntheticBodyStructureNodes(draftNodes)) {
+            deletedKeys.addAll(bodyRegionOriginalNodeKeys(structureContext, draftNodes));
+        }
+        return deletedKeys;
+    }
+
+    private String fallbackOriginalNodeInsertionAnchor(List<DraftNode> draftNodes, ExportStructureContext structureContext) {
+        if (!hasOutlineSyntheticBodyStructureNodes(draftNodes)) {
+            return "";
+        }
+        return draftNodes.stream()
+                .filter(this::isDeletedDraftNode)
+                .filter(node -> !isSyntheticDraftNode(node))
+                .filter(node -> isBodyStructureRole(node.role()))
+                .map(DraftNode::templateNodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElseGet(() -> bodyRegionOriginalNodeKeys(structureContext, draftNodes).stream().findFirst().orElse(""));
+    }
+
+    private boolean hasOutlineSyntheticBodyStructureNodes(List<DraftNode> draftNodes) {
+        if (draftNodes == null || draftNodes.isEmpty()) {
+            return false;
+        }
+        return draftNodes.stream()
+                .filter(node -> !isDeletedDraftNode(node))
+                .filter(this::isOutlineSyntheticDraftNode)
+                .filter(node -> isBodyStructureRole(node.role()))
+                .findAny()
+                .isPresent();
+    }
+
+    private Set<String> bodyRegionOriginalNodeKeys(ExportStructureContext structureContext, List<DraftNode> draftNodes) {
+        StructureMappingProfile mapping = structureContext == null ? null : structureContext.mappingProfile();
+        LinkedHashSet<String> keys = new LinkedHashSet<>(bodyStructureMappingNodeKeys(mapping));
+        if (draftNodes != null) {
+            draftNodes.stream()
+                    .filter(this::isDeletedDraftNode)
+                    .filter(node -> !isSyntheticDraftNode(node))
+                    .filter(node -> isBodyStructureRole(node.role()))
+                    .map(DraftNode::templateNodeKey)
+                    .filter(nodeKey -> !isBlank(nodeKey))
+                    .forEach(keys::add);
+        }
+        DocumentStructureProfile structureProfile = structureContext == null ? null : structureContext.structureProfile();
+        if (structureProfile == null || structureProfile.nodes() == null || structureProfile.nodes().isEmpty()) {
+            return keys;
+        }
+        Map<String, String> rolesByNodeKey = mapping == null || mapping.items() == null
+                ? Map.of()
+                : mapping.items().stream()
+                        .collect(Collectors.toMap(
+                                StructureMappingItem::nodeKey,
+                                StructureMappingItem::role,
+                                (left, right) -> right
+                        ));
+        List<DocumentNode> orderedNodes = structureProfile.nodes().stream()
+                .filter(node -> node != null && !isBlank(node.nodeKey()))
+                .sorted(Comparator.comparingInt(DocumentNode::orderIndex))
+                .toList();
+        int bodyStartIndex = firstBodyRegionIndex(orderedNodes, rolesByNodeKey, keys);
+        if (bodyStartIndex < 0) {
+            return keys;
+        }
+        for (int index = bodyStartIndex; index < orderedNodes.size(); index++) {
+            DocumentNode node = orderedNodes.get(index);
+            String role = effectiveOriginalNodeRole(node, rolesByNodeKey);
+            if (index > bodyStartIndex && isBodyRegionBoundary(node, role)) {
+                break;
+            }
+            if (isBodyRegionRemovableNode(node, role)) {
+                keys.add(node.nodeKey());
+            }
+        }
+        return keys;
+    }
+
+    private int firstBodyRegionIndex(List<DocumentNode> orderedNodes, Map<String, String> rolesByNodeKey, Set<String> knownBodyKeys) {
+        for (int index = 0; index < orderedNodes.size(); index++) {
+            DocumentNode node = orderedNodes.get(index);
+            String role = effectiveOriginalNodeRole(node, rolesByNodeKey);
+            if (knownBodyKeys.contains(node.nodeKey()) || isBodyStructureRole(role)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isBodyRegionRemovableNode(DocumentNode node, String role) {
+        return "PARAGRAPH".equalsIgnoreCase(node.nodeType())
+                && !isBodyRegionBoundary(node, role);
+    }
+
+    private boolean isBodyRegionBoundary(DocumentNode node, String role) {
+        if (node == null) {
+            return false;
+        }
+        String nodeType = node.nodeType() == null ? "" : node.nodeType().strip().toUpperCase();
+        if ("HEADER_PARAGRAPH".equals(nodeType) || "FOOTER_PARAGRAPH".equals(nodeType) || "TABLE_PARAGRAPH".equals(nodeType)) {
+            return true;
+        }
+        String normalizedRole = normalizeRole(role);
+        return Set.of(
+                "TITLE",
+                "SUBTITLE",
+                "RECIPIENT",
+                "ISSUING_ORGAN",
+                "DOC_NUMBER",
+                "ATTACHMENT_NOTE",
+                "ATTACHMENT_CONTENT",
+                "ATTACHMENT",
+                "TABLE_ATTACHMENT",
+                "SIGNATURE",
+                "DATE",
+                "CC"
+        ).contains(normalizedRole);
+    }
+
+    private String effectiveOriginalNodeRole(DocumentNode node, Map<String, String> rolesByNodeKey) {
+        String mappedRole = rolesByNodeKey.getOrDefault(node.nodeKey(), "");
+        return isBlank(mappedRole) || "UNKNOWN".equals(normalizeRole(mappedRole))
+                ? node.roleSuggestion()
+                : mappedRole;
+    }
+
+    private Set<String> bodyStructureMappingNodeKeys(StructureMappingProfile mapping) {
+        if (mapping == null || mapping.items() == null) {
+            return Set.of();
+        }
+        return mapping.items().stream()
+                .filter(item -> isBodyStructureRole(item.role()))
+                .map(item -> item.nodeKey())
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private String styleSourceNodeKeyForRole(List<DraftNode> nodes, String role) {
+        String normalizedRole = normalizeRole(role);
+        if (DocumentHeadingRoleDetector.isHeadingRole(normalizedRole)) {
+            String sourceByNumbering = headingStyleSourceNodeKeyByNumbering(nodes, normalizedRole);
+            if (!isBlank(sourceByNumbering)) {
+                return sourceByNumbering;
+            }
+            String exact = exactStyleSourceNodeKey(nodes, normalizedRole);
+            if (!isBlank(exact) && !hasConflictingHeadingNumbering(nodes, exact, normalizedRole)) {
+                return exact;
+            }
+            return exactStyleSourceNodeKey(nodes, "BODY");
+        }
+        String exact = exactStyleSourceNodeKey(nodes, role);
+        if (!isBlank(exact)) {
+            return exact;
+        }
+        return "";
+    }
+
+    private String styleSourceNodeKeyForRole(ExportStructureContext structureContext, String role) {
+        String normalizedRole = normalizeRole(role);
+        if (structureContext == null
+                || structureContext.structureProfile() == null
+                || !DocumentHeadingRoleDetector.isHeadingRole(normalizedRole)) {
+            return "";
+        }
+        String sourceByNumbering = structureContext.structureProfile().nodes().stream()
+                .filter(node -> normalizedRole.equals(DocumentHeadingRoleDetector.detect(node.text())))
+                .map(DocumentNode::nodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElse("");
+        if (!isBlank(sourceByNumbering)) {
+            return sourceByNumbering;
+        }
+        String exact = structureContext.structureProfile().nodes().stream()
+                .filter(node -> normalizedRole.equals(normalizeRole(node.roleSuggestion())))
+                .filter(node -> DocumentHeadingRoleDetector.detect(node.text()).isBlank())
+                .map(DocumentNode::nodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElse("");
+        if (!isBlank(exact)) {
+            return exact;
+        }
+        return structureContext.structureProfile().nodes().stream()
+                .filter(node -> "BODY".equals(normalizeRole(node.roleSuggestion())))
+                .map(DocumentNode::nodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElse("");
+    }
+
+    private String styleSourceNodeKeyForRole(StructureMappingProfile mapping, String role) {
+        String exact = exactStyleSourceNodeKey(mapping, role);
+        if (!isBlank(exact)) {
+            return exact;
+        }
+        if (normalizeRole(role).startsWith("BODY_HEADING_LEVEL_")) {
+            return exactStyleSourceNodeKey(mapping, "BODY");
+        }
+        return "";
+    }
+
+    private String exactStyleSourceNodeKey(List<DraftNode> nodes, String role) {
+        if (nodes == null || nodes.isEmpty()) {
+            return "";
+        }
+        String normalizedRole = normalizeRole(role);
+        return nodes.stream()
+                .filter(node -> !isSyntheticDraftNode(node))
+                .filter(node -> normalizedRole.equals(normalizeRole(node.role())))
+                .map(DraftNode::templateNodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElse("");
+    }
+
+    private String headingStyleSourceNodeKeyByNumbering(List<DraftNode> nodes, String role) {
+        if (nodes == null || nodes.isEmpty()) {
+            return "";
+        }
+        return nodes.stream()
+                .filter(node -> !isSyntheticDraftNode(node))
+                .filter(node -> role.equals(DocumentHeadingRoleDetector.detect(firstNonBlank(node.content(), node.title()))))
+                .map(DraftNode::templateNodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElse("");
+    }
+
+    private boolean hasConflictingHeadingNumbering(List<DraftNode> nodes, String sourceNodeKey, String expectedRole) {
+        if (nodes == null || nodes.isEmpty() || isBlank(sourceNodeKey)) {
+            return false;
+        }
+        String detectedRole = nodes.stream()
+                .filter(node -> sourceNodeKey.equals(node.templateNodeKey()))
+                .map(node -> DocumentHeadingRoleDetector.detect(firstNonBlank(node.content(), node.title())))
+                .filter(role -> !role.isBlank())
+                .findFirst()
+                .orElse("");
+        return !isBlank(detectedRole) && !detectedRole.equals(expectedRole);
+    }
+
+    private String exactStyleSourceNodeKey(StructureMappingProfile mapping, String role) {
+        if (mapping == null || mapping.items() == null || mapping.items().isEmpty()) {
+            return "";
+        }
+        String normalizedRole = normalizeRole(role);
+        return mapping.items().stream()
+                .filter(item -> normalizedRole.equals(normalizeRole(item.role())))
+                .map(StructureMappingItem::nodeKey)
+                .filter(nodeKey -> !isBlank(nodeKey))
+                .findFirst()
+                .orElse("");
+    }
+
+    private boolean isBodyStructureRole(String role) {
+        String normalizedRole = normalizeRole(role);
+        return "BODY".equals(normalizedRole) || normalizedRole.startsWith("BODY_HEADING");
     }
 
     private boolean isDeletedDraftNode(DraftNode node) {
@@ -603,6 +1034,10 @@ public class DraftWordExportService {
 
     private boolean isSyntheticDraftNode(DraftNode node) {
         return node != null && node.metadata() != null && node.metadata().synthetic();
+    }
+
+    private boolean isOutlineSyntheticDraftNode(DraftNode node) {
+        return isSyntheticDraftNode(node) && node.templateNodeKey().startsWith("outline-");
     }
 
     private String insertionPositionForExport(String position) {
@@ -866,8 +1301,9 @@ public class DraftWordExportService {
             long templateVersionId,
             byte[] templateBytes,
             WordExportRequest request,
-            StructureMappingProfile mapping,
+            ExportStructureContext structureContext,
             List<DraftNode> draftNodes,
+            Map<String, TemplateStructureFormattingProfile> structureOverrides,
             String strategy
     ) {
     }

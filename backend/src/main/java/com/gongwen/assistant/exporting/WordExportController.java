@@ -1,12 +1,11 @@
 package com.gongwen.assistant.exporting;
 
 import com.gongwen.assistant.common.api.ApiResponse;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +18,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/exports")
+@PreAuthorize("hasAnyRole('DRAFTER', 'TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
 public class WordExportController {
     private static final MediaType DOCX_MEDIA_TYPE = MediaType.parseMediaType(
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -85,22 +85,5 @@ public class WordExportController {
                 .contentType(DOCX_MEDIA_TYPE)
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .body(result.content());
-    }
-
-    @ExceptionHandler(WordExportException.class)
-    public ResponseEntity<ApiResponse<Void>> handleWordExportException(WordExportException exception) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.error(exception.errorCode(), exception.getMessage()));
-    }
-
-    @ExceptionHandler(ExportRecordException.class)
-    public ResponseEntity<ApiResponse<Void>> handleExportRecordException(ExportRecordException exception) {
-        HttpStatus status = "EXPORT_RECORD_NOT_FOUND".equals(exception.errorCode())
-                ? HttpStatus.NOT_FOUND
-                : HttpStatus.BAD_REQUEST;
-        return ResponseEntity.status(status)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.error(exception.errorCode(), exception.getMessage()));
     }
 }

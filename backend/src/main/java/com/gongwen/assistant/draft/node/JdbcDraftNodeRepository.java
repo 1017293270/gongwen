@@ -124,6 +124,18 @@ public class JdbcDraftNodeRepository implements DraftNodeRepository {
     }
 
     @Override
+    public void deleteBodyStructureNodes(long draftId) {
+        jdbcTemplate.update("""
+                update draft_node
+                set status = 'DELETED',
+                    updated_at = now()
+                where draft_id = ?
+                  and (role = 'BODY' or role like 'BODY_HEADING_LEVEL_%')
+                  and status <> 'DELETED'
+                """, draftId);
+    }
+
+    @Override
     @Transactional
     public List<DraftNode> updateSortOrders(long draftId, Map<Long, Integer> sortOrdersByNodeId) {
         sortOrdersByNodeId.forEach((nodeId, sortOrder) -> jdbcTemplate.update("""

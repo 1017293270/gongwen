@@ -1,6 +1,7 @@
 package com.gongwen.assistant.ai;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 public record AiOutlineResponse(
@@ -15,8 +16,14 @@ public record AiOutlineResponse(
     }
 
     public AiOutlineResponse {
-        sections = List.copyOf(sections);
-        missingInformation = List.copyOf(missingInformation);
-        nodeSuggestions = nodeSuggestions == null ? List.of() : List.copyOf(nodeSuggestions);
+        sections = sections == null
+                ? List.of()
+                : sections.stream().filter(Objects::nonNull).toList();
+        missingInformation = missingInformation == null
+                ? List.of()
+                : missingInformation.stream().filter(Objects::nonNull).map(String::strip).filter(value -> !value.isBlank()).toList();
+        nodeSuggestions = nodeSuggestions == null
+                ? List.of()
+                : nodeSuggestions.stream().filter(Objects::nonNull).toList();
     }
 }

@@ -43,11 +43,13 @@ class AiOutlineServiceTest {
 
         assertThat(response.traceId()).isNotNull();
         assertThat(response.titleSuggestion()).isEqualTo("测试通知");
-        assertThat(response.sections()).hasSize(3);
+        assertThat(response.sections()).hasSize(6);
+        assertThat(response.sections()).extracting(AiOutlineSection::level)
+                .containsExactly(1, 2, 1, 2, 3, 1);
         assertThat(traceRepository.saved.status()).isEqualTo("SUCCESS");
         assertThat(traceRepository.saved.inputSummary()).contains("draftBlocks=3");
         assertThat(traceRepository.saved.inputSummary()).doesNotContain("会议材料");
-        assertThat(traceRepository.saved.outputSummary()).contains("sections=3");
+        assertThat(traceRepository.saved.outputSummary()).contains("sections=6", "sourceRefs=6");
     }
 
     @Test
@@ -117,11 +119,29 @@ class AiOutlineServiceTest {
     }
 
     @Test
-    void reportsInvalidResponseWhenParsedOutlineHasNoSections() {
+    void fallsBackToDefaultOutlineWhenParsedOutlineHasNoSections() {
         DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
                 new DraftBlockUpdateRequest("TITLE", "测试通知", 10)
         ));
         AiOutlineService service = newService(new EmptySectionsModelAdapter());
+
+        AiOutlineResponse response = service.generateOutline(draft.id(), new AiOutlineRequest(""));
+
+        assertThat(response.sections()).hasSize(6);
+        assertThat(response.sections()).extracting(AiOutlineSection::level)
+                .containsExactly(1, 2, 1, 2, 1, 2);
+        assertThat(response.missingInformation())
+                .contains("AI 未返回可用提纲结构，已按文种生成默认结构；请补充材料或要求后再调整。");
+        assertThat(traceRepository.saved.status()).isEqualTo("SUCCESS");
+        assertThat(traceRepository.saved.outputSummary()).contains("sections=6");
+    }
+
+    @Test
+    void rejectsOutlineWithJumpedSectionLevel() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10)
+        ));
+        AiOutlineService service = newService(new JumpedLevelModelAdapter());
 
         AiOutlineException exception = catchThrowableOfType(
                 () -> service.generateOutline(draft.id(), new AiOutlineRequest("")),
@@ -129,10 +149,8 @@ class AiOutlineServiceTest {
         );
 
         assertThat(exception.errorCode()).isEqualTo("AI_RESPONSE_INVALID");
-        assertThat(exception).hasMessage("AI 返回结构无效，请重试");
         assertThat(traceRepository.saved.status()).isEqualTo("FAILED");
-        assertThat(traceRepository.saved.errorCode()).isEqualTo("AI_RESPONSE_INVALID");
-        assertThat(traceRepository.saved.errorMessage()).isEqualTo("sections are required");
+        assertThat(traceRepository.saved.errorMessage()).contains("section level jumps");
     }
 
     @Test
@@ -206,6 +224,31 @@ class AiOutlineServiceTest {
         @Override
         public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
             return new AiOutlineResponse(UUID.randomUUID(), "测试通知", List.of(), List.of());
+        }
+    }
+
+    private static final class JumpedLevelModelAdapter implements ModelAdapter {
+        @Override
+        public String provider() {
+            return "deepseek";
+        }
+
+        @Override
+        public String modelName() {
+            return "deepseek-v4-flash";
+        }
+
+        @Override
+        public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
+            return new AiOutlineResponse(
+                    UUID.randomUUID(),
+                    "测试通知",
+                    List.of(
+                            new AiOutlineSection("一、工作情况", List.of("概述工作"), 1, List.of()),
+                            new AiOutlineSection("1. 直接跳到三级", List.of("跳级"), 3, List.of())
+                    ),
+                    List.of()
+            );
         }
     }
 

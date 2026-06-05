@@ -17,5 +17,9 @@ public interface AiParagraphCandidateRepository {
 
     Optional<AiParagraphCandidate> markAccepted(long candidateId, UUID paragraphTraceId, long acceptedBy);
 
+    default void discardUnacceptedByDraftId(long draftId, String errorCode, String errorMessage) {
+        throw new UnsupportedOperationException("discardUnacceptedByDraftId is not implemented");
+    }
+
     void delete(long candidateId);
 }

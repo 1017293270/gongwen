@@ -54,6 +54,13 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             "points", "items", "keyPoints", "children", "details", "content", "summary",
             "requirements", "要点", "要点列表", "写作要点", "主要内容", "内容", "说明"
     };
+    private static final String[] LEVEL_FIELDS = {
+            "level", "headingLevel", "sectionLevel", "titleLevel", "层级", "标题层级", "章节层级", "级别"
+    };
+    private static final String[] SOURCE_REF_FIELDS = {
+            "sourceRefs", "sourceReferences", "sources", "references", "materialRefs", "referenceFiles",
+            "参考材料", "材料引用", "来源", "依据材料", "参考文件"
+    };
     private static final String[] MISSING_FIELDS = {
             "missingInformation", "missing", "missing_information", "missingInfo", "missingFields",
             "缺失信息", "缺失信息提示", "待补充信息", "补充信息", "需要补充的信息"
@@ -605,16 +612,19 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             if (!parsed.isEmpty()) {
                 return parsed.getFirst();
             }
-            return new AiOutlineSection(node.asText(), List.of());
+            String heading = node.asText();
+            return new AiOutlineSection(heading, List.of(), inferOutlineLevel(heading), List.of());
         }
         if (!node.isObject()) {
             return null;
         }
         String heading = firstText(node, HEADING_FIELDS);
+        int level = parseOutlineLevel(firstExisting(node, LEVEL_FIELDS), heading);
+        List<String> sourceRefs = parseTextList(firstExisting(node, SOURCE_REF_FIELDS));
         List<String> points = parseTextList(firstExisting(node, POINT_FIELDS));
         if (heading.isBlank() && !points.isEmpty()) {
             heading = sectionFallbackHeading(index);
-            return new AiOutlineSection(heading, points);
+            return new AiOutlineSection(heading, points, parseOutlineLevel(firstExisting(node, LEVEL_FIELDS), heading), sourceRefs);
         }
         if (heading.isBlank()) {
             Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
@@ -629,7 +639,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
                 }
             }
         }
-        return heading.isBlank() ? null : new AiOutlineSection(heading, points);
+        return heading.isBlank() ? null : new AiOutlineSection(heading, points, level, sourceRefs);
     }
 
     private AiOutlineSection parseMappedSection(String heading, JsonNode value, int index) {
@@ -637,23 +647,29 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         if (value != null && value.isObject()) {
             String explicitHeading = firstText(value, HEADING_FIELDS);
             List<String> explicitPoints = parseTextList(firstExisting(value, POINT_FIELDS));
+            int explicitLevel = parseOutlineLevel(firstExisting(value, LEVEL_FIELDS), firstNonBlank(explicitHeading, normalizedHeading));
+            List<String> explicitSourceRefs = parseTextList(firstExisting(value, SOURCE_REF_FIELDS));
             if (!explicitHeading.isBlank() || !explicitPoints.isEmpty()) {
                 return new AiOutlineSection(
                         firstNonBlank(explicitHeading, normalizedHeading, sectionFallbackHeading(index)),
-                        explicitPoints
+                        explicitPoints,
+                        explicitLevel,
+                        explicitSourceRefs
                 );
             }
             AiOutlineSection parsed = parseSectionNode(value, index);
             if (parsed != null) {
                 String finalHeading = parsed.heading().isBlank() ? normalizedHeading : parsed.heading();
-                return new AiOutlineSection(finalHeading, parsed.points());
+                return new AiOutlineSection(finalHeading, parsed.points(), parsed.level(), parsed.sourceRefs());
             }
         }
         List<String> points = parseTextList(value);
         if (normalizedHeading.isBlank() && !points.isEmpty()) {
             normalizedHeading = sectionFallbackHeading(index);
         }
-        return normalizedHeading.isBlank() ? null : new AiOutlineSection(normalizedHeading, points);
+        return normalizedHeading.isBlank()
+                ? null
+                : new AiOutlineSection(normalizedHeading, points, inferOutlineLevel(normalizedHeading), List.of());
     }
 
     private List<AiOutlineSection> parseOutlineText(String value) {
@@ -670,7 +686,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             }
             if (isOutlineHeadingLine(line)) {
                 if (!currentHeading.isBlank()) {
-                    sections.add(new AiOutlineSection(currentHeading, currentPoints));
+                    sections.add(new AiOutlineSection(currentHeading, currentPoints, inferOutlineLevel(currentHeading), List.of()));
                 }
                 int separatorIndex = firstColonIndex(line);
                 currentHeading = separatorIndex > 0 ? line.substring(0, separatorIndex).strip() : line;
@@ -683,7 +699,7 @@ public class DeepSeekModelAdapter implements ModelAdapter {
             }
         }
         if (!currentHeading.isBlank()) {
-            sections.add(new AiOutlineSection(currentHeading, currentPoints));
+            sections.add(new AiOutlineSection(currentHeading, currentPoints, inferOutlineLevel(currentHeading), List.of()));
         }
         return sections;
     }
@@ -699,9 +715,46 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         }
         List<String> points = splitTextItems(normalized);
         if (points.size() > 1) {
-            return List.of(new AiOutlineSection(sectionFallbackHeading(0), points));
+            return List.of(new AiOutlineSection(sectionFallbackHeading(0), points, 1, List.of()));
         }
         return List.of();
+    }
+
+    private int parseOutlineLevel(JsonNode levelNode, String heading) {
+        int level = 0;
+        if (levelNode != null && !levelNode.isMissingNode() && !levelNode.isNull()) {
+            if (levelNode.isInt() || levelNode.isLong()) {
+                level = levelNode.asInt();
+            } else {
+                String text = levelNode.asText("");
+                if (!text.isBlank()) {
+                    String compact = text.replaceAll("\\s+", "");
+                    if (compact.matches(".*[1一壹].*")) {
+                        level = 1;
+                    } else if (compact.matches(".*[2二贰两].*")) {
+                        level = 2;
+                    } else if (compact.matches(".*[3三叁].*")) {
+                        level = 3;
+                    }
+                }
+            }
+        }
+        return level >= 1 && level <= 3 ? level : inferOutlineLevel(heading);
+    }
+
+    private int inferOutlineLevel(String heading) {
+        String normalized = heading == null ? "" : heading.strip();
+        if (normalized.matches("^[一二三四五六七八九十]+[、.．].+")
+                || normalized.matches("^第[一二三四五六七八九十\\d]+[章节部分].+")) {
+            return 1;
+        }
+        if (normalized.matches("^[（(][一二三四五六七八九十]+[）)].+")) {
+            return 2;
+        }
+        if (normalized.matches("^\\d+[、.．)）].+")) {
+            return 3;
+        }
+        return 0;
     }
 
     private boolean isOutlineHeadingLine(String line) {
@@ -862,6 +915,8 @@ public class DeepSeekModelAdapter implements ModelAdapter {
         return field == null
                 || matchesAny(field, TITLE_FIELDS)
                 || matchesAny(field, MISSING_FIELDS)
+                || matchesAny(field, LEVEL_FIELDS)
+                || matchesAny(field, SOURCE_REF_FIELDS)
                 || field.equalsIgnoreCase("traceId")
                 || field.equalsIgnoreCase("id")
                 || field.equalsIgnoreCase("createdAt")
@@ -967,12 +1022,23 @@ public class DeepSeekModelAdapter implements ModelAdapter {
 
     private String outlineUserPrompt(OutlinePrompt prompt) {
         return """
-                请基于以下信息生成公文提纲，返回 JSON：
+                请基于以下信息生成可直接套版的全文公文正文结构，返回 JSON：
                 {
                   "titleSuggestion": "标题建议",
-                  "sections": [{"heading": "一、...", "points": ["要点"]}],
+                  "sections": [
+                    {"level": 1, "heading": "一、...", "points": ["要点"], "sourceRefs": ["materialId=1: 文件名"]},
+                    {"level": 2, "heading": "（一）...", "points": ["要点"], "sourceRefs": []},
+                    {"level": 3, "heading": "1. ...", "points": ["要点"], "sourceRefs": []}
+                  ],
                   "missingInformation": ["缺失信息"]
                 }
+                要求：
+                1. sections 必须覆盖全文正文结构，不能只返回一级标题；按公文写作需要给出一级、二级、三级标题。
+                2. sections 使用扁平有序数组，不要嵌套 children；level 只允许 1、2、3。
+                3. AI 只生成标题结构和写作要点，不要输出字体、字号、缩进、行距等格式指令。
+                4. 可以参考材料摘要；sourceRefs 只写材料 id、文件名或摘要编号，不要复制材料全文。
+                5. 不要编造材料中不存在的事实；信息不足时写入 missingInformation。
+                6. 即使字段摘要、材料摘要或补充要求为空，也必须按文种返回不少于 3 个一级标题和必要的二级标题，sections 绝不能是空数组。
                 文种：%s
                 标题：%s
                 字段摘要：%s

@@ -28,11 +28,12 @@ MVP 采用私有化单单位 Web 应用。长期预留 SaaS、多租户、审核
 进入项目后优先阅读：
 
 1. `AGENTS.md`
-2. `DESIGN.md`
-3. `docs/superpowers/specs/2026-05-25-gongwen-assistant-design.md`
-4. `docs/PROJECT_TASKS.md`
-5. 当前任务相关的 issue、task 或计划文档
-6. 代码中的 README、模块说明和测试
+2. `docs/CONTEXT_LOADING.md`
+3. `DESIGN.md`
+4. `docs/superpowers/specs/2026-05-25-gongwen-assistant-design.md`
+5. `docs/PROJECT_TASKS.md`
+6. 当前任务相关的 issue、task 或计划文档
+7. 代码中的 README、模块说明和测试
 
 如果实现与文档不一致，先判断是代码落后还是文档落后。修复后必须同步更新文档。
 
@@ -349,6 +350,19 @@ Agent: 后端
 - Agent P10E-Roundtrip：T27 严格对应修正已完成；后续维护 `docs/DOCX_ROUNDTRIP_TEST_CASES.md`、`DocxCompleteStructurePipelineTest` 和 `WorkbenchPreview.test.tsx`，确保原稿、工作台结构化预览、未编辑导出三者不丢节点、不乱序。
 - 集成 Agent：P10E T27 已完成；后续新阶段仍先查 `git status --short --branch`，确认没有覆盖用户未提交改动；对齐 API 字段后跑 focused 后端测试、前端 `npm run build`，必要时再跑更广测试。DOCX 链路相关改动至少运行 `DocxCompleteStructurePipelineTest`、`WorkbenchPreview.test.tsx` 和 `docs/DOCX_ROUNDTRIP_TEST_CASES.md` 中的对应用例。
 
+## 12.2 上下文加载规范
+
+本项目采用分层上下文加载，详细方案见 `docs/CONTEXT_LOADING.md`。默认不要把所有历史文档、计划、测试输出和大组件一次性塞进上下文。
+
+每次写代码前必须先完成轻量上下文检查：
+
+1. 运行或查看 `git status --short --branch`，确认未提交改动和用户改动。
+2. 读取 `AGENTS.md`、`docs/CONTEXT_LOADING.md`，并按任务类型读取 `DESIGN.md`、`docs/PROJECT_TASKS.md` 或对应专题规格的相关章节。
+3. 只加载当前任务相关源码、类型、API client、测试和一个同类实现示例。
+4. 大文件按需切片读取，尤其是 `frontend/src/App.tsx`、`docs/superpowers/plans/**`、长测试输出、DOCX/PDF 解析内容和数据库大表查询结果。
+5. 如果规格、代码、用户当前要求冲突，先明确冲突，不要静默猜测或扩大实现范围。
+6. 写完后按风险运行 focused tests 或构建，并说明未验证项。
+
 ## 13. 文档更新规则
 
 每次开发完成后必须检查是否需要更新本文件。
@@ -373,11 +387,17 @@ Agent: 后端
 
 当前状态：P8 基础质检已完成首版可见闭环，P8B 模板适配质检已接入最小闭环，P9 账号/部门/认证底座已完成第三档首版，P10 模板管理已完成首版文种文件夹与模板卡片流，P10B 已从“能力矩阵展示”转向“结构维度闭环”并补上预览/质检/导出共享的 effective formatting 合同，P10C 已开始把工作台正文从草稿块视图升级为结构节点视图，P11 已接入草稿绑定模板后的 Word 导出入口、导出前结构阻断、导出记录列表、导出详情、失败重试和历史文件下载；基础质检保持独立入口，不再作为 Word 导出的强制前置动作。仓库包含 Spring Boot 后端骨架、React 前端骨架、PostgreSQL Docker Compose、本项目 `DESIGN.md` token 落地、基础健康检查、`.docx` 模板占位符解析、Word 模板填充导出、部门/账号/角色表、模板/字段/版本/profile/映射/规则/结构映射/导出记录/渲染预览表、文种/草稿/草稿块/草稿节点数据表、材料表、AI trace 表、AI 段落候选表、AI 配置持久化表、质量检查结果表，以及登录页、会话恢复、系统管理员部门树管理、账号管理、文种 CRUD 管理、总览入口、与模板管理层级一致的草稿文种文件夹和草稿卡片流、文种内新建草稿、从草稿卡片进入工作台、工作台真实草稿加载、模板版本绑定、编辑、预览、保存、材料上传、材料列表、AI 提纲生成、基于提纲的单段和全局正文生成、节点感知 AI 后端合同、右栏节点 AI 前端动作和节点元数据请求路由、DraftNode 格式覆盖后端合同、右栏节点级格式面板、运行时 Mock / DeepSeek 切换、DeepSeek 连接测试、选中单个正文段落后的 AI 局部建议和采纳替换能力、右栏基础质检面板、右栏当前草稿 Word 导出、右栏草稿级真实预览状态与自动/手动刷新入口、导出记录页、导出消费结构映射与 DraftNode 正文/格式合并结果、模板管理文种卡片、模板卡片、新增模板、上传新版本、模板解析工作台、profile/structure-profile/document-kind 展示、结构映射草稿/发布后端 API、结构节点角色选择和映射发布 UI、DraftNode 初始化/读取/保存后端 API、工作台 DraftNode 结构树、节点状态标记和中间节点编辑 UI、模板版本渲染预览状态和页面下载 API、工作台类 Word 预览按所选模板结构维度渲染、后端基于模板结构默认值与覆盖项合并出的 effective formatting 解析、无占位符参考/正式文档原 DOCX 节点原位替换导出，以及前端 `WorkbenchNode` 派生层将正文小标题和正文内容分开展示、选择和编辑。PostgreSQL 曾通过 Docker Compose 启动并健康；仓库 Flyway 迁移已到 V21。当前本机可用 JDK 21 路径为 `C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot`；`scripts/backend-test-focused.ps1` 指向的 `.tools\gradle-8.10.2\bin\gradle.bat` 不存在，后端 focused 验证临时使用 `backend\gradlew.bat` 和默认 Gradle 缓存。
 
-B3 lightweight 已完成后端候选正文生成入口：`ModelAdapter.generateParagraphCandidate(ParagraphPrompt)` 默认复用 `generateParagraph`；`POST /api/drafts/{draftId}/ai/paragraph-candidates/{candidateId}/retry` 会校验草稿访问和候选归属，基于候选标题、要点、指令、目标节点上下文和材料生成单个持久化候选，写入 `READY` 或 `ERROR` 状态，但不写 `DraftNode` 或 `DraftBlock`，采纳仍由既有 accept API 负责。DeepSeek 真实 SSE 流式输出尚未接入。
+B3 lightweight 已完成后端候选正文生成入口：`ModelAdapter.generateParagraphCandidate(ParagraphPrompt)` 默认复用 `generateParagraph`，DeepSeek 适配器单独实现正文候选 prompt；`POST /api/drafts/{draftId}/ai/paragraph-candidates/{candidateId}/retry` 会校验草稿访问和候选归属，基于候选标题、要点、指令、目标节点上下文、材料和目标格式摘要生成单个持久化候选，写入 `READY` 或 `ERROR` 状态，但不写 `DraftNode` 或 `DraftBlock`，采纳仍由既有 accept API 负责。
 
-B4 lightweight 已完成后端候选批处理任务 SSE 包装：`POST /api/drafts/{draftId}/ai/paragraph-candidates/jobs` 基于现有批量创建生成内存 job，`GET /jobs/{jobId}/events` 通过当前 `retry` 流同步发出 `batch_started`、`candidate_started`、`candidate_ready`/`candidate_error`、`batch_done`/`batch_cancelled` 事件，`POST /jobs/{jobId}/cancel` 标记内存取消并尽量把 `PENDING`/`RETRYING` 候选更新为 `CANCELLED`；真实 DeepSeek token 流式输出仍 deferred。
+B4 lightweight 已完成后端候选批处理任务 SSE 包装：`POST /api/drafts/{draftId}/ai/paragraph-candidates/jobs` 基于现有批量创建生成内存 job，`GET /jobs/{jobId}/events` 通过 `retryStreaming` 发出 `batch_started`、`candidate_started`、`candidate_delta`、`candidate_ready`/`candidate_error`、`batch_done`/`batch_cancelled` 事件，`POST /jobs/{jobId}/cancel` 标记内存取消并尽量把 `PENDING`/`RETRYING` 候选更新为 `CANCELLED`；DeepSeek 正文候选已走纯文本流式输出。
 
-B5/B6 lightweight 已完成右栏正文候选画布与工作台集成：前端新增 `ParagraphCandidateCanvas`，按提纲批量生成正文候选，候选在右栏展示并支持生成中、失败、停止、重试、编辑、丢弃、逐段确认和批量确认；确认前不替换中间 `DraftNode`，确认后写回目标节点和兼容 `DraftBlock`，并标记真实预览待刷新。候选持久化迁移使用 `V20__ai_paragraph_candidate.sql`，候选节点同草稿约束后移到 `V21__paragraph_candidate_node_draft_constraint.sql`，避免修改已应用的 V20 引发 Flyway checksum mismatch。
+B5/B6 lightweight 已完成右栏正文候选画布与工作台集成：前端新增 `ParagraphCandidateCanvas`，按提纲批量生成正文候选，候选在右栏展示并支持生成中、失败、停止、重试、编辑、丢弃、逐段确认和批量确认；候选正文面向 `BODY` DraftNode，只保存标题节点下的正文内容，不重复输出小标题，确认前不替换中间 `DraftNode`，确认后写回目标节点和兼容 `DraftBlock`，并标记真实预览待刷新。候选持久化迁移使用 `V20__ai_paragraph_candidate.sql`，候选节点同草稿约束后移到 `V21__paragraph_candidate_node_draft_constraint.sql`，避免修改已应用的 V20 引发 Flyway checksum mismatch。
+
+Outline-v2 可套版正文结构已落地：提纲 AI 合同升级为扁平有序 `sections(level, heading, points, sourceRefs)`，后端校验 1-3 级标题、至少一个一级标题和层级跳跃，缺 level 时按常见中文编号兜底推断；提纲生成只预览不直接改正文，`POST /api/drafts/{draftId}/nodes/apply-outline` 只替换正文区 DraftNode，保留标题、主送、附件、落款、日期、材料和模板绑定，并返回稳定 `sectionTargets(bodyNodeId)`。模板绑定/初始化可用 `bodyContentMode=TEMPLATE_HEADINGS_ONLY` 只展示模板示例标题、正文置空；应用新提纲会失效未确认正文候选，正文候选生成在前端要求先应用提纲并强绑定 `sectionTargets.bodyNodeId`，AI 输出不携带格式，格式仍由模板结构映射和 effective formatting 负责。DeepSeek 返回空 `sections` 时，服务层按文种生成默认正文结构并在缺失信息中提示兜底，不再让前端卡在“结构无效”。应用提纲时旧正文/正文标题节点必须软删除为 `DELETED`，新 synthetic 节点必须携带原 DOCX 锚点和样式来源；真实预览与 Word 导出通过同一原位替换链路先定位旧正文区原始段落、插入新节点，再移除旧模板正文区，避免回落到原模板内容或残留示例标题/正文。
+
+Outline-v2 格式来源规则：正文标题层级统一按原文编号识别，`一、`/`二、` 为 `BODY_HEADING_LEVEL_1`，`（一）`/`（二）` 为 `BODY_HEADING_LEVEL_2`，`1.`/`1、` 为 `BODY_HEADING_LEVEL_3`。新 synthetic 标题节点优先按原模板节点文本编号找样式源；缺少对应 `BODY_HEADING_LEVEL_1/2/3` 时，不得跨级借用其他标题层级格式，必须退到 `BODY` 或系统默认格式并提示格式依据不足。历史节点 metadata 若已保存跨级 `styleSourceNodeKey`，工作台节点格式解析和 Word 导出都必须在读取时按原文编号纠偏，避免同一草稿在预览与导出间反复出现缩进/对齐漂移。
+
+Outline-v2 DOCX 插入规则：真实预览和 Word 导出插入 synthetic 提纲/正文节点时，只允许使用解析出的 formatting 显式写回 alignment、首行缩进、段前段后、行距和字体；不得继承原 DOCX 段落中未解析的自动编号 `numPr`、左缩进或悬挂缩进 `ind`。这些隐藏属性必须在复制段落样式时清理，否则三级标题等编号段落会出现额外缩进或位置漂移。
 
 P10D DOCX 原貌预览与结构化工作台已完成 T0 契约冻结。冻结内容见 `docs/superpowers/plans/2026-05-30-docx-structure-workbench.md`：下一迁移号从 `V12` 开始，后续 T3/T4/T6/T8/T14 分别预留 `V12`/`V13`/`V14`/`V15`/`V16`；共享枚举、API 边界、Agent 文件边界和进度更新规则已固定；本机 `18081` 只视为手动联调后端，不作为自动测试前置条件。
 
@@ -546,6 +566,7 @@ AI 逐段正文生成当前约定：
 - 生成结果默认保存为 `BODY_PARAGRAPH` 草稿块；如果请求带目标正文 `nodeId`，后端会同时写入对应 `DraftNode` 并标记 `AI_GENERATED`，但不会改变节点角色。
 - 段落生成不能直接写入 `TITLE`、`RECIPIENT`、`SIGNATURE`、`DATE` 等受保护结构槽位，防止 AI 隐式改写标题、主送、落款或日期。
 - 段落生成会要求并兜底确保正文以提纲章节标题开头，避免同一篇正文中部分段落有标题、部分段落无标题。
+- 正文候选生成与直接段落生成不同：候选按结构化工作台的“标题节点 + 正文节点”模型生成，只输出 `BODY` 节点正文内容，不重复小标题；prompt 会携带目标节点上下文、READY 材料摘要和解析出的 effective formatting 摘要，返回只有标题或空正文时标记候选 `ERROR`。
 - `PromptBuilder` 集中构建 `paragraph-v1` 输入摘要，不在前端或 controller 散落 prompt。
 - `ai_generation_trace` 使用 `PARAGRAPH` task type 记录 provider、model、状态、prompt 版本、输入摘要、输出摘要、错误摘要和耗时。
 - trace 不保存完整正文、完整材料提取文本或完整 prompt。

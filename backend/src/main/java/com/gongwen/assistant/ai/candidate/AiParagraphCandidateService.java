@@ -20,6 +20,8 @@ import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialRepository;
 import com.gongwen.assistant.security.CurrentUser;
 import com.gongwen.assistant.security.CurrentUserProvider;
+import com.gongwen.assistant.template.profile.TemplateLineSpacingProfile;
+import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -296,13 +298,10 @@ public class AiParagraphCandidateService {
                 )
                 .orElseThrow(() -> targetMissing(targetNode.id()));
         updatePairedHeadingIfNeeded(draft.id(), targetNode, candidate.heading(), nodeStatus);
-        DraftDetailDto updatedDraft = draft;
-        if (candidate.targetNodeId() == null) {
-            updatedDraft = draftService.updateBlocks(
-                    draft.id(),
-                    new UpdateDraftBlocksRequest(upsertParagraphBlock(draft, acceptedContent, updatedNode.sortOrder()))
-            );
-        }
+        DraftDetailDto updatedDraft = draftService.updateBlocks(
+                draft.id(),
+                new UpdateDraftBlocksRequest(upsertParagraphBlock(draft, acceptedContent, updatedNode.sortOrder()))
+        );
         AiParagraphCandidate accepted = candidateRepository.markAccepted(
                         candidate.id(),
                         candidate.paragraphTraceId() == null ? UUID.randomUUID() : candidate.paragraphTraceId(),
@@ -312,7 +311,7 @@ public class AiParagraphCandidateService {
         return new AiParagraphCandidateAcceptResponse(
                 AiParagraphCandidateDto.from(accepted),
                 updatedDraft,
-                hydratedNodeDto(draft, updatedNode)
+                hydratedNodeDto(updatedDraft, updatedNode)
         );
     }
 
@@ -405,7 +404,40 @@ public class AiParagraphCandidateService {
                 nodeContext.nodeContext()
         );
         List<MaterialPromptSummary> materials = materialRepository.findReadyTextSummariesByDraftId(draft.id());
-        return promptBuilder.buildParagraphPrompt(draft, materials, request, nodeContext);
+        return promptBuilder.buildParagraphPrompt(draft, materials, request, nodeContext, targetFormattingSummary(draft, targetNode));
+    }
+
+    private String targetFormattingSummary(DraftDetailDto draft, DraftNode targetNode) {
+        if (draft == null || targetNode == null) {
+            return "";
+        }
+        Map<Long, DraftNodeFormattingResolver.ResolvedDraftNodeFormatting> formattingByNodeId =
+                formattingResolver.resolve(draft.templateVersionId(), List.of(targetNode));
+        DraftNodeFormattingResolver.ResolvedDraftNodeFormatting resolved = formattingByNodeId.get(targetNode.id());
+        TemplateStructureFormattingProfile formatting = resolved == null ? null : resolved.effectiveFormatting();
+        if (formatting == null) {
+            return "targetRole=%s;slot=%s;templateNode=%s".formatted(
+                    targetNode.role(),
+                    targetNode.slotKey(),
+                    targetNode.templateNodeKey()
+            );
+        }
+        TemplateLineSpacingProfile lineSpacing = formatting.lineSpacing();
+        return "targetRole=%s;slot=%s;templateNode=%s;font=%s;eastAsiaFont=%s;latinFont=%s;fontSizeHalfPoints=%s;bold=%s;alignment=%s;firstLineIndentTwip=%s;lineSpacing=%s;spacingBeforeTwip=%s;spacingAfterTwip=%s".formatted(
+                targetNode.role(),
+                targetNode.slotKey(),
+                targetNode.templateNodeKey(),
+                blankToEmpty(formatting.fontFamily()),
+                blankToEmpty(formatting.eastAsiaFontFamily()),
+                blankToEmpty(formatting.latinFontFamily()),
+                value(formatting.fontSizeHalfPoints()),
+                value(formatting.bold()),
+                blankToEmpty(formatting.alignment()),
+                value(formatting.indentationFirstLine()),
+                lineSpacingSummary(lineSpacing),
+                value(formatting.spacingBefore()),
+                value(formatting.spacingAfter())
+        );
     }
 
     private AiParagraphCandidate ownedCandidate(long draftId, long candidateId) {
@@ -645,15 +677,23 @@ public class AiParagraphCandidateService {
                 || value == ',';
     }
 
-    private boolean startsWithPunctuation(String value) {
-        return value.startsWith(":")
-                || value.startsWith(",")
-                || value.startsWith(";")
-                || value.startsWith("!")
-                || value.startsWith("?")
-                || value.startsWith(".")
-                || value.startsWith(")")
-                || value.startsWith("]");
+    private String lineSpacingSummary(TemplateLineSpacingProfile lineSpacing) {
+        if (lineSpacing == null) {
+            return "";
+        }
+        return "%s:%s:%s".formatted(
+                blankToEmpty(lineSpacing.mode()),
+                value(lineSpacing.valueTwips()),
+                value(lineSpacing.multipleHundred())
+        );
+    }
+
+    private String blankToEmpty(String value) {
+        return value == null ? "" : value.strip();
+    }
+
+    private String value(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     private String firstNonBlank(String first, String second) {

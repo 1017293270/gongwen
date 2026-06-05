@@ -12,7 +12,11 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -33,7 +37,11 @@ class ParagraphCandidateJobServiceTest {
         AiParagraphCandidateDto pending = candidateDto(draft.id(), 11L, "PENDING", "");
         AiParagraphCandidateDto ready = candidateDto(draft.id(), 11L, "READY", "generated");
         when(candidateService.createBatch(draft.id(), batchRequest())).thenReturn(List.of(pending));
-        when(candidateService.retry(draft.id(), 11L)).thenReturn(ready);
+        when(candidateService.retryStreaming(eq(draft.id()), eq(11L), any())).thenAnswer(invocation -> {
+            Consumer<String> onDelta = invocation.getArgument(2);
+            onDelta.accept("generated");
+            return ready;
+        });
 
         ParagraphCandidateJobResponse job = service.createJob(draft.id(), batchRequest());
         CapturingEventSender sender = new CapturingEventSender();

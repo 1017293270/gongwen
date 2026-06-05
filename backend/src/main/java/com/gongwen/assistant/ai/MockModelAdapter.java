@@ -15,15 +15,21 @@ public class MockModelAdapter implements ModelAdapter {
 
     @Override
     public String modelName() {
-        return "mock-outline-v1";
+        return "mock-outline-v2";
     }
 
     @Override
     public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
         List<AiOutlineSection> sections = new ArrayList<>();
-        sections.add(new AiOutlineSection("一、背景与依据", List.of("概括发文背景", "结合材料提炼主要依据")));
-        sections.add(new AiOutlineSection("二、主要事项", List.of("明确工作安排", "说明责任分工和时间要求")));
-        sections.add(new AiOutlineSection("三、执行要求", List.of("提出落实要求", "补充报送或反馈方式")));
+        List<String> sourceRefs = prompt.materialSummaries().stream()
+                .map(summary -> summary.split(";summary=", 2)[0])
+                .toList();
+        sections.add(new AiOutlineSection("一、背景与依据", List.of("概括发文背景", "结合材料提炼主要依据"), 1, sourceRefs));
+        sections.add(new AiOutlineSection("（一）政策依据", List.of("梳理上级部署和制度要求"), 2, sourceRefs));
+        sections.add(new AiOutlineSection("二、主要事项", List.of("明确工作安排", "说明责任分工和时间要求"), 1, sourceRefs));
+        sections.add(new AiOutlineSection("（一）重点任务", List.of("列明具体任务和推进路径"), 2, sourceRefs));
+        sections.add(new AiOutlineSection("1. 责任分工", List.of("细化牵头单位和协同要求"), 3, sourceRefs));
+        sections.add(new AiOutlineSection("三、执行要求", List.of("提出落实要求", "补充报送或反馈方式"), 1, sourceRefs));
 
         List<String> missing = new ArrayList<>();
         if (isBlankField(prompt, "RECIPIENT")) {

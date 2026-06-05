@@ -8,6 +8,7 @@ import type {
   AiParagraphCandidateAcceptResponse,
   AiParagraphCandidateBatchAcceptResponse,
   AiOutlineSection,
+  ApplyOutlineResponse,
   AiProviderSettings,
   AiProviderSettingsUpdate,
   AiProviderStatus,
@@ -338,10 +339,10 @@ export function saveDraftBlocks(draftId: number, blocks: DraftBlockUpdate[]) {
   });
 }
 
-export function initializeDraftNodes(draftId: number) {
+export function initializeDraftNodes(draftId: number, bodyContentMode = 'TEMPLATE_HEADINGS_ONLY') {
   return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes/initialize`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ bodyContentMode }),
   });
 }
 
@@ -368,6 +369,16 @@ export function insertDraftNode(
   request: { role: string; anchorNodeId: number | null; position: string },
 ) {
   return requestJson<DraftNode[]>(`/api/drafts/${draftId}/nodes`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export function applyDraftOutline(
+  draftId: number,
+  request: { outlineTraceId: string | null; titleSuggestion: string; sections: AiOutlineSection[] },
+) {
+  return requestJson<ApplyOutlineResponse>(`/api/drafts/${draftId}/nodes/apply-outline`, {
     method: 'POST',
     body: JSON.stringify(request),
   });

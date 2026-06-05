@@ -64,7 +64,9 @@ class DeepSeekModelAdapterParsingTest {
                   "正文结构": {
                     "章节列表": [
                       {
+                        "层级": 1,
                         "章节标题": "一、工作开展情况",
+                        "参考材料": ["meeting.docx"],
                         "写作要点": [
                           {"内容": "概述年度重点任务"},
                           {"内容": "说明关键成效"}
@@ -83,6 +85,8 @@ class DeepSeekModelAdapterParsingTest {
         assertThat(response.titleSuggestion()).isEqualTo("关于做好年度述职工作的报告");
         assertThat(response.sections()).hasSize(2);
         assertThat(response.sections().getFirst().heading()).isEqualTo("一、工作开展情况");
+        assertThat(response.sections().getFirst().level()).isEqualTo(1);
+        assertThat(response.sections().getFirst().sourceRefs()).containsExactly("meeting.docx");
         assertThat(response.sections().getFirst().points()).containsExactly("概述年度重点任务", "说明关键成效");
         assertThat(response.sections().get(1).points()).containsExactly("明确改进方向", "提出落实举措");
         assertThat(response.missingInformation()).containsExactly("具体时间", "数据口径");

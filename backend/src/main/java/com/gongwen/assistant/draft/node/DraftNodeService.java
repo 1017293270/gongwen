@@ -1,5 +1,9 @@
 package com.gongwen.assistant.draft.node;
 
+import com.gongwen.assistant.ai.AiOutlineSection;
+import com.gongwen.assistant.ai.candidate.AiParagraphCandidate;
+import com.gongwen.assistant.ai.candidate.AiParagraphCandidateRepository;
+import com.gongwen.assistant.documentstructure.DocumentHeadingRoleDetector;
 import com.gongwen.assistant.documentstructure.DocumentNode;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
@@ -11,6 +15,7 @@ import com.gongwen.assistant.draft.DraftDetailDto;
 import com.gongwen.assistant.draft.DraftService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -60,6 +66,7 @@ public class DraftNodeService {
     private final StructureMappingRepository mappingRepository;
     private final DocumentStructureProfileRepository structureProfileRepository;
     private final DraftNodeFormattingResolver formattingResolver;
+    private final AiParagraphCandidateRepository candidateRepository;
 
     @Autowired
     public DraftNodeService(
@@ -67,16 +74,39 @@ public class DraftNodeService {
             DraftNodeRepository draftNodeRepository,
             StructureMappingRepository mappingRepository,
             DocumentStructureProfileRepository structureProfileRepository,
-            DraftNodeFormattingResolver formattingResolver
+            DraftNodeFormattingResolver formattingResolver,
+            AiParagraphCandidateRepository candidateRepository
     ) {
         this.draftService = draftService;
         this.draftNodeRepository = draftNodeRepository;
         this.mappingRepository = mappingRepository;
         this.structureProfileRepository = structureProfileRepository;
         this.formattingResolver = Objects.requireNonNull(formattingResolver, "formattingResolver is required");
+        this.candidateRepository = candidateRepository;
+    }
+
+    public DraftNodeService(
+            DraftService draftService,
+            DraftNodeRepository draftNodeRepository,
+            StructureMappingRepository mappingRepository,
+            DocumentStructureProfileRepository structureProfileRepository,
+            DraftNodeFormattingResolver formattingResolver
+    ) {
+        this(
+                draftService,
+                draftNodeRepository,
+                mappingRepository,
+                structureProfileRepository,
+                formattingResolver,
+                new NoopAiParagraphCandidateRepository()
+        );
     }
 
     public List<DraftNodeDto> initializeNodes(long draftId) {
+        return initializeNodes(draftId, null);
+    }
+
+    public List<DraftNodeDto> initializeNodes(long draftId, InitializeDraftNodesRequest request) {
         DraftDetailDto draft = draftService.getDraft(draftId);
         Long templateVersionId = draft.templateVersionId();
         if (templateVersionId == null) {
@@ -90,7 +120,8 @@ public class DraftNodeService {
         }
         DocumentStructureProfile structureProfile = structureProfileRepository.findByTemplateVersionId(templateVersionId)
                 .orElseThrow(() -> new DraftNodeException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found"));
-        List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, List.of(), false);
+        boolean templateHeadingsOnly = request != null && request.shouldUseTemplateHeadingsOnly();
+        List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, List.of(), false, templateHeadingsOnly);
         return toDtos(draft, draftNodeRepository.replaceForDraft(draftId, nodes));
     }
 
@@ -106,7 +137,7 @@ public class DraftNodeService {
                 .orElseThrow(() -> new DraftNodeException("DOCUMENT_STRUCTURE_PROFILE_NOT_FOUND", "Document structure profile not found"));
         List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId);
         boolean preserveUserEditedNodes = request == null || request.shouldPreserveUserEditedNodes();
-        List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, existingNodes, preserveUserEditedNodes);
+        List<DraftNode> nodes = buildDraftNodes(draftId, draft, mapping, structureProfile, existingNodes, preserveUserEditedNodes, false);
         return toDtos(draft, draftNodeRepository.replaceForDraft(draftId, nodes));
     }
 
@@ -116,7 +147,8 @@ public class DraftNodeService {
             StructureMappingProfile mapping,
             DocumentStructureProfile structureProfile,
             List<DraftNode> existingNodes,
-            boolean preserveUserEditedNodes
+            boolean preserveUserEditedNodes,
+            boolean templateHeadingsOnly
     ) {
         Map<String, DocumentNode> sourceNodes = structureProfile.nodes().stream()
                 .collect(Collectors.toMap(DocumentNode::nodeKey, Function.identity()));
@@ -143,7 +175,8 @@ public class DraftNodeService {
                         legacyContent,
                         legacyBodyBySortOrder,
                         existingByKeyAndRole,
-                        preserveUserEditedNodes
+                        preserveUserEditedNodes,
+                        templateHeadingsOnly
                 ))
                 .toList();
     }
@@ -218,6 +251,78 @@ public class DraftNodeService {
         return toDtos(draft, reorderAfterInsert(draftId, orderedNodes, savedNodes, groupId, anchor, position));
     }
 
+    @Transactional
+    public ApplyOutlineResponse applyOutline(long draftId, ApplyOutlineRequest request) {
+        DraftDetailDto draft = draftService.getDraft(draftId);
+        Long templateVersionId = draft.templateVersionId();
+        if (templateVersionId == null) {
+            throw new DraftNodeException("DRAFT_TEMPLATE_REQUIRED", "Draft must bind a template version before outline can be applied");
+        }
+        StructureMappingProfile mapping = mappingRepository.findLatestByStatus(templateVersionId, "PUBLISHED")
+                .orElseThrow(() -> new DraftNodeException("STRUCTURE_MAPPING_REQUIRED", "Published structure mapping is required before outline can be applied"));
+        if (!draftNodeRepository.existsByDraftId(draftId)) {
+            initializeNodes(draftId);
+        }
+        List<DraftNode> existingNodes = draftNodeRepository.findByDraftId(draftId).stream()
+                .filter(node -> !"DELETED".equalsIgnoreCase(node.status()))
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        List<AiOutlineSection> sections = normalizeOutlineSections(request == null ? List.of() : request.sections());
+        List<String> formattingWarnings = outlineFormattingWarnings(existingNodes, sections);
+        int insertionIndex = outlineInsertionIndex(existingNodes);
+        List<DraftNode> nonBodyNodes = existingNodes.stream()
+                .filter(node -> !isBodyStructureNode(node))
+                .toList();
+        DraftNode outlineAnchor = outlineAnchorNode(existingNodes);
+        String outlineAnchorKey = outlineAnchor == null ? "" : outlineAnchor.templateNodeKey();
+        Long outlineAnchorId = outlineAnchor == null || outlineAnchor.id() <= 0 ? null : outlineAnchor.id();
+        List<OutlineNodePair> bodyPairs = outlineBodyPairs(
+                draftId,
+                mapping.mappingProfileId(),
+                existingNodes,
+                sections,
+                outlineAnchorId,
+                outlineAnchorKey
+        );
+        List<DraftNode> bodyNodes = new ArrayList<>(bodyPairs.stream()
+                .flatMap(pair -> pair.nodes().stream())
+                .toList());
+
+        List<Object> finalSlots = new ArrayList<>(nonBodyNodes);
+        finalSlots.addAll(Math.min(insertionIndex, finalSlots.size()), bodyNodes);
+        Map<Long, Integer> nonBodySortOrders = new LinkedHashMap<>();
+        List<DraftNode> sortedBodyNodes = new ArrayList<>();
+        for (int index = 0; index < finalSlots.size(); index++) {
+            Object slot = finalSlots.get(index);
+            int sortOrder = (index + 1) * 10;
+            if (slot instanceof DraftNode node && node.id() > 0) {
+                nonBodySortOrders.put(node.id(), sortOrder);
+            }
+            if (slot instanceof DraftNode node && node.id() == 0) {
+                sortedBodyNodes.add(withSortOrder(node, sortOrder));
+            }
+        }
+
+        if (!nonBodySortOrders.isEmpty()) {
+            draftNodeRepository.updateSortOrders(draftId, nonBodySortOrders);
+        }
+        draftNodeRepository.deleteBodyStructureNodes(draftId);
+        List<DraftNode> savedNodes = draftNodeRepository.insertNodes(draftId, sortedBodyNodes);
+        List<DraftNode> visibleNodes = savedNodes.stream()
+                .filter(node -> !"DELETED".equalsIgnoreCase(node.status()))
+                .toList();
+        candidateRepository.discardUnacceptedByDraftId(
+                draftId,
+                "AI_CANDIDATE_OUTLINE_REPLACED",
+                "正文结构已由新提纲替换，请重新生成正文候选"
+        );
+        return new ApplyOutlineResponse(
+                toDtos(draft, visibleNodes),
+                sectionTargets(savedNodes, bodyPairs),
+                formattingWarnings
+        );
+    }
+
     public DraftNodeDto updateNode(long draftId, long nodeId, UpdateDraftNodeRequest request) {
         DraftDetailDto draft = draftService.getDraft(draftId);
         String status = normalizeStatus(request == null ? null : request.status());
@@ -225,6 +330,235 @@ public class DraftNodeService {
         DraftNode updated = draftNodeRepository.updateContent(draftId, nodeId, content, status)
                 .orElseThrow(() -> new DraftNodeException("DRAFT_NODE_NOT_FOUND", "Draft node not found: " + nodeId));
         return toDto(draft, updated);
+    }
+
+    private List<AiOutlineSection> normalizeOutlineSections(List<AiOutlineSection> sections) {
+        if (sections == null || sections.isEmpty()) {
+            throw new DraftNodeException("AI_OUTLINE_SECTIONS_REQUIRED", "请先生成可应用的提纲");
+        }
+        List<AiOutlineSection> normalized = new ArrayList<>();
+        int previousLevel = 0;
+        int index = 0;
+        for (AiOutlineSection section : sections) {
+            if (section == null) {
+                continue;
+            }
+            String heading = section.heading() == null ? "" : section.heading().strip();
+            if (heading.isBlank()) {
+                throw new DraftNodeException("AI_OUTLINE_HEADING_REQUIRED", "提纲标题不能为空");
+            }
+            int level = section.level() >= 1 && section.level() <= 3
+                    ? section.level()
+                    : inferOutlineLevel(heading);
+            if (level < 1 || level > 3) {
+                throw new DraftNodeException("AI_OUTLINE_LEVEL_INVALID", "提纲标题层级只能是 1、2 或 3");
+            }
+            if (index == 0 && level != 1) {
+                throw new DraftNodeException("AI_OUTLINE_LEVEL_INVALID", "提纲第一个标题必须是一级标题");
+            }
+            if (previousLevel > 0 && level > previousLevel + 1) {
+                throw new DraftNodeException("AI_OUTLINE_LEVEL_INVALID", "提纲标题层级不能跳级");
+            }
+            normalized.add(new AiOutlineSection(heading, section.points(), level, section.sourceRefs()));
+            previousLevel = level;
+            index++;
+        }
+        if (normalized.stream().noneMatch(section -> section.level() == 1)) {
+            throw new DraftNodeException("AI_OUTLINE_LEVEL_INVALID", "提纲至少需要一个一级标题");
+        }
+        return normalized;
+    }
+
+    private int inferOutlineLevel(String heading) {
+        return switch (DocumentHeadingRoleDetector.detect(heading)) {
+            case "BODY_HEADING_LEVEL_2" -> 2;
+            case "BODY_HEADING_LEVEL_3" -> 3;
+            default -> 1;
+        };
+    }
+
+    private List<String> outlineFormattingWarnings(List<DraftNode> existingNodes, List<AiOutlineSection> sections) {
+        List<String> warnings = new ArrayList<>();
+        if (exactStyleSourceNodeKey(existingNodes, "BODY").isBlank()) {
+            warnings.add("模板未识别出正文格式，将使用系统正文默认格式");
+        }
+        sections.stream()
+                .map(section -> "BODY_HEADING_LEVEL_" + section.level())
+                .distinct()
+                .filter(role -> exactStyleSourceNodeKey(existingNodes, role).isBlank())
+                .map(role -> switch (role) {
+                    case "BODY_HEADING_LEVEL_1" -> "模板未识别出一级标题格式，将使用正文或系统默认格式";
+                    case "BODY_HEADING_LEVEL_2" -> "模板未识别出二级标题格式，将使用正文或系统默认格式";
+                    case "BODY_HEADING_LEVEL_3" -> "模板未识别出三级标题格式，将使用正文或系统默认格式";
+                    default -> "模板未识别出标题格式，将使用正文或系统默认格式";
+                })
+                .forEach(warnings::add);
+        return warnings;
+    }
+
+    private int outlineInsertionIndex(List<DraftNode> existingNodes) {
+        for (int index = 0; index < existingNodes.size(); index++) {
+            if (isBodyStructureNode(existingNodes.get(index))) {
+                return (int) existingNodes.subList(0, index).stream()
+                        .filter(node -> !isBodyStructureNode(node))
+                        .count();
+            }
+        }
+        for (int index = 0; index < existingNodes.size(); index++) {
+            String role = existingNodes.get(index).role();
+            if ("SIGNATURE".equals(role) || "DATE".equals(role) || role.startsWith("ATTACHMENT")) {
+                return (int) existingNodes.subList(0, index).stream()
+                        .filter(node -> !isBodyStructureNode(node))
+                        .count();
+            }
+        }
+        return (int) existingNodes.stream().filter(node -> !isBodyStructureNode(node)).count();
+    }
+
+    private List<OutlineNodePair> outlineBodyPairs(
+            long draftId,
+            Long mappingProfileId,
+            List<DraftNode> existingNodes,
+            List<AiOutlineSection> sections,
+            Long anchorNodeId,
+            String anchorTemplateNodeKey
+    ) {
+        List<OutlineNodePair> pairs = new ArrayList<>();
+        int sectionIndex = 0;
+        for (AiOutlineSection section : sections) {
+            String groupId = UUID.randomUUID().toString();
+            String headingRole = "BODY_HEADING_LEVEL_" + section.level();
+            DraftNode headingNode = outlineSyntheticNode(
+                    draftId,
+                    mappingProfileId,
+                    headingRole,
+                    section.heading(),
+                    groupId,
+                    anchorNodeId,
+                    anchorTemplateNodeKey,
+                    styleSourceNodeKey(existingNodes, headingRole, section.heading())
+            );
+            DraftNode bodyNode = outlineSyntheticNode(
+                    draftId,
+                    mappingProfileId,
+                    "BODY",
+                    "",
+                    groupId,
+                    anchorNodeId,
+                    anchorTemplateNodeKey,
+                    styleSourceNodeKey(existingNodes, "BODY")
+            );
+            pairs.add(new OutlineNodePair(sectionIndex, section.heading(), section.level(), groupId, List.of(headingNode, bodyNode)));
+            sectionIndex++;
+        }
+        return pairs;
+    }
+
+    private DraftNode outlineAnchorNode(List<DraftNode> existingNodes) {
+        if (existingNodes == null || existingNodes.isEmpty()) {
+            return null;
+        }
+        List<DraftNode> ordered = existingNodes.stream()
+                .filter(node -> !"DELETED".equalsIgnoreCase(node.status()))
+                .sorted(Comparator.comparingInt(DraftNode::sortOrder).thenComparingLong(DraftNode::id))
+                .toList();
+        for (int index = 0; index < ordered.size(); index++) {
+            DraftNode node = ordered.get(index);
+            if (!isBodyStructureNode(node)) {
+                continue;
+            }
+            for (int previousIndex = index - 1; previousIndex >= 0; previousIndex--) {
+                DraftNode previous = ordered.get(previousIndex);
+                if (!isBodyStructureNode(previous) && !previous.templateNodeKey().isBlank()) {
+                    return previous;
+                }
+            }
+            return node.templateNodeKey().isBlank() ? null : node;
+        }
+        return ordered.stream()
+                .filter(node -> !node.templateNodeKey().isBlank())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private DraftNode outlineSyntheticNode(
+            long draftId,
+            Long mappingProfileId,
+            String role,
+            String content,
+            String groupId,
+            Long anchorNodeId,
+            String anchorTemplateNodeKey,
+            String styleSourceNodeKey
+    ) {
+        return new DraftNode(
+                0,
+                draftId,
+                mappingProfileId,
+                "outline-" + UUID.randomUUID(),
+                null,
+                "PARAGRAPH",
+                role,
+                slotKeyFor(role),
+                role.startsWith("BODY_HEADING_LEVEL_") ? content : titleForSyntheticRole(role),
+                content == null ? "" : content,
+                0,
+                content == null || content.isBlank() ? "EMPTY" : "USER_FILLED",
+                DraftNodeFormatOverride.empty(),
+                DraftNodeMetadata.synthetic(anchorNodeId, anchorTemplateNodeKey, "AFTER", groupId, styleSourceNodeKey),
+                null,
+                null
+        );
+    }
+
+    private DraftNode withSortOrder(DraftNode node, int sortOrder) {
+        return new DraftNode(
+                node.id(),
+                node.draftId(),
+                node.structureMappingProfileId(),
+                node.templateNodeKey(),
+                node.parentTemplateNodeKey(),
+                node.nodeType(),
+                node.role(),
+                node.slotKey(),
+                node.title(),
+                node.content(),
+                sortOrder,
+                node.status(),
+                node.formatOverride(),
+                node.metadata(),
+                node.createdAt(),
+                node.updatedAt()
+        );
+    }
+
+    private List<AppliedOutlineSectionTarget> sectionTargets(List<DraftNode> savedNodes, List<OutlineNodePair> pairs) {
+        return pairs.stream()
+                .map(pair -> {
+                    Long headingNodeId = savedNodes.stream()
+                            .filter(node -> pair.groupId().equals(node.metadata().groupId()))
+                            .filter(node -> node.role().startsWith("BODY_HEADING_LEVEL_"))
+                            .map(DraftNode::id)
+                            .findFirst()
+                            .orElse(null);
+                    Long bodyNodeId = savedNodes.stream()
+                            .filter(node -> pair.groupId().equals(node.metadata().groupId()))
+                            .filter(node -> "BODY".equals(node.role()))
+                            .map(DraftNode::id)
+                            .findFirst()
+                            .orElse(null);
+                    return new AppliedOutlineSectionTarget(pair.sectionIndex(), pair.heading(), pair.level(), headingNodeId, bodyNodeId);
+                })
+                .toList();
+    }
+
+    private record OutlineNodePair(
+            int sectionIndex,
+            String heading,
+            int level,
+            String groupId,
+            List<DraftNode> nodes
+    ) {
     }
 
     public DraftNodeDto saveFormatOverride(long draftId, long nodeId, DraftNodeFormatOverride request) {
@@ -258,9 +592,10 @@ public class DraftNodeService {
             Map<String, String> legacyContent,
             Map<Integer, String> legacyBodyBySortOrder,
             Map<String, DraftNode> existingByKeyAndRole,
-            boolean preserveUserEditedNodes
+            boolean preserveUserEditedNodes,
+            boolean templateHeadingsOnly
     ) {
-        String content = initialContent(item, sourceNode, legacyContent, legacyBodyBySortOrder);
+        String content = initialContent(item, sourceNode, legacyContent, legacyBodyBySortOrder, templateHeadingsOnly);
         String title = titleFor(item.role(), sourceNode, content);
         DraftNode node = new DraftNode(
                 0,
@@ -287,11 +622,15 @@ public class DraftNodeService {
             StructureMappingItem item,
             DocumentNode sourceNode,
             Map<String, String> legacyContent,
-            Map<Integer, String> legacyBodyBySortOrder
+            Map<Integer, String> legacyBodyBySortOrder,
+            boolean templateHeadingsOnly
     ) {
         String role = item.role();
         String source = editableSourceText(sourceNode);
         if ("BODY".equals(role) || role.startsWith("BODY_HEADING_LEVEL_")) {
+            if (templateHeadingsOnly && "BODY".equals(role)) {
+                return "";
+            }
             if (!source.isBlank()) {
                 return source;
             }
@@ -526,12 +865,74 @@ public class DraftNodeService {
     }
 
     private String styleSourceNodeKey(List<DraftNode> nodes, String role) {
+        return styleSourceNodeKey(nodes, role, "");
+    }
+
+    private String styleSourceNodeKey(List<DraftNode> nodes, String role, String text) {
+        String normalizedRole = normalizeRole(role);
+        if (DocumentHeadingRoleDetector.isHeadingRole(normalizedRole)) {
+            String sourceByNumbering = headingStyleSourceNodeKeyByNumbering(nodes, normalizedRole);
+            if (!sourceByNumbering.isBlank()) {
+                return sourceByNumbering;
+            }
+            String exact = exactStyleSourceNodeKey(nodes, normalizedRole);
+            if (!exact.isBlank() && !hasConflictingHeadingNumbering(nodes, exact, normalizedRole)) {
+                return exact;
+            }
+            return exactStyleSourceNodeKey(nodes, "BODY");
+        }
+        String exact = exactStyleSourceNodeKey(nodes, role);
+        if (!exact.isBlank()) {
+            return exact;
+        }
+        return "";
+    }
+
+    private String exactStyleSourceNodeKey(List<DraftNode> nodes, String role) {
         return nodes.stream()
                 .filter(node -> role.equals(node.role()))
                 .map(DraftNode::templateNodeKey)
                 .filter(key -> key != null && !key.isBlank())
                 .findFirst()
                 .orElse("");
+    }
+
+    private String headingStyleSourceNodeKeyByNumbering(List<DraftNode> nodes, String role) {
+        if (nodes == null || nodes.isEmpty()) {
+            return "";
+        }
+        return nodes.stream()
+                .filter(node -> node.metadata() == null || !node.metadata().synthetic())
+                .filter(node -> role.equals(DocumentHeadingRoleDetector.detect(firstNonBlank(node.content(), node.title()))))
+                .map(DraftNode::templateNodeKey)
+                .filter(key -> key != null && !key.isBlank())
+                .findFirst()
+                .orElse("");
+    }
+
+    private boolean hasConflictingHeadingNumbering(List<DraftNode> nodes, String sourceNodeKey, String expectedRole) {
+        if (nodes == null || nodes.isEmpty() || sourceNodeKey == null || sourceNodeKey.isBlank()) {
+            return false;
+        }
+        String detectedRole = nodes.stream()
+                .filter(node -> node.metadata() == null || !node.metadata().synthetic())
+                .filter(node -> sourceNodeKey.equals(node.templateNodeKey()))
+                .map(node -> DocumentHeadingRoleDetector.detect(firstNonBlank(node.content(), node.title())))
+                .filter(role -> !role.isBlank())
+                .findFirst()
+                .orElse("");
+        return !detectedRole.isBlank() && !detectedRole.equals(expectedRole);
+    }
+
+    private String normalizeRole(String role) {
+        return role == null ? "" : role.strip().toUpperCase();
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        return second == null ? "" : second;
     }
 
     private String titleForSyntheticRole(String role) {
@@ -725,5 +1126,45 @@ public class DraftNodeService {
             case "DATE" -> "date";
             default -> "";
         };
+    }
+
+    private static final class NoopAiParagraphCandidateRepository implements AiParagraphCandidateRepository {
+        @Override
+        public AiParagraphCandidate insert(AiParagraphCandidate candidate) {
+            return candidate;
+        }
+
+        @Override
+        public List<AiParagraphCandidate> findByDraftId(long draftId) {
+            return List.of();
+        }
+
+        @Override
+        public Optional<AiParagraphCandidate> findById(long candidateId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<AiParagraphCandidate> updateTextAndStatus(long candidateId, String text, String status, String digest) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<AiParagraphCandidate> updateStatusAndError(long candidateId, String status, String errorCode, String errorMessage) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<AiParagraphCandidate> markAccepted(long candidateId, UUID paragraphTraceId, long acceptedBy) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void discardUnacceptedByDraftId(long draftId, String errorCode, String errorMessage) {
+        }
+
+        @Override
+        public void delete(long candidateId) {
+        }
     }
 }

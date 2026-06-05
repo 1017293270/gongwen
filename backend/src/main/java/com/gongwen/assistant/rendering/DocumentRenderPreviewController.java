@@ -3,10 +3,9 @@ package com.gongwen.assistant.rendering;
 import com.gongwen.assistant.common.api.ApiResponse;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 
 @RestController
 @RequestMapping("/api")
+@PreAuthorize("hasAnyRole('DRAFTER', 'TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
 public class DocumentRenderPreviewController {
     private final DocumentRenderPreviewService service;
     private final LibreOfficeRenderClient renderClient;
@@ -64,17 +64,5 @@ public class DocumentRenderPreviewController {
                 .contentType(MediaType.parseMediaType(file.contentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .body(file.content());
-    }
-
-    @ExceptionHandler(RenderPreviewException.class)
-    public ResponseEntity<ApiResponse<Void>> handleRenderPreviewException(RenderPreviewException exception) {
-        HttpStatus status = switch (exception.errorCode()) {
-            case "TEMPLATE_VERSION_NOT_FOUND", "RENDER_PREVIEW_NOT_FOUND", "RENDER_PREVIEW_PAGE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "RENDER_PREVIEW_UNSUPPORTED" -> HttpStatus.UNPROCESSABLE_ENTITY;
-            default -> HttpStatus.BAD_REQUEST;
-        };
-        return ResponseEntity.status(status)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.error(exception.errorCode(), exception.getMessage()));
     }
 }

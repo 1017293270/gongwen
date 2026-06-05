@@ -446,6 +446,22 @@ export type Material = {
 export type AiOutlineSection = {
   heading: string;
   points: string[];
+  level?: number;
+  sourceRefs?: string[];
+};
+
+export type AppliedOutlineSectionTarget = {
+  sectionIndex: number;
+  heading: string;
+  level: number;
+  headingNodeId: number | null;
+  bodyNodeId: number | null;
+};
+
+export type ApplyOutlineResponse = {
+  nodes: DraftNode[];
+  sectionTargets: AppliedOutlineSectionTarget[];
+  formattingWarnings: string[];
 };
 
 export type AiNodeSuggestion = {

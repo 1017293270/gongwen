@@ -15,6 +15,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.test.context.support.WithMockUser;
 
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(TemplateController.class)
 @AutoConfigureMockMvc(addFilters = false)
+@WithMockUser(roles = {"TEMPLATE_ADMIN"})
 class TemplateUploadControllerTest {
     @Autowired
     private MockMvc mockMvc;

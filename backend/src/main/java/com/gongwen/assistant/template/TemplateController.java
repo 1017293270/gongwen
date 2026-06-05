@@ -11,18 +11,15 @@ import com.gongwen.assistant.template.profile.TemplateProfile;
 import com.gongwen.assistant.template.profile.TemplateProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingProfile;
 import com.gongwen.assistant.template.profile.TemplateStructureFormattingRepository;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -74,17 +71,20 @@ public class TemplateController {
     }
 
     @PostMapping
-    public ApiResponse<TemplateSummary> createTemplate(@org.springframework.web.bind.annotation.RequestBody CreateTemplateRequest request) {
+    @PreAuthorize("hasAnyRole('TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
+    public ApiResponse<TemplateSummary> createTemplate(@RequestBody CreateTemplateRequest request) {
         return ApiResponse.ok(templateRepository.create(request.templateName(), request.documentTypeCode(), currentUser()));
     }
 
     @DeleteMapping("/{templateId}")
+    @PreAuthorize("hasAnyRole('TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
     public ApiResponse<Void> deleteTemplate(@PathVariable long templateId) {
         templateRepository.deleteById(templateId, currentUser());
         return ApiResponse.ok(null);
     }
 
     @PostMapping("/{templateId}/versions")
+    @PreAuthorize("hasAnyRole('TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
     public ApiResponse<TemplateUploadResponse> uploadVersion(
             @PathVariable long templateId,
             @RequestPart("file") MultipartFile file
@@ -125,7 +125,7 @@ public class TemplateController {
                     List.of(),
                     "REVIEW_REQUIRED",
                     List.of(),
-                    "未生成智能识别结果",
+                    "鏈敓鎴愭櫤鑳借瘑鍒粨鏋?",
                     "profile"
             ));
         }
@@ -148,6 +148,7 @@ public class TemplateController {
     }
 
     @PutMapping("/versions/{versionId}/structures/{structureKey}/formatting")
+    @PreAuthorize("hasAnyRole('TEMPLATE_ADMIN', 'SYSTEM_ADMIN')")
     public ApiResponse<TemplateStructureFormattingProfile> updateStructureFormatting(
             @PathVariable long versionId,
             @PathVariable String structureKey,
@@ -166,13 +167,6 @@ public class TemplateController {
 
     private CurrentUser currentUser() {
         return currentUserProvider.currentUser();
-    }
-
-    @ExceptionHandler(TemplateException.class)
-    public ResponseEntity<ApiResponse<Void>> handleTemplateException(TemplateException exception) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(ApiResponse.error(exception.errorCode(), exception.getMessage()));
     }
 
     public record TemplateParseResponse(List<String> placeholders) {

@@ -1,5 +1,6 @@
 package com.gongwen.assistant.draft.node;
 
+import com.gongwen.assistant.documentstructure.DocumentHeadingRoleDetector;
 import com.gongwen.assistant.documentstructure.DocumentNode;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfileRepository;
 import com.gongwen.assistant.template.profile.TemplateEffectiveFormattingService;
@@ -38,9 +39,10 @@ public class DraftNodeFormattingResolver {
                         .collect(Collectors.toMap(
                                 DocumentNode::nodeKey,
                                 Function.identity(),
-                                (first, ignored) -> first
+                                (first, ignored) -> first,
+                                LinkedHashMap::new
                         )))
-                .orElse(Map.of());
+                .orElseGet(LinkedHashMap::new);
         Map<String, TemplateStructureFormattingProfile> templateOverrides = formattingRepository.findOverrides(templateVersionId);
         Map<String, TemplateStructureFormattingProfile> safeTemplateOverrides = templateOverrides == null
                 ? Map.of()
@@ -48,7 +50,7 @@ public class DraftNodeFormattingResolver {
 
         Map<Long, ResolvedDraftNodeFormatting> resolved = new LinkedHashMap<>();
         for (DraftNode node : nodes) {
-            String sourceKey = sourceKeyFor(node);
+            String sourceKey = sourceKeyFor(node, sourceNodes);
             DocumentNode sourceNode = sourceNodes.get(sourceKey);
             TemplateStructureFormattingProfile originalFormatting = sourceNode == null ? null : sourceNode.formatting();
             TemplateStructureFormattingProfile structureOverride = safeTemplateOverrides.get(sourceKey);
@@ -71,12 +73,70 @@ public class DraftNodeFormattingResolver {
         return resolved;
     }
 
-    private String sourceKeyFor(DraftNode node) {
+    private String sourceKeyFor(DraftNode node, Map<String, DocumentNode> sourceNodes) {
         DraftNodeMetadata metadata = node.metadata();
         if (metadata != null && metadata.synthetic() && !metadata.styleSourceNodeKey().isBlank()) {
+            String nodeRole = normalizeRole(node.role());
+            if (DocumentHeadingRoleDetector.isHeadingRole(nodeRole)) {
+                String sourceTextRole = headingRoleForSourceKey(sourceNodes, metadata.styleSourceNodeKey());
+                if (nodeRole.equals(sourceTextRole)) {
+                    return metadata.styleSourceNodeKey();
+                }
+                if (!sourceTextRole.isBlank() && !nodeRole.equals(sourceTextRole)) {
+                    return headingSourceKeyForRole(sourceNodes, nodeRole, node.templateNodeKey());
+                }
+            }
+            String sourceRole = normalizeRole(sourceNodes.get(metadata.styleSourceNodeKey()));
+            if (DocumentHeadingRoleDetector.isHeadingRole(nodeRole)
+                    && DocumentHeadingRoleDetector.isHeadingRole(sourceRole)
+                    && !nodeRole.equals(sourceRole)) {
+                return headingSourceKeyForRole(sourceNodes, nodeRole, node.templateNodeKey());
+            }
             return metadata.styleSourceNodeKey();
         }
         return node.templateNodeKey();
+    }
+
+    private String headingSourceKeyForRole(Map<String, DocumentNode> sourceNodes, String role, String fallbackKey) {
+        String byNumbering = sourceNodes.values().stream()
+                .filter(node -> role.equals(DocumentHeadingRoleDetector.detect(node.text())))
+                .map(DocumentNode::nodeKey)
+                .findFirst()
+                .orElse("");
+        if (!byNumbering.isBlank()) {
+            return byNumbering;
+        }
+        String exact = sourceKeyForRole(sourceNodes, role);
+        if (!exact.isBlank() && headingRoleForSourceKey(sourceNodes, exact).isBlank()) {
+            return exact;
+        }
+        String bodySourceKey = sourceKeyForRole(sourceNodes, "BODY");
+        return bodySourceKey.isBlank() ? fallbackKey : bodySourceKey;
+    }
+
+    private String headingRoleForSourceKey(Map<String, DocumentNode> sourceNodes, String sourceKey) {
+        DocumentNode sourceNode = sourceNodes.get(sourceKey);
+        return sourceNode == null ? "" : DocumentHeadingRoleDetector.detect(sourceNode.text());
+    }
+
+    private String sourceKeyForRole(Map<String, DocumentNode> sourceNodes, String role) {
+        if (sourceNodes == null || sourceNodes.isEmpty()) {
+            return "";
+        }
+        String normalizedRole = normalizeRole(role);
+        return sourceNodes.values().stream()
+                .filter(node -> normalizedRole.equals(normalizeRole(node)))
+                .map(DocumentNode::nodeKey)
+                .findFirst()
+                .orElse("");
+    }
+
+    private String normalizeRole(DocumentNode node) {
+        return node == null ? "" : normalizeRole(node.roleSuggestion());
+    }
+
+    private String normalizeRole(String role) {
+        return role == null ? "" : role.strip().toUpperCase();
     }
 
     public record ResolvedDraftNodeFormatting(

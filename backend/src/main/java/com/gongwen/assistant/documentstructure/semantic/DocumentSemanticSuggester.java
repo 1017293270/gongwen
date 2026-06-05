@@ -1,6 +1,7 @@
 package com.gongwen.assistant.documentstructure.semantic;
 
 import com.gongwen.assistant.documentstructure.DocumentNode;
+import com.gongwen.assistant.documentstructure.DocumentHeadingRoleDetector;
 import com.gongwen.assistant.documentstructure.DocumentStructureProfile;
 import org.springframework.stereotype.Component;
 
@@ -11,8 +12,6 @@ import java.util.regex.Pattern;
 @Component
 public class DocumentSemanticSuggester {
     private static final Pattern CHINESE_DATE_LINE_PATTERN = Pattern.compile("^\\d{4}年\\d{1,2}月\\d{1,2}日$");
-    private static final Pattern BODY_HEADING_LEVEL_1_PATTERN = Pattern.compile("^([一二三四五六七八九十]+[、.．]|（[一二三四五六七八九十]+）)\\s*\\S+");
-    private static final Pattern BODY_HEADING_LEVEL_2_PATTERN = Pattern.compile("^\\d+[.．、]\\s*\\S+");
 
     public DocumentStructureProfile suggest(DocumentStructureProfile profile, String documentKind, String documentTypeCode) {
         if (profile == null) {
@@ -81,13 +80,10 @@ public class DocumentSemanticSuggester {
         if (isLikelyRecipient(text, state)) {
             return "RECIPIENT";
         }
-        if (isBodyHeadingLevel1(text)) {
+        String headingRole = DocumentHeadingRoleDetector.detect(text);
+        if (!headingRole.isBlank()) {
             state.seenBody = true;
-            return "BODY_HEADING_LEVEL_1";
-        }
-        if (isBodyHeadingLevel2(text)) {
-            state.seenBody = true;
-            return "BODY_HEADING_LEVEL_2";
+            return headingRole;
         }
         if (isLikelySignature(text, state)) {
             return "SIGNATURE";
@@ -151,14 +147,6 @@ public class DocumentSemanticSuggester {
                 && !state.seenRecipient
                 && text.length() <= 80
                 && (text.endsWith("：") || text.endsWith(":"));
-    }
-
-    private boolean isBodyHeadingLevel1(String text) {
-        return "结束语".equals(text) || (BODY_HEADING_LEVEL_1_PATTERN.matcher(text).matches() && text.length() <= 60);
-    }
-
-    private boolean isBodyHeadingLevel2(String text) {
-        return BODY_HEADING_LEVEL_2_PATTERN.matcher(text).matches() && text.length() <= 80;
     }
 
     private boolean isLikelyBody(String text, State state) {

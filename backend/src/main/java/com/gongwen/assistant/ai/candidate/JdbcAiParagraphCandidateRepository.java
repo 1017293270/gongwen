@@ -154,6 +154,22 @@ public class JdbcAiParagraphCandidateRepository implements AiParagraphCandidateR
     }
 
     @Override
+    public void discardUnacceptedByDraftId(long draftId, String errorCode, String errorMessage) {
+        jdbcTemplate.update("""
+                update ai_paragraph_candidate
+                set status = 'DISCARDED',
+                    error_code = ?,
+                    error_message = ?,
+                    updated_at = now()
+                where draft_id = ?
+                  and status <> 'ACCEPTED'
+                """,
+                normalize(errorCode),
+                normalize(errorMessage),
+                draftId);
+    }
+
+    @Override
     public void delete(long candidateId) {
         jdbcTemplate.update("delete from ai_paragraph_candidate where id = ?", candidateId);
     }
