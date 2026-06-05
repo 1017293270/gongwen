@@ -7,8 +7,6 @@ export type WorkbenchInspectorSection = 'ai' | 'format' | 'review' | 'export';
 type WorkbenchInspectorPanelProps = {
   activeSection: WorkbenchInspectorSection;
   blockCount: number;
-  candidateSlot: ReactNode;
-  candidateCount: number;
   candidateStatus: string;
   draftId: number | null;
   exportStatus: string;
@@ -36,7 +34,7 @@ const SECTIONS: Array<{
   id: WorkbenchInspectorSection;
   label: string;
 }> = [
-  { id: 'ai', label: 'AI', description: '提纲、正文候选与局部改写' },
+  { id: 'ai', label: 'AI', description: '提纲与局部改写' },
   { id: 'format', label: '格式', description: '当前节点字体、行距与对齐' },
   { id: 'review', label: '质检', description: '基础质检与问题摘要' },
   { id: 'export', label: '导出', description: '真实预览与 Word 导出' },
@@ -45,8 +43,6 @@ const SECTIONS: Array<{
 export function WorkbenchInspectorPanel({
   activeSection,
   blockCount,
-  candidateSlot,
-  candidateCount,
   candidateStatus,
   draftId,
   exportStatus,
@@ -95,7 +91,6 @@ export function WorkbenchInspectorPanel({
           <span>{nodeCount} 节点</span>
           <span>{blockCount} 兼容块</span>
           <span>{materialCount} 材料</span>
-          <span>{candidateCount} 候选</span>
         </div>
 
         <StatusMessage className="workbench-compact-status" title={statusMessage} tone={statusTone} />
@@ -138,9 +133,6 @@ export function WorkbenchInspectorPanel({
             <div className="workbench-inspector-stack" aria-label="AI 生成">
               <section className="workbench-inspector-section">
                 {outlineSlot}
-              </section>
-              <section className="workbench-inspector-section">
-                {candidateSlot}
               </section>
               <section className="workbench-inspector-section">
                 {localOperationSlot}

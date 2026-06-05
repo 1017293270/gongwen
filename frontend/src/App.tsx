@@ -121,7 +121,6 @@ import {
   type WorkbenchInspectorSection,
 } from './components/workbench/WorkbenchInspectorPanel';
 import { NodeFormatPanel, type NodeFormatPanelStatus } from './components/workbench/NodeFormatPanel';
-import { ParagraphCandidateCanvas } from './components/workbench/ParagraphCandidateCanvas';
 import { WorkbenchPreview } from './components/workbench/WorkbenchPreview';
 import { WorkbenchStructureTree, type ReinitializeNodeStatus } from './components/workbench/WorkbenchStructureTree';
 import { TemplateParseWorkspace } from './components/template/TemplateParseWorkspace';
@@ -2839,21 +2838,6 @@ function Workbench({ currentUser, onLogout }: { currentUser: AuthUser; onLogout:
             <WorkbenchInspectorPanel
               activeSection={rightInspectorSection}
               blockCount={blocks.length}
-              candidateCount={paragraphCandidates.length}
-              candidateSlot={(
-                <ParagraphCandidateCanvas
-                  candidates={paragraphCandidates}
-                  disabled={!draft || status === 'loading'}
-                  isGenerating={isCandidateGenerating}
-                  onAccept={(candidate) => void handleAcceptParagraphCandidate(candidate)}
-                  onAcceptBatch={(candidates) => void handleAcceptParagraphCandidateBatch(candidates)}
-                  onDiscard={(candidate) => void handleDiscardParagraphCandidate(candidate)}
-                  onEdit={(candidate, candidateText) => void handleEditParagraphCandidate(candidate, candidateText)}
-                  onGenerateAll={() => void handleGenerateAllParagraphCandidates()}
-                  onRetry={(candidate) => void handleRetryParagraphCandidate(candidate)}
-                  onStop={() => void handleStopParagraphCandidateJob()}
-                />
-              )}
               candidateStatus={candidateStatus}
               draftId={draft?.id ?? null}
               exportSlot={(
