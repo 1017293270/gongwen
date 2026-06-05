@@ -5,6 +5,8 @@ import com.gongwen.assistant.draft.DraftService;
 import com.gongwen.assistant.draft.node.DraftNode;
 import com.gongwen.assistant.draft.node.DraftNodeRepository;
 import com.gongwen.assistant.material.MaterialRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -14,6 +16,7 @@ import java.util.UUID;
 
 @Service
 public class AiOutlineService {
+    private static final Logger log = LoggerFactory.getLogger(AiOutlineService.class);
     private static final int MAX_INSTRUCTION_LENGTH = 1000;
 
     private final DraftService draftService;
@@ -51,6 +54,14 @@ public class AiOutlineService {
         OutlinePrompt prompt = promptBuilder.buildOutlinePrompt(draft, materials, instruction, nodeContext);
         UUID traceId = UUID.randomUUID();
         Instant startedAt = Instant.now();
+        log.info(
+                "AI outline generation started draftId={} traceId={} provider={} model={} inputSummary={}",
+                draftId,
+                traceId,
+                modelAdapter.provider(),
+                modelAdapter.modelName(),
+                prompt.inputSummary()
+        );
 
         try {
             AiOutlineResponse adapterResponse = modelAdapter.generateOutline(prompt);
@@ -63,12 +74,38 @@ public class AiOutlineService {
             );
             validate(response);
             traceRepository.save(successTrace(traceId, draftId, prompt, response, startedAt));
+            log.info(
+                    "AI outline generation succeeded draftId={} traceId={} sections={} missing={} durationMs={}",
+                    draftId,
+                    traceId,
+                    response.sections().size(),
+                    response.missingInformation().size(),
+                    Duration.between(startedAt, Instant.now()).toMillis()
+            );
             return response;
         } catch (ModelAdapterException exception) {
             traceRepository.save(failedTrace(traceId, draftId, prompt, exception.errorCode(), exception.getMessage(), startedAt));
-            throw new AiOutlineException("AI_MODEL_UNAVAILABLE", "AI 服务暂不可用：" + exception.getMessage());
+            String responseErrorCode = responseErrorCode(exception);
+            log.warn(
+                    "AI outline generation failed draftId={} traceId={} adapterErrorCode={} responseErrorCode={} durationMs={} inputSummary={}",
+                    draftId,
+                    traceId,
+                    exception.errorCode(),
+                    responseErrorCode,
+                    Duration.between(startedAt, Instant.now()).toMillis(),
+                    prompt.inputSummary()
+            );
+            throw new AiOutlineException(responseErrorCode, responseErrorMessage(responseErrorCode, exception));
         } catch (IllegalArgumentException exception) {
             traceRepository.save(failedTrace(traceId, draftId, prompt, "AI_RESPONSE_INVALID", exception.getMessage(), startedAt));
+            log.warn(
+                    "AI outline response validation failed draftId={} traceId={} reason={} durationMs={} inputSummary={}",
+                    draftId,
+                    traceId,
+                    exception.getMessage(),
+                    Duration.between(startedAt, Instant.now()).toMillis(),
+                    prompt.inputSummary()
+            );
             throw new AiOutlineException("AI_RESPONSE_INVALID", "AI 返回结构无效，请重试");
         }
     }
@@ -188,5 +225,23 @@ public class AiOutlineService {
             return first.strip();
         }
         return second == null ? "" : second.strip();
+    }
+
+    private String responseErrorCode(ModelAdapterException exception) {
+        String errorCode = exception.errorCode() == null ? "" : exception.errorCode();
+        if (errorCode.contains("RESPONSE_INVALID") || errorCode.contains("EMPTY_RESPONSE")) {
+            return "AI_RESPONSE_INVALID";
+        }
+        return "AI_MODEL_UNAVAILABLE";
+    }
+
+    private String responseErrorMessage(String responseErrorCode, ModelAdapterException exception) {
+        if ("AI_RESPONSE_INVALID".equals(responseErrorCode)) {
+            if (exception.errorCode() != null && exception.errorCode().contains("EMPTY_RESPONSE")) {
+                return "AI 返回内容为空，请重试";
+            }
+            return "AI 返回结构无效，请重试";
+        }
+        return "AI 服务暂不可用：" + exception.getMessage();
     }
 }

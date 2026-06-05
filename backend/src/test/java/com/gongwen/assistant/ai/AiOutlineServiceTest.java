@@ -17,9 +17,11 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 class AiOutlineServiceTest {
     private final InMemoryDraftRepository draftRepository = new InMemoryDraftRepository();
@@ -82,13 +84,55 @@ class AiOutlineServiceTest {
         ));
         AiOutlineService service = newService(new FailingModelAdapter());
 
-        assertThatThrownBy(() -> service.generateOutline(draft.id(), new AiOutlineRequest("")))
-                .isInstanceOf(AiOutlineException.class)
-                .hasMessageContaining("AI 服务暂不可用");
+        AiOutlineException exception = catchThrowableOfType(
+                () -> service.generateOutline(draft.id(), new AiOutlineRequest("")),
+                AiOutlineException.class
+        );
+
+        assertThat(exception.errorCode()).isEqualTo("AI_MODEL_UNAVAILABLE");
+        assertThat(exception).hasMessageContaining("AI 服务暂不可用");
 
         assertThat(traceRepository.saved.status()).isEqualTo("FAILED");
         assertThat(traceRepository.saved.errorCode()).isEqualTo("MODEL_TIMEOUT");
         assertThat(traceRepository.saved.errorMessage()).isEqualTo("模型请求超时");
+    }
+
+    @Test
+    void reportsInvalidResponseWhenAdapterReturnsInvalidDeepSeekStructure() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10)
+        ));
+        AiOutlineService service = newService(new InvalidDeepSeekStructureAdapter());
+
+        AiOutlineException exception = catchThrowableOfType(
+                () -> service.generateOutline(draft.id(), new AiOutlineRequest("")),
+                AiOutlineException.class
+        );
+
+        assertThat(exception.errorCode()).isEqualTo("AI_RESPONSE_INVALID");
+        assertThat(exception).hasMessage("AI 返回结构无效，请重试");
+        assertThat(traceRepository.saved.status()).isEqualTo("FAILED");
+        assertThat(traceRepository.saved.errorCode()).isEqualTo("AI_DEEPSEEK_RESPONSE_INVALID");
+        assertThat(traceRepository.saved.errorMessage()).isEqualTo("DeepSeek 返回结构无效");
+    }
+
+    @Test
+    void reportsInvalidResponseWhenParsedOutlineHasNoSections() {
+        DraftDetailDto draft = draftRepository.createDraft("NOTICE", "测试通知", List.of(
+                new DraftBlockUpdateRequest("TITLE", "测试通知", 10)
+        ));
+        AiOutlineService service = newService(new EmptySectionsModelAdapter());
+
+        AiOutlineException exception = catchThrowableOfType(
+                () -> service.generateOutline(draft.id(), new AiOutlineRequest("")),
+                AiOutlineException.class
+        );
+
+        assertThat(exception.errorCode()).isEqualTo("AI_RESPONSE_INVALID");
+        assertThat(exception).hasMessage("AI 返回结构无效，请重试");
+        assertThat(traceRepository.saved.status()).isEqualTo("FAILED");
+        assertThat(traceRepository.saved.errorCode()).isEqualTo("AI_RESPONSE_INVALID");
+        assertThat(traceRepository.saved.errorMessage()).isEqualTo("sections are required");
     }
 
     @Test
@@ -128,6 +172,40 @@ class AiOutlineServiceTest {
         @Override
         public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
             throw new ModelAdapterException("MODEL_TIMEOUT", "模型请求超时");
+        }
+    }
+
+    private static final class InvalidDeepSeekStructureAdapter implements ModelAdapter {
+        @Override
+        public String provider() {
+            return "deepseek";
+        }
+
+        @Override
+        public String modelName() {
+            return "deepseek-v4-flash";
+        }
+
+        @Override
+        public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
+            throw new ModelAdapterException("AI_DEEPSEEK_RESPONSE_INVALID", "DeepSeek 返回结构无效");
+        }
+    }
+
+    private static final class EmptySectionsModelAdapter implements ModelAdapter {
+        @Override
+        public String provider() {
+            return "deepseek";
+        }
+
+        @Override
+        public String modelName() {
+            return "deepseek-v4-flash";
+        }
+
+        @Override
+        public AiOutlineResponse generateOutline(OutlinePrompt prompt) {
+            return new AiOutlineResponse(UUID.randomUUID(), "测试通知", List.of(), List.of());
         }
     }
 
